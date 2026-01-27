@@ -1,25 +1,53 @@
 // providers/navigation_provider.dart
-// Navigation state
-// - explorer: File tree (groups → workspaces → boards)
-// - dms: Direct messages panel
-// - events: Network events
+// Simplified navigation state - Explorer, AllBoards, Chat (fullscreen)
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../widgets/icon_rail.dart';
 
-/// Provider for navigation mode
-final navigationModeProvider = StateNotifierProvider<NavigationModeNotifier, AppNavMode>((ref) {
-  return NavigationModeNotifier();
+/// Main view modes
+enum ViewMode {
+  allBoards,  // Default: Pinterest grid of ALL boards
+  explorer,   // File tree + board grid (workspace filtered)
+  chat,       // Full-screen chat (takes over everything)
+  events,     // Network events view
+}
+
+/// Navigation mode provider
+final viewModeProvider = StateNotifierProvider<ViewModeNotifier, ViewMode>((ref) {
+  return ViewModeNotifier();
 });
 
-class NavigationModeNotifier extends StateNotifier<AppNavMode> {
-  NavigationModeNotifier() : super(AppNavMode.explorer);
+class ViewModeNotifier extends StateNotifier<ViewMode> {
+  ViewModeNotifier() : super(ViewMode.allBoards);
   
-  void setMode(AppNavMode mode) {
-    state = mode;
+  void setMode(ViewMode mode) => state = mode;
+  void showAllBoards() => state = ViewMode.allBoards;
+  void showExplorer() => state = ViewMode.explorer;
+  void showChat() => state = ViewMode.chat;
+  void showEvents() => state = ViewMode.events;
+  
+  void toggleExplorer() {
+    if (state == ViewMode.explorer) {
+      state = ViewMode.allBoards;
+    } else {
+      state = ViewMode.explorer;
+    }
   }
-  
-  void showExplorer() => state = AppNavMode.explorer;
-  void showDMs() => state = AppNavMode.dms;
-  void showEvents() => state = AppNavMode.events;
+}
+
+/// DMs panel visibility (separate from main chat)
+final showDMsPanelProvider = StateProvider<bool>((ref) => false);
+
+/// Console visibility
+final showConsoleProvider = StateProvider<bool>((ref) => false);
+
+// Legacy providers for backward compatibility
+enum NavSection { home, search, starred, profile, debug }
+
+final navigationProvider = StateNotifierProvider<NavigationNotifier, NavSection>((ref) {
+  return NavigationNotifier();
+});
+
+class NavigationNotifier extends StateNotifier<NavSection> {
+  NavigationNotifier() : super(NavSection.home);
+  void setSection(NavSection section) => state = section;
 }

@@ -24,6 +24,10 @@ dependencies:
   collection: ^1.18.0
   equatable: ^2.0.5
   universal_platform: ^1.0.0+1
+  flutter_code_editor: ^0.3.0
+  highlight: ^0.7.0
+  desktop_drop: ^0.4.4
+  file_picker: ^6.1.1
 
 dev_dependencies:
   flutter_test:
