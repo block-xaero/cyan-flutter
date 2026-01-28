@@ -95,7 +95,7 @@ class _AllBoardsGridState extends ConsumerState<AllBoardsGrid> {
     final allBoards = _getAllBoards(treeState);
     final filteredBoards = _filterAndSort(allBoards);
 
-    return Container(
+    return Material(
       color: const Color(0xFF1E1E1E),
       child: Column(
         children: [

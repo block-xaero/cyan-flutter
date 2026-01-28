@@ -1,240 +1,295 @@
 // providers/chat_provider.dart
-// Chat state - messages for a workspace
-// Uses ComponentBridge pattern matching Swift's ChatViewModel
+// Chat state management with actual FFI bridge
 
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ffi/component_bridge.dart';
-import '../models/chat_message.dart';
+import '../models/chat_models.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
-// STATE
+// CHAT STATE
 // ═══════════════════════════════════════════════════════════════════════════
 
 class ChatState {
+  final ChatContextInfo? context;
   final List<ChatMessage> messages;
+  final List<PeerInfo> onlinePeers;
   final bool isLoading;
+  final bool isSending;
   final String? error;
-  final String? currentWorkspaceId;
-  
+
   const ChatState({
+    this.context,
     this.messages = const [],
+    this.onlinePeers = const [],
     this.isLoading = false,
+    this.isSending = false,
     this.error,
-    this.currentWorkspaceId,
   });
-  
+
   ChatState copyWith({
+    ChatContextInfo? context,
     List<ChatMessage>? messages,
+    List<PeerInfo>? onlinePeers,
     bool? isLoading,
+    bool? isSending,
     String? error,
-    String? currentWorkspaceId,
+    bool clearContext = false,
+    bool clearError = false,
   }) {
     return ChatState(
+      context: clearContext ? null : (context ?? this.context),
       messages: messages ?? this.messages,
+      onlinePeers: onlinePeers ?? this.onlinePeers,
       isLoading: isLoading ?? this.isLoading,
-      error: error,
-      currentWorkspaceId: currentWorkspaceId ?? this.currentWorkspaceId,
+      isSending: isSending ?? this.isSending,
+      error: clearError ? null : (error ?? this.error),
     );
   }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// PROVIDER - Per workspace (family)
+// CHAT PROVIDER
 // ═══════════════════════════════════════════════════════════════════════════
 
-final chatProvider = StateNotifierProvider.family<ChatNotifier, ChatState, String>((ref, workspaceId) {
-  return ChatNotifier(workspaceId);
+final chatProvider = StateNotifierProvider<ChatNotifier, ChatState>((ref) {
+  return ChatNotifier();
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// NOTIFIER - Uses ComponentBridge pattern
-// ═══════════════════════════════════════════════════════════════════════════
-
 class ChatNotifier extends StateNotifier<ChatState> {
-  final String workspaceId;
-  final _bridge = ChatBridge();
-  StreamSubscription<ChatEvent>? _subscription;
-  
-  ChatNotifier(this.workspaceId) : super(const ChatState()) {
+  late final ComponentBridge _bridge;
+  StreamSubscription? _subscription;
+  String? _currentUserId;
+
+  ChatNotifier() : super(const ChatState()) {
     _init();
   }
-  
+
   void _init() {
-    print('💬 ChatNotifier: Starting for workspace $workspaceId');
+    // Create bridge for chat_panel component
+    _bridge = ComponentBridge(
+      componentName: 'chat_panel',
+      onEvent: _handleEvent,
+    );
     _bridge.start();
-    _subscription = _bridge.events.listen(_handleEvent);
     
-    // Load chat history for this workspace
-    loadHistory();
+    // Get current user ID from FFI
+    _loadCurrentUserId();
   }
-  
-  void _handleEvent(ChatEvent event) {
-    print('📥 Chat event: ${event.type}');
+
+  void _loadCurrentUserId() {
+    // TODO: Get from FFI - cyan_get_node_id_hex()
+    // For now, use placeholder
+    _currentUserId = 'current_user';
+  }
+
+  void _handleEvent(Map<String, dynamic> event) {
+    final type = event['type'] as String?;
+    print('📥 Chat event: $type');
     
-    switch (event.type) {
+    switch (type) {
       case 'ChatSent':
-        _handleChatSent(event);
+        _handleChatMessage(event['data'] as Map<String, dynamic>? ?? event);
         break;
         
       case 'ChatDeleted':
-        final id = event.data['id'] as String?;
-        if (id != null) {
-          state = state.copyWith(
-            messages: state.messages.where((m) => m.id != id).toList(),
-          );
-        }
+        _handleChatDeleted(event['data'] as Map<String, dynamic>? ?? event);
         break;
         
       case 'ChatHistory':
-        _handleChatHistory(event);
+        _handleChatHistory(event['data'] as Map<String, dynamic>? ?? event);
         break;
         
-      case 'DirectMessageReceived':
-        _handleDirectMessage(event);
+      case 'PeerJoined':
+        _handlePeerJoined(event['data'] as Map<String, dynamic>? ?? event);
         break;
         
-      case 'ChatStreamReady':
-        print('✅ Chat stream ready with peer: ${event.data['peer_id']}');
-        break;
-        
-      case 'ChatStreamClosed':
-        print('❌ Chat stream closed with peer: ${event.data['peer_id']}');
+      case 'PeerLeft':
+        _handlePeerLeft(event['data'] as Map<String, dynamic>? ?? event);
         break;
         
       case 'Error':
         state = state.copyWith(
-          error: event.data['message'] as String?,
+          error: event['message'] as String?,
           isLoading: false,
+          isSending: false,
         );
         break;
     }
   }
-  
-  void _handleChatSent(ChatEvent event) {
-    // Only add if it's for our workspace
-    final eventWorkspaceId = event.data['workspace_id'] as String?;
-    if (eventWorkspaceId != workspaceId) return;
+
+  void _handleChatMessage(Map<String, dynamic> data) {
+    // Only add if it's for the current context
+    final wsId = data['workspace_id'] as String?;
+    if (state.context == null) return;
+    if (wsId != state.context!.workspaceId && wsId != state.context!.id) return;
     
-    final message = ChatMessage(
-      id: event.data['id'] as String? ?? '',
-      boardId: workspaceId,
-      senderId: event.data['author'] as String? ?? '',
-      senderName: event.data['author_name'] as String? ?? 'Unknown',
-      senderColor: event.data['author_color'] as String?,
-      text: event.data['message'] as String? ?? '',
-      timestamp: DateTime.fromMillisecondsSinceEpoch(
-        (event.data['timestamp'] as int? ?? 0) * 1000,
-      ),
-      isMe: event.data['is_me'] as bool? ?? false,
-    );
+    final msg = ChatMessage.fromJson(data, currentUserId: _currentUserId);
     
-    // Avoid duplicates (optimistic add)
-    if (!state.messages.any((m) => m.id == message.id)) {
-      state = state.copyWith(
-        messages: [...state.messages, message],
-      );
+    // Avoid duplicates (from optimistic add)
+    if (state.messages.any((m) => m.id == msg.id)) return;
+    // Also check temp IDs
+    if (msg.id.startsWith('temp_')) return;
+    
+    final messages = [...state.messages, msg];
+    // Sort by timestamp
+    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+    
+    state = state.copyWith(messages: messages, isSending: false);
+  }
+
+  void _handleChatDeleted(Map<String, dynamic> data) {
+    final id = data['id'] as String?;
+    if (id != null) {
+      final messages = state.messages.where((m) => m.id != id).toList();
+      state = state.copyWith(messages: messages);
     }
   }
-  
-  void _handleChatHistory(ChatEvent event) {
-    final messagesData = event.data['messages'] as List<dynamic>? ?? [];
+
+  void _handleChatHistory(Map<String, dynamic> data) {
+    final messagesData = data['messages'] as List<dynamic>? ?? [];
     final messages = messagesData.map((m) {
-      final msg = m as Map<String, dynamic>;
-      return ChatMessage(
-        id: msg['id'] as String? ?? '',
-        boardId: workspaceId,
-        senderId: msg['author'] as String? ?? '',
-        senderName: msg['author_name'] as String? ?? 'Unknown',
-        senderColor: msg['author_color'] as String?,
-        text: msg['message'] as String? ?? '',
-        timestamp: DateTime.fromMillisecondsSinceEpoch(
-          (msg['timestamp'] as int? ?? 0) * 1000,
-        ),
-        isMe: msg['is_me'] as bool? ?? false,
-      );
+      return ChatMessage.fromJson(m as Map<String, dynamic>, currentUserId: _currentUserId);
     }).toList();
+    
+    // Sort by timestamp
+    messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
     
     state = state.copyWith(
       messages: messages,
       isLoading: false,
     );
   }
-  
-  void _handleDirectMessage(ChatEvent event) {
-    final message = ChatMessage(
-      id: event.data['id'] as String? ?? '',
-      boardId: workspaceId,
-      senderId: event.data['peer_id'] as String? ?? '',
-      senderName: event.data['peer_name'] as String? ?? 'Peer',
-      text: event.data['message'] as String? ?? '',
-      timestamp: DateTime.fromMillisecondsSinceEpoch(
-        (event.data['timestamp'] as int? ?? 0) * 1000,
-      ),
-      isMe: (event.data['is_incoming'] as bool?) == false,
-    );
+
+  void _handlePeerJoined(Map<String, dynamic> data) {
+    final peerId = data['peer_id'] as String?;
+    if (peerId == null) return;
     
-    state = state.copyWith(
-      messages: [...state.messages, message],
-    );
+    final peers = List<PeerInfo>.from(state.onlinePeers);
+    final existingIndex = peers.indexWhere((p) => p.id == peerId);
+    
+    if (existingIndex >= 0) {
+      peers[existingIndex] = peers[existingIndex].copyWith(isOnline: true);
+    } else {
+      peers.add(PeerInfo.fromPublicKey(peerId, isOnline: true));
+    }
+    
+    state = state.copyWith(onlinePeers: peers);
   }
-  
-  // ═══════════════════════════════════════════════════════════════════════════
-  // PUBLIC API - Send commands via bridge
-  // ═══════════════════════════════════════════════════════════════════════════
-  
-  void loadHistory() {
-    print('📤 Chat: LoadChatHistory for workspace $workspaceId');
-    state = state.copyWith(isLoading: true);
-    _bridge.send(ChatCommand.loadChatHistory(workspaceId: workspaceId));
+
+  void _handlePeerLeft(Map<String, dynamic> data) {
+    final peerId = data['peer_id'] as String?;
+    if (peerId == null) return;
+    
+    final peers = state.onlinePeers.map((p) {
+      if (p.id == peerId) return p.copyWith(isOnline: false);
+      return p;
+    }).toList();
+    
+    state = state.copyWith(onlinePeers: peers);
   }
-  
-  void sendMessage(String text) {
-    print('📤 Chat: SendChat "$text" to workspace $workspaceId');
-    _bridge.send(ChatCommand.sendMessage(
+
+  // ═══════════════════════════════════════════════════════════════════════════
+  // PUBLIC API
+  // ═══════════════════════════════════════════════════════════════════════════
+
+  /// Set chat context (workspace, group, etc.)
+  void setContext(ChatContextInfo context) {
+    print('💬 Setting chat context: ${context.title}');
+    state = state.copyWith(context: context, messages: [], isLoading: true);
+    _loadHistory();
+  }
+
+  /// Clear chat context
+  void clearContext() {
+    state = state.copyWith(clearContext: true, messages: []);
+  }
+
+  /// Load chat history for current context
+  void _loadHistory() {
+    if (state.context == null) return;
+    
+    final workspaceId = state.context!.workspaceId ?? state.context!.id;
+    print('📤 Loading chat history for $workspaceId');
+    
+    _bridge.send(jsonEncode({
+      'type': 'LoadChatHistory',
+      'workspace_id': workspaceId,
+    }));
+  }
+
+  /// Send a message
+  void sendMessage(String text, {List<String>? attachments}) {
+    if (text.trim().isEmpty || state.context == null) return;
+    
+    final workspaceId = state.context!.workspaceId ?? state.context!.id;
+    print('📤 Sending message to $workspaceId: $text');
+    
+    state = state.copyWith(isSending: true);
+    
+    // Optimistic update
+    final localId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+    final msg = ChatMessage(
+      id: localId,
       workspaceId: workspaceId,
       message: text,
-    ));
-    
-    // Optimistically add message
-    final optimisticMessage = ChatMessage(
-      id: 'temp_${DateTime.now().millisecondsSinceEpoch}',
-      boardId: workspaceId,
-      senderId: 'me',
-      senderName: 'Me',
-      text: text,
+      authorId: _currentUserId ?? 'me',
+      authorName: 'Me',
       timestamp: DateTime.now(),
-      isMe: true,
+      isOwn: true,
     );
     
-    state = state.copyWith(
-      messages: [...state.messages, optimisticMessage],
-    );
+    final messages = [...state.messages, msg];
+    state = state.copyWith(messages: messages);
+    
+    // Send via FFI bridge
+    _bridge.send(jsonEncode({
+      'type': 'SendChat',
+      'workspace_id': workspaceId,
+      'message': text,
+    }));
   }
-  
+
+  /// Delete a message
   void deleteMessage(String id) {
-    print('📤 Chat: DeleteChat $id');
-    _bridge.send(ChatCommand.deleteMessage(id: id));
+    print('📤 Deleting message $id');
+    
+    // Optimistic update
+    final messages = state.messages.where((m) => m.id != id).toList();
+    state = state.copyWith(messages: messages);
+    
+    _bridge.send(jsonEncode({
+      'type': 'DeleteChat',
+      'id': id,
+    }));
   }
-  
-  void startDirectChat(String peerId) {
-    print('📤 Chat: StartDirectChat with peer $peerId in workspace $workspaceId');
-    _bridge.send(ChatCommand.startDirectChat(
-      peerId: peerId,
-      workspaceId: workspaceId,
-    ));
+
+  /// Start DM with a peer
+  void startDirectMessage(PeerInfo peer) {
+    print('📤 Starting DM with ${peer.displayName}');
+    
+    final context = ChatContextInfo.directMessage(
+      peerId: peer.id,
+      peerName: peer.displayName,
+    );
+    setContext(context);
+    
+    // Start QUIC stream
+    _bridge.send(jsonEncode({
+      'type': 'StartDirectChat',
+      'peer_id': peer.id,
+      'workspace_id': 'direct',
+    }));
   }
-  
-  void sendDirectMessage(String peerId, String text) {
-    print('📤 Chat: SendDirectMessage to peer $peerId');
-    _bridge.send(ChatCommand.sendDirectMessage(
-      peerId: peerId,
-      workspaceId: workspaceId,
-      message: text,
-    ));
+
+  /// Refresh peer list
+  void refreshPeers() {
+    _bridge.send(jsonEncode({
+      'type': 'GetOnlinePeers',
+    }));
   }
-  
+
   @override
   void dispose() {
     _subscription?.cancel();
@@ -242,3 +297,19 @@ class ChatNotifier extends StateNotifier<ChatState> {
     super.dispose();
   }
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CONVENIENCE PROVIDERS
+// ═══════════════════════════════════════════════════════════════════════════
+
+final onlinePeersProvider = Provider<List<PeerInfo>>((ref) {
+  return ref.watch(chatProvider).onlinePeers;
+});
+
+final onlinePeerCountProvider = Provider<int>((ref) {
+  return ref.watch(onlinePeersProvider).where((p) => p.isOnline).length;
+});
+
+final chatContextProvider = StateProvider<ChatContextInfo?>((ref) {
+  return ref.watch(chatProvider).context;
+});

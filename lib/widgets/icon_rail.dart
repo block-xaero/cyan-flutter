@@ -1,10 +1,10 @@
 // widgets/icon_rail.dart
-// Simplified icon rail - AllBoards, Explorer, Chat, DMs, Events
+// VS Code style icon rail - matches Swift app exactly
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/navigation_provider.dart';
-import 'file_tree_widget.dart';
 
 class IconRail extends ConsumerWidget {
   const IconRail({super.key});
@@ -21,136 +21,108 @@ class IconRail extends ConsumerWidget {
       child: Column(
         children: [
           const SizedBox(height: 8),
-
-          // All Boards (default view)
-          _RailButton(
-            icon: Icons.dashboard_outlined,
-            label: 'Boards',
-            isSelected: viewMode == ViewMode.allBoards,
-            shortcut: '⌘1',
-            onTap: () => ref.read(viewModeProvider.notifier).showAllBoards(),
-          ),
-
-          // Explorer (file tree + filtered boards)
-          _RailButton(
+          
+          // Main navigation items (fixed at top)
+          _RailItem(
             icon: Icons.folder_outlined,
             label: 'Explorer',
-            isSelected: viewMode == ViewMode.explorer,
-            shortcut: '⌘2',
-            onTap: () => ref.read(viewModeProvider.notifier).showExplorer(),
+            isActive: viewMode == ViewMode.explorer,
+            onTap: () => ref.read(viewModeProvider.notifier).setMode(ViewMode.explorer),
+            shortcut: '⌘1',
           ),
-
-          // Chat (full screen)
-          _RailButton(
+          _RailItem(
+            icon: Icons.dashboard_outlined,
+            label: 'Boards',
+            isActive: viewMode == ViewMode.allBoards,
+            onTap: () => ref.read(viewModeProvider.notifier).setMode(ViewMode.allBoards),
+            shortcut: '⌘2',
+          ),
+          _RailItem(
             icon: Icons.chat_bubble_outline,
             label: 'Chat',
-            isSelected: viewMode == ViewMode.chat,
+            isActive: viewMode == ViewMode.chat,
+            onTap: () => ref.read(viewModeProvider.notifier).setMode(ViewMode.chat),
             shortcut: '⌘3',
-            accentColor: const Color(0xFF66D9EF),
-            onTap: () => ref.read(viewModeProvider.notifier).showChat(),
           ),
-
-          // Events
-          _RailButton(
-            icon: Icons.hub_outlined,
+          _RailItem(
+            icon: Icons.device_hub,
             label: 'Events',
-            isSelected: viewMode == ViewMode.events,
+            isActive: viewMode == ViewMode.events,
+            onTap: () => ref.read(viewModeProvider.notifier).setMode(ViewMode.events),
             shortcut: '⌘4',
-            onTap: () => ref.read(viewModeProvider.notifier).showEvents(),
           ),
-
-          _divider(),
-
-          // DMs (toggleable panel)
-          _RailButton(
-            icon: showDMs ? Icons.mark_chat_read : Icons.mark_chat_unread_outlined,
-            label: 'DMs',
-            isSelected: showDMs,
-            shortcut: '⌘D',
-            accentColor: const Color(0xFFF92672),
-            onTap: () => ref.read(showDMsPanelProvider.notifier).state = !showDMs,
-          ),
-
-          // Console toggle
-          _RailButton(
+          
+          const _RailDivider(),
+          
+          _RailItem(
             icon: Icons.terminal,
             label: 'Console',
-            isSelected: showConsole,
-            shortcut: '⌘5',
-            accentColor: const Color(0xFFAE81FF),
+            isActive: showConsole,
             onTap: () => ref.read(showConsoleProvider.notifier).state = !showConsole,
           ),
-
+          _RailItem(
+            icon: Icons.mark_chat_unread_outlined,
+            label: 'DMs',
+            isActive: showDMs,
+            onTap: () => ref.read(showDMsPanelProvider.notifier).state = !showDMs,
+          ),
+          
           const Spacer(),
-
-          _divider(),
-
-          // Settings
-          _RailButton(
+          
+          // Bottom items (fixed at bottom)
+          const _RailDivider(),
+          
+          _RailItem(
             icon: Icons.settings_outlined,
             label: 'Settings',
-            isSelected: false,
-            shortcut: '⌘,',
-            showLabel: false,
-            onTap: () {
-              // TODO: Show settings
-            },
+            isActive: false,
+            onTap: () {},
           ),
-
+          _RailItem(
+            icon: Icons.person_outline,
+            label: 'Profile',
+            isActive: false,
+            onTap: () {},
+          ),
+          
           const SizedBox(height: 8),
         ],
       ),
     );
   }
-
-  Widget _divider() {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Container(
-        height: 1,
-        margin: const EdgeInsets.symmetric(horizontal: 8),
-        color: const Color(0xFF2A2A2A),
-      ),
-    );
-  }
 }
 
-class _RailButton extends StatefulWidget {
+class _RailItem extends StatefulWidget {
   final IconData icon;
   final String label;
-  final bool isSelected;
-  final String shortcut;
-  final Color accentColor;
-  final bool showLabel;
+  final bool isActive;
   final VoidCallback onTap;
+  final String? shortcut;
+  final int? badge;
+  final bool hasNotification;
 
-  const _RailButton({
+  const _RailItem({
     required this.icon,
     required this.label,
-    required this.isSelected,
-    this.shortcut = '',
-    this.accentColor = const Color(0xFFA6E22E),
-    this.showLabel = true,
+    required this.isActive,
     required this.onTap,
+    this.shortcut,
+    this.badge,
+    this.hasNotification = false,
   });
 
   @override
-  State<_RailButton> createState() => _RailButtonState();
+  State<_RailItem> createState() => _RailItemState();
 }
 
-class _RailButtonState extends State<_RailButton> {
+class _RailItemState extends State<_RailItem> {
   bool _isHovered = false;
-
-  Color get _iconColor {
-    if (widget.isSelected) return widget.accentColor;
-    if (_isHovered) return const Color(0xFFCCCCCC);
-    return const Color(0xFF808080);
-  }
 
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: '${widget.label} (${widget.shortcut})',
+      message: widget.shortcut != null ? '${widget.label} (${widget.shortcut})' : widget.label,
+      preferBelow: false,
       waitDuration: const Duration(milliseconds: 500),
       child: MouseRegion(
         onEnter: (_) => setState(() => _isHovered = true),
@@ -158,36 +130,135 @@ class _RailButtonState extends State<_RailButton> {
         child: GestureDetector(
           onTap: widget.onTap,
           child: Container(
-            padding: const EdgeInsets.symmetric(vertical: 3),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Container(
-                  width: 40,
-                  height: 26,
-                  decoration: BoxDecoration(
-                    color: widget.isSelected
-                        ? widget.accentColor.withOpacity(0.15)
-                        : (_isHovered ? const Color(0xFF2A2A2A) : Colors.transparent),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Icon(widget.icon, size: 16, color: _iconColor),
+            width: 56,
+            height: 48,
+            decoration: BoxDecoration(
+              color: widget.isActive
+                  ? const Color(0xFF66D9EF).withOpacity(0.15)
+                  : _isHovered
+                      ? const Color(0xFF3E3D32)
+                      : Colors.transparent,
+              border: Border(
+                left: BorderSide(
+                  color: widget.isActive ? const Color(0xFF66D9EF) : Colors.transparent,
+                  width: 2,
                 ),
-                if (widget.showLabel) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    widget.label,
-                    style: TextStyle(
-                      fontSize: 8,
-                      fontWeight: FontWeight.w500,
-                      color: widget.isSelected ? widget.accentColor : const Color(0xFF808080),
+              ),
+            ),
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Icon(
+                      widget.icon,
+                      size: 22,
+                      color: widget.isActive
+                          ? const Color(0xFF66D9EF)
+                          : _isHovered
+                              ? const Color(0xFFF8F8F2)
+                              : const Color(0xFF808080),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      widget.label,
+                      style: TextStyle(
+                        fontSize: 9,
+                        color: widget.isActive
+                            ? const Color(0xFF66D9EF)
+                            : _isHovered
+                                ? const Color(0xFFF8F8F2)
+                                : const Color(0xFF808080),
+                      ),
+                    ),
+                  ],
+                ),
+                // Badge
+                if (widget.badge != null && widget.badge! > 0)
+                  Positioned(
+                    top: 6,
+                    right: 10,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF92672),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        '${widget.badge}',
+                        style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold),
+                      ),
                     ),
                   ),
-                ],
+                // Notification dot
+                if (widget.hasNotification)
+                  Positioned(
+                    top: 8,
+                    right: 12,
+                    child: Container(
+                      width: 6,
+                      height: 6,
+                      decoration: const BoxDecoration(
+                        color: Color(0xFFFD971F),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
         ),
+      ),
+    );
+  }
+}
+
+class _RailDivider extends StatelessWidget {
+  const _RailDivider();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+      height: 1,
+      color: const Color(0xFF3E3D32),
+    );
+  }
+}
+
+/// Keyboard shortcut handler - wrap your app with this
+class KeyboardShortcuts extends ConsumerWidget {
+  final Widget child;
+
+  const KeyboardShortcuts({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    return CallbackShortcuts(
+      bindings: {
+        const SingleActivator(LogicalKeyboardKey.digit1, meta: true): () {
+          ref.read(viewModeProvider.notifier).setMode(ViewMode.explorer);
+        },
+        const SingleActivator(LogicalKeyboardKey.digit2, meta: true): () {
+          ref.read(viewModeProvider.notifier).setMode(ViewMode.allBoards);
+        },
+        const SingleActivator(LogicalKeyboardKey.digit3, meta: true): () {
+          ref.read(viewModeProvider.notifier).setMode(ViewMode.chat);
+        },
+        const SingleActivator(LogicalKeyboardKey.digit4, meta: true): () {
+          ref.read(viewModeProvider.notifier).setMode(ViewMode.events);
+        },
+        const SingleActivator(LogicalKeyboardKey.backquote, meta: true): () {
+          ref.read(showConsoleProvider.notifier).update((s) => !s);
+        },
+        const SingleActivator(LogicalKeyboardKey.keyD, meta: true, shift: true): () {
+          ref.read(showDMsPanelProvider.notifier).update((s) => !s);
+        },
+      },
+      child: Focus(
+        autofocus: true,
+        child: child,
       ),
     );
   }

@@ -1,7 +1,136 @@
 // models/chat_models.dart
-// Enhanced chat models with DMs, markdown, code blocks, peers
+// Chat models matching Swift ChatTypes.swift
 
 import 'package:flutter/material.dart';
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHAT MESSAGE
+// ═══════════════════════════════════════════════════════════════════════════
+
+class ChatMessage {
+  final String id;
+  final String workspaceId;
+  final String message;
+  final String authorId;
+  final String? authorName;
+  final String? parentId;
+  final DateTime timestamp;
+  final List<String> mentions;
+  final bool isBroadcast;
+  final bool mentionsMe;
+  final bool isOwn;
+
+  const ChatMessage({
+    required this.id,
+    required this.workspaceId,
+    required this.message,
+    required this.authorId,
+    this.authorName,
+    this.parentId,
+    required this.timestamp,
+    this.mentions = const [],
+    this.isBroadcast = false,
+    this.mentionsMe = false,
+    this.isOwn = false,
+  });
+
+  factory ChatMessage.fromJson(Map<String, dynamic> json, {String? currentUserId}) {
+    final authorId = json['author'] as String? ?? json['author_id'] as String? ?? '';
+    return ChatMessage(
+      id: json['id'] as String? ?? '',
+      workspaceId: json['workspace_id'] as String? ?? '',
+      message: json['message'] as String? ?? '',
+      authorId: authorId,
+      authorName: json['author_name'] as String?,
+      parentId: json['parent_id'] as String?,
+      timestamp: _parseTimestamp(json['timestamp']),
+      mentions: (json['mentions'] as List<dynamic>?)?.cast<String>() ?? [],
+      isBroadcast: json['is_broadcast'] as bool? ?? false,
+      mentionsMe: json['mentions_me'] as bool? ?? false,
+      isOwn: currentUserId != null && authorId == currentUserId,
+    );
+  }
+
+  static DateTime _parseTimestamp(dynamic ts) {
+    if (ts is int) return DateTime.fromMillisecondsSinceEpoch(ts * 1000);
+    if (ts is double) return DateTime.fromMillisecondsSinceEpoch((ts * 1000).toInt());
+    return DateTime.now();
+  }
+
+  String get displayAuthor {
+    if (authorName != null && authorName!.isNotEmpty) return authorName!;
+    if (authorId.length > 12) {
+      return '${authorId.substring(0, 6)}...${authorId.substring(authorId.length - 4)}';
+    }
+    return authorId;
+  }
+
+  String get displayTime {
+    return '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ENHANCED MESSAGE WITH PARSED CONTENT
+// ═══════════════════════════════════════════════════════════════════════════
+
+class EnhancedChatMessage {
+  final String id;
+  final String workspaceId;
+  final String authorId;
+  final String authorName;
+  final DateTime timestamp;
+  final bool isOwn;
+  final List<MessagePart> content;
+  final List<String> attachments;
+  final String? replyToId;
+
+  const EnhancedChatMessage({
+    required this.id,
+    required this.workspaceId,
+    required this.authorId,
+    required this.authorName,
+    required this.timestamp,
+    this.isOwn = false,
+    this.content = const [],
+    this.attachments = const [],
+    this.replyToId,
+  });
+
+  String get displayTime => '${timestamp.hour.toString().padLeft(2, '0')}:${timestamp.minute.toString().padLeft(2, '0')}';
+  String get plainText => content.map((p) => p.text).join();
+
+  static List<MessagePart> parseContent(String text) {
+    final parts = <MessagePart>[];
+    if (text.isEmpty) return parts;
+
+    // Simple parsing - just return as text for now
+    // Full markdown is rendered by MarkdownRenderer widget
+    parts.add(MessagePart.text(text));
+    return parts;
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MESSAGE PART (for rich content)
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum MessagePartType { text, code, codeBlock, mention, link, bold, italic }
+
+class MessagePart {
+  final MessagePartType type;
+  final String text;
+  final String? language; // for code blocks
+  final String? url; // for links
+
+  const MessagePart({required this.type, required this.text, this.language, this.url});
+
+  factory MessagePart.text(String t) => MessagePart(type: MessagePartType.text, text: t);
+  factory MessagePart.code(String t) => MessagePart(type: MessagePartType.code, text: t);
+  factory MessagePart.codeBlock(String t, String? lang) => MessagePart(type: MessagePartType.codeBlock, text: t, language: lang);
+  factory MessagePart.mention(String t) => MessagePart(type: MessagePartType.mention, text: t);
+  factory MessagePart.link(String t, String u) => MessagePart(type: MessagePartType.link, text: t, url: u);
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // PEER INFO
@@ -12,140 +141,52 @@ class PeerInfo {
   final String displayName;
   final bool isOnline;
   final int unreadCount;
+  final String? avatarUrl;
 
   const PeerInfo({
     required this.id,
     required this.displayName,
     this.isOnline = false,
     this.unreadCount = 0,
+    this.avatarUrl,
   });
 
-  /// Create from public key with shortened display name
-  factory PeerInfo.fromPublicKey(String publicKey, {bool isOnline = false}) {
-    final displayName = publicKey.length > 12
-        ? '${publicKey.substring(0, 6)}...${publicKey.substring(publicKey.length - 4)}'
-        : publicKey;
-    return PeerInfo(id: publicKey, displayName: displayName, isOnline: isOnline);
+  factory PeerInfo.fromPublicKey(String publicKey, {bool isOnline = true}) {
+    String name;
+    if (publicKey.length > 12) {
+      name = '${publicKey.substring(0, 6)}...${publicKey.substring(publicKey.length - 4)}';
+    } else {
+      name = publicKey;
+    }
+    return PeerInfo(id: publicKey, displayName: name, isOnline: isOnline);
   }
 
-  PeerInfo copyWith({
-    String? displayName,
-    bool? isOnline,
-    int? unreadCount,
-  }) {
+  PeerInfo copyWith({String? displayName, bool? isOnline, int? unreadCount}) {
     return PeerInfo(
       id: id,
       displayName: displayName ?? this.displayName,
       isOnline: isOnline ?? this.isOnline,
       unreadCount: unreadCount ?? this.unreadCount,
+      avatarUrl: avatarUrl,
     );
   }
-}
 
-// ═══════════════════════════════════════════════════════════════════════════
-// CHAT CONTEXT
-// ═══════════════════════════════════════════════════════════════════════════
-
-enum ChatContextType { global, group, workspace, board, directMessage }
-
-class ChatContext {
-  final String id;
-  final ChatContextType type;
-  final String? workspaceId;
-  final String? groupId;
-  final String displayName;
-
-  const ChatContext({
-    required this.id,
-    required this.type,
-    this.workspaceId,
-    this.groupId,
-    required this.displayName,
-  });
-
-  String get title {
-    switch (type) {
-      case ChatContextType.global:
-        return 'Global Chat';
-      case ChatContextType.group:
-        return 'Group: $displayName';
-      case ChatContextType.workspace:
-        return displayName;
-      case ChatContextType.board:
-        return 'Board: $displayName';
-      case ChatContextType.directMessage:
-        return 'DM: $displayName';
-    }
+  /// Color based on peer ID hash (for avatar background)
+  Color get avatarColor {
+    final hash = id.hashCode;
+    final colors = [
+      const Color(0xFF66D9EF), // cyan
+      const Color(0xFFA6E22E), // green
+      const Color(0xFFF92672), // pink
+      const Color(0xFFAE81FF), // purple
+      const Color(0xFFFD971F), // orange
+      const Color(0xFFE6DB74), // yellow
+    ];
+    return colors[hash.abs() % colors.length];
   }
 
-  // Factory methods
-  static ChatContext global() => const ChatContext(
-        id: 'global',
-        type: ChatContextType.global,
-        displayName: 'Global',
-      );
-
-  static ChatContext group({required String id, required String name}) =>
-      ChatContext(
-        id: 'g:$id',
-        type: ChatContextType.group,
-        groupId: id,
-        displayName: name,
-      );
-
-  static ChatContext workspace({
-    required String id,
-    required String groupId,
-    required String name,
-  }) =>
-      ChatContext(
-        id: 'ws:$id',
-        type: ChatContextType.workspace,
-        workspaceId: id,
-        groupId: groupId,
-        displayName: name,
-      );
-
-  static ChatContext board({
-    required String id,
-    required String workspaceId,
-    required String groupId,
-    required String name,
-  }) =>
-      ChatContext(
-        id: 'b:$id',
-        type: ChatContextType.board,
-        workspaceId: workspaceId,
-        groupId: groupId,
-        displayName: name,
-      );
-
-  static ChatContext directMessage({
-    required String peerId,
-    required String peerName,
-  }) =>
-      ChatContext(
-        id: 'dm:$peerId',
-        type: ChatContextType.directMessage,
-        displayName: peerName,
-      );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CHAT MODE
-// ═══════════════════════════════════════════════════════════════════════════
-
-sealed class ChatMode {
-  const ChatMode();
-}
-
-class GroupChatMode extends ChatMode {
-  const GroupChatMode();
-}
-
-class DirectChatMode extends ChatMode {
-  final PeerInfo peer;
-  const DirectChatMode(this.peer);
+  /// Initial for avatar
+  String get initial => displayName.isNotEmpty ? displayName[0].toUpperCase() : '?';
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -169,19 +210,6 @@ class DMConversation {
     this.isOnline = false,
   });
 
-  String get id => peerId;
-
-  String get displayTime {
-    if (lastMessageTime == null) return '';
-    final now = DateTime.now();
-    final diff = now.difference(lastMessageTime!);
-    if (diff.inMinutes < 1) return 'now';
-    if (diff.inHours < 1) return '${diff.inMinutes}m';
-    if (diff.inDays < 1) return '${diff.inHours}h';
-    if (diff.inDays < 7) return '${diff.inDays}d';
-    return '${lastMessageTime!.month}/${lastMessageTime!.day}';
-  }
-
   DMConversation copyWith({
     String? peerName,
     String? lastMessage,
@@ -198,195 +226,191 @@ class DMConversation {
       isOnline: isOnline ?? this.isOnline,
     );
   }
+
+  String get displayTime {
+    if (lastMessageTime == null) return '';
+    final diff = DateTime.now().difference(lastMessageTime!);
+    if (diff.inMinutes < 1) return 'now';
+    if (diff.inHours < 1) return '${diff.inMinutes}m';
+    if (diff.inDays < 1) return '${diff.inHours}h';
+    return '${diff.inDays}d';
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// ENHANCED CHAT MESSAGE
+// CHAT CONTEXT
 // ═══════════════════════════════════════════════════════════════════════════
 
-/// Content block in a message (text, code, file, etc.)
-sealed class MessageContent {
-  const MessageContent();
-}
+enum ChatContextType { global, group, workspace, board, directMessage }
 
-class TextContent extends MessageContent {
-  final String text;
-  const TextContent(this.text);
-}
-
-class CodeContent extends MessageContent {
-  final String code;
-  final String? language;
-  const CodeContent(this.code, {this.language});
-}
-
-class FileContent extends MessageContent {
-  final String fileId;
-  final String fileName;
-  final int fileSize;
-  final String? mimeType;
-  final String? localPath;
-  const FileContent({
-    required this.fileId,
-    required this.fileName,
-    required this.fileSize,
-    this.mimeType,
-    this.localPath,
-  });
-}
-
-class EnhancedChatMessage {
+class ChatContextInfo {
   final String id;
-  final String workspaceId;
-  final String authorId; // Public key
-  final String authorName;
-  final DateTime timestamp;
-  final bool isOwn;
-  final List<MessageContent> content;
-  final List<String> mentions;
-  final bool isBroadcast;
-  final bool mentionsMe;
-  final String? parentId;
+  final ChatContextType type;
+  final String? workspaceId;
+  final String? groupId;
+  final String displayName;
 
-  const EnhancedChatMessage({
+  const ChatContextInfo({
     required this.id,
-    required this.workspaceId,
-    required this.authorId,
-    required this.authorName,
-    required this.timestamp,
-    required this.isOwn,
-    required this.content,
-    this.mentions = const [],
-    this.isBroadcast = false,
-    this.mentionsMe = false,
-    this.parentId,
+    required this.type,
+    this.workspaceId,
+    this.groupId,
+    required this.displayName,
   });
 
-  /// Parse raw text into content blocks (handles code blocks)
-  static List<MessageContent> parseContent(String rawText) {
-    final blocks = <MessageContent>[];
-    final codeBlockPattern = RegExp(r'```(\w+)?\n?([\s\S]*?)```');
-
-    int lastEnd = 0;
-    for (final match in codeBlockPattern.allMatches(rawText)) {
-      // Add text before code block
-      if (match.start > lastEnd) {
-        final text = rawText.substring(lastEnd, match.start).trim();
-        if (text.isNotEmpty) {
-          blocks.add(TextContent(text));
-        }
-      }
-
-      // Add code block
-      final language = match.group(1);
-      final code = match.group(2)?.trim() ?? '';
-      blocks.add(CodeContent(code, language: language));
-
-      lastEnd = match.end;
+  String get title {
+    switch (type) {
+      case ChatContextType.global:
+        return 'Global Chat';
+      case ChatContextType.group:
+        return 'Group: $displayName';
+      case ChatContextType.workspace:
+        return displayName;
+      case ChatContextType.board:
+        return 'Board: $displayName';
+      case ChatContextType.directMessage:
+        return 'DM: $displayName';
     }
-
-    // Add remaining text
-    if (lastEnd < rawText.length) {
-      final text = rawText.substring(lastEnd).trim();
-      if (text.isNotEmpty) {
-        blocks.add(TextContent(text));
-      }
-    }
-
-    // If no blocks, treat entire text as plain text
-    if (blocks.isEmpty) {
-      blocks.add(TextContent(rawText));
-    }
-
-    return blocks;
-  }
-
-  /// Get all file attachments
-  List<FileContent> get files =>
-      content.whereType<FileContent>().toList();
-
-  /// Check if message has any files
-  bool get hasFiles => files.isNotEmpty;
-
-  /// Get plain text representation
-  String get plainText {
-    return content.map((c) {
-      if (c is TextContent) return c.text;
-      if (c is CodeContent) return '```${c.language ?? ''}\n${c.code}\n```';
-      if (c is FileContent) return '[File: ${c.fileName}]';
-      return '';
-    }).join('\n');
-  }
-
-  /// Shortened author ID for display
-  String get shortAuthorId {
-    if (authorId.length > 12) {
-      return '${authorId.substring(0, 6)}...${authorId.substring(authorId.length - 4)}';
-    }
-    return authorId;
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// FILE ATTACHMENT INFO
-// ═══════════════════════════════════════════════════════════════════════════
-
-class ChatFileAttachment {
-  final String messageId;
-  final String fileId;
-  final String fileName;
-  final int fileSize;
-  final String? mimeType;
-  final String authorName;
-  final DateTime timestamp;
-
-  const ChatFileAttachment({
-    required this.messageId,
-    required this.fileId,
-    required this.fileName,
-    required this.fileSize,
-    this.mimeType,
-    required this.authorName,
-    required this.timestamp,
-  });
-
-  String get formattedSize {
-    if (fileSize < 1024) return '$fileSize B';
-    if (fileSize < 1024 * 1024) return '${(fileSize / 1024).toStringAsFixed(1)} KB';
-    return '${(fileSize / (1024 * 1024)).toStringAsFixed(1)} MB';
   }
 
   IconData get icon {
-    final ext = fileName.split('.').last.toLowerCase();
-    switch (ext) {
-      case 'pdf':
-        return Icons.picture_as_pdf;
-      case 'doc':
-      case 'docx':
-        return Icons.description;
-      case 'xls':
-      case 'xlsx':
-        return Icons.table_chart;
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-      case 'webp':
-        return Icons.image;
-      case 'mp4':
-      case 'mov':
-      case 'avi':
-        return Icons.video_file;
-      case 'mp3':
-      case 'wav':
-      case 'aac':
-        return Icons.audio_file;
-      case 'zip':
-      case 'tar':
-      case 'gz':
-        return Icons.folder_zip;
-      default:
-        return Icons.insert_drive_file;
+    switch (type) {
+      case ChatContextType.global:
+        return Icons.public;
+      case ChatContextType.group:
+        return Icons.folder;
+      case ChatContextType.workspace:
+        return Icons.workspaces_outline;
+      case ChatContextType.board:
+        return Icons.dashboard;
+      case ChatContextType.directMessage:
+        return Icons.person;
     }
   }
+
+  Color get color {
+    switch (type) {
+      case ChatContextType.global:
+        return const Color(0xFFAE81FF);
+      case ChatContextType.group:
+        return const Color(0xFF66D9EF);
+      case ChatContextType.workspace:
+        return const Color(0xFFA6E22E);
+      case ChatContextType.board:
+        return const Color(0xFFF92672);
+      case ChatContextType.directMessage:
+        return const Color(0xFFFD971F);
+    }
+  }
+
+  // Factory methods
+  static ChatContextInfo global() => const ChatContextInfo(
+        id: 'global',
+        type: ChatContextType.global,
+        displayName: 'Global',
+      );
+
+  static ChatContextInfo workspace({
+    required String id,
+    required String groupId,
+    required String name,
+  }) =>
+      ChatContextInfo(
+        id: 'ws:$id',
+        type: ChatContextType.workspace,
+        workspaceId: id,
+        groupId: groupId,
+        displayName: name,
+      );
+
+  static ChatContextInfo group({required String id, required String name}) => ChatContextInfo(
+        id: 'g:$id',
+        type: ChatContextType.group,
+        groupId: id,
+        displayName: name,
+      );
+
+  static ChatContextInfo board({
+    required String id,
+    required String workspaceId,
+    required String groupId,
+    required String name,
+  }) =>
+      ChatContextInfo(
+        id: 'b:$id',
+        type: ChatContextType.board,
+        workspaceId: workspaceId,
+        groupId: groupId,
+        displayName: name,
+      );
+
+  static ChatContextInfo directMessage({
+    required String peerId,
+    required String peerName,
+  }) =>
+      ChatContextInfo(
+        id: 'dm:$peerId',
+        type: ChatContextType.directMessage,
+        displayName: peerName,
+      );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CHAT MODE
+// ═══════════════════════════════════════════════════════════════════════════
+
+enum ChatMode { group, direct }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// XAERO IDENTITY (matches XaeroIdentity.swift)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class XaeroIdentity {
+  final String secretKeyHex;
+  final String publicKeyHex;
+  final String did;
+  final DateTime createdAt;
+  final String? email;
+  final String? displayName;
+  final String? avatarUrl;
+
+  const XaeroIdentity({
+    required this.secretKeyHex,
+    required this.publicKeyHex,
+    required this.did,
+    required this.createdAt,
+    this.email,
+    this.displayName,
+    this.avatarUrl,
+  });
+
+  /// Short display ID (first 8 chars of DID suffix)
+  String get shortId {
+    final suffix = did.replaceFirst('did:peer:z', '');
+    return suffix.length > 8 ? suffix.substring(0, 8) : suffix;
+  }
+
+  factory XaeroIdentity.fromJson(Map<String, dynamic> json) {
+    return XaeroIdentity(
+      secretKeyHex: json['secret_key'] as String? ?? '',
+      publicKeyHex: json['pubkey'] as String? ?? json['public_key'] as String? ?? '',
+      did: json['did'] as String? ?? '',
+      createdAt: json['created_at'] != null
+          ? DateTime.fromMillisecondsSinceEpoch((json['created_at'] as num).toInt() * 1000)
+          : DateTime.now(),
+      email: json['email'] as String?,
+      displayName: json['display_name'] as String?,
+      avatarUrl: json['avatar_url'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'secret_key': secretKeyHex,
+        'pubkey': publicKeyHex,
+        'did': did,
+        'created_at': createdAt.millisecondsSinceEpoch ~/ 1000,
+        'email': email,
+        'display_name': displayName,
+        'avatar_url': avatarUrl,
+      };
 }

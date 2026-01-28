@@ -52,7 +52,7 @@ class _FileTreeWidgetState extends ConsumerState<FileTreeWidget> {
   Widget build(BuildContext context) {
     final treeState = ref.watch(fileTreeProvider);
 
-    return Container(
+    return Material(
       color: const Color(0xFF1E1E1E),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,

@@ -17,7 +17,7 @@ final viewModeProvider = StateNotifierProvider<ViewModeNotifier, ViewMode>((ref)
 });
 
 class ViewModeNotifier extends StateNotifier<ViewMode> {
-  ViewModeNotifier() : super(ViewMode.allBoards);
+  ViewModeNotifier() : super(ViewMode.explorer);  // Default to explorer view
   
   void setMode(ViewMode mode) => state = mode;
   void showAllBoards() => state = ViewMode.allBoards;

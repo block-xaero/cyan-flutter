@@ -67,11 +67,73 @@ class FileTreeNotifier extends StateNotifier<FileTreeState> {
     _bridge.start();
     _subscription = _bridge.events.listen(_handleEvent);
 
-    // Wait a bit then request initial data
-    await Future.delayed(const Duration(milliseconds: 300));
-    _bridge.send(FileTreeCommand.seedDemoIfEmpty());
-    await Future.delayed(const Duration(milliseconds: 200));
-    _bridge.send(FileTreeCommand.snapshot());
+    // Try to request initial data
+    await Future.delayed(const Duration(milliseconds: 100));
+    final seedOk = _bridge.send(FileTreeCommand.seedDemoIfEmpty());
+    await Future.delayed(const Duration(milliseconds: 100));
+    final snapOk = _bridge.send(FileTreeCommand.snapshot());
+    
+    // If sends failed immediately, load demo data right away
+    if (!seedOk || !snapOk) {
+      print('⚠️ FFI not available - loading demo data');
+      _loadDemoData();
+      return;
+    }
+    
+    // Timeout: if still loading after 1 second, use demo data
+    await Future.delayed(const Duration(seconds: 1));
+    if (state.isLoading) {
+      print('⚠️ FFI timeout - loading demo data');
+      _loadDemoData();
+    }
+  }
+  
+  void _loadDemoData() {
+    // Create demo structure when FFI is unavailable
+    final demoGroups = <TreeGroup>[
+      TreeGroup(
+        id: 'demo-group-1',
+        name: 'Personal',
+        color: '#66D9EF',
+        workspaces: [
+          TreeWorkspace(
+            id: 'demo-ws-1',
+            groupId: 'demo-group-1',
+            name: 'Projects',
+            boards: [
+              TreeBoard(id: 'demo-board-1', workspaceId: 'demo-ws-1', name: 'Welcome Board', createdAt: DateTime.now().millisecondsSinceEpoch),
+              TreeBoard(id: 'demo-board-2', workspaceId: 'demo-ws-1', name: 'Ideas', createdAt: DateTime.now().millisecondsSinceEpoch),
+            ],
+          ),
+          TreeWorkspace(
+            id: 'demo-ws-2',
+            groupId: 'demo-group-1',
+            name: 'Notes',
+            boards: [
+              TreeBoard(id: 'demo-board-3', workspaceId: 'demo-ws-2', name: 'Daily Log', createdAt: DateTime.now().millisecondsSinceEpoch),
+            ],
+          ),
+        ],
+      ),
+      TreeGroup(
+        id: 'demo-group-2',
+        name: 'Work',
+        color: '#A6E22E',
+        workspaces: [
+          TreeWorkspace(
+            id: 'demo-ws-3',
+            groupId: 'demo-group-2',
+            name: 'Team Alpha',
+            boards: [
+              TreeBoard(id: 'demo-board-4', workspaceId: 'demo-ws-3', name: 'Sprint Planning', createdAt: DateTime.now().millisecondsSinceEpoch),
+              TreeBoard(id: 'demo-board-5', workspaceId: 'demo-ws-3', name: 'Retrospective', createdAt: DateTime.now().millisecondsSinceEpoch),
+            ],
+          ),
+        ],
+      ),
+    ];
+    
+    state = state.copyWith(groups: demoGroups, isLoading: false, error: null);
   }
 
   void _handleEvent(FileTreeEvent event) {

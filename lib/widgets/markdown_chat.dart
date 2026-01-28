@@ -142,25 +142,37 @@ class MarkdownRenderer extends StatelessWidget {
 
   List<_Block> _parseBlocks(String text) {
     final blocks = <_Block>[];
+    if (text.isEmpty) return blocks;
+    
     final lines = text.split('\n');
     bool inCode = false;
     String codeLang = '';
     List<String> codeLines = [];
 
     for (final line in lines) {
-      if (line.startsWith('```')) {
+      // Check for code fence (``` with optional language)
+      if (line.trim().startsWith('```')) {
         if (inCode) {
+          // Close code block
           blocks.add(_Block.code(codeLines.join('\n'), codeLang));
           codeLines = [];
           codeLang = '';
           inCode = false;
         } else {
+          // Open code block
           inCode = true;
-          codeLang = line.length > 3 ? line.substring(3).trim() : '';
+          final afterFence = line.trim().substring(3).trim();
+          codeLang = afterFence.isNotEmpty ? afterFence : '';
         }
         continue;
       }
-      if (inCode) { codeLines.add(line); continue; }
+      
+      if (inCode) { 
+        codeLines.add(line); 
+        continue; 
+      }
+      
+      // Parse non-code blocks
       if (line.startsWith('### ')) { blocks.add(_Block.h3(line.substring(4))); }
       else if (line.startsWith('## ')) { blocks.add(_Block.h2(line.substring(3))); }
       else if (line.startsWith('# ')) { blocks.add(_Block.h1(line.substring(2))); }
@@ -169,7 +181,14 @@ class MarkdownRenderer extends StatelessWidget {
       else if (line.trim().isEmpty) { blocks.add(_Block.empty()); }
       else { blocks.add(_Block.para(line)); }
     }
-    if (inCode && codeLines.isNotEmpty) { blocks.add(_Block.code(codeLines.join('\n'), codeLang)); }
+    
+    // Handle unclosed code block - show as "pending" code block
+    if (inCode) {
+      // If there's content, show it; otherwise show placeholder
+      final content = codeLines.isNotEmpty ? codeLines.join('\n') : '...';
+      blocks.add(_Block.code(content, codeLang.isNotEmpty ? '$codeLang (typing...)' : '(typing...)'));
+    }
+    
     return blocks;
   }
 
