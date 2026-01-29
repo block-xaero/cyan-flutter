@@ -1,229 +1,434 @@
 // widgets/full_chat_view.dart
-// Full-screen chat with markdown and file drop
+// Full-screen chat view with proper group/workspace/board scoping
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../providers/chat_provider.dart';
+import '../providers/selection_provider.dart';
 import '../providers/navigation_provider.dart';
-import 'file_tree_widget.dart';
-import 'markdown_chat.dart';
-import 'file_drop_target.dart';
+import '../providers/file_tree_provider.dart';
+import '../theme/monokai_theme.dart';
 
-class FullChatView extends ConsumerStatefulWidget {
+class FullChatView extends ConsumerWidget {
   const FullChatView({super.key});
   
   @override
-  ConsumerState<FullChatView> createState() => _FullChatViewState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final selection = ref.watch(selectionProvider);
+    final fileTreeState = ref.watch(fileTreeProvider);
+    
+    // Build context and get workspace IDs for group chat
+    final result = _buildChatContext(selection, fileTreeState);
+    
+    return _ChatViewContent(
+      key: ValueKey(result.context.id),
+      chatContext: result.context,
+      workspaceIdsForGroup: result.workspaceIds,
+    );
+  }
+  
+  _ChatContextResult _buildChatContext(SelectionState selection, FileTreeState treeState) {
+    // Board context
+    if (selection.boardId != null && selection.workspaceId != null) {
+      return _ChatContextResult(
+        context: ChatContextInfo.board(
+          id: selection.boardId!,
+          workspaceId: selection.workspaceId!,
+          groupId: selection.groupId ?? '',
+          name: selection.boardName ?? 'Board',
+        ),
+        workspaceIds: [],
+      );
+    }
+    
+    // Workspace context
+    if (selection.workspaceId != null) {
+      return _ChatContextResult(
+        context: ChatContextInfo.workspace(
+          id: selection.workspaceId!,
+          groupId: selection.groupId ?? '',
+          name: selection.workspaceName ?? 'Workspace',
+        ),
+        workspaceIds: [],
+      );
+    }
+    
+    // Group context - collect all workspace IDs in the group
+    if (selection.groupId != null) {
+      final group = treeState.groups.where((g) => g.id == selection.groupId).firstOrNull;
+      final workspaceIds = group?.workspaces.map((w) => w.id).toList() ?? [];
+      
+      return _ChatContextResult(
+        context: ChatContextInfo.group(
+          id: selection.groupId!,
+          name: selection.groupName ?? 'Group',
+        ),
+        workspaceIds: workspaceIds,
+      );
+    }
+    
+    // Global - collect ALL workspace IDs
+    final allWorkspaceIds = <String>[];
+    for (final group in treeState.groups) {
+      for (final ws in group.workspaces) {
+        allWorkspaceIds.add(ws.id);
+      }
+    }
+    
+    return _ChatContextResult(
+      context: ChatContextInfo.global(),
+      workspaceIds: allWorkspaceIds,
+    );
+  }
 }
 
-class _FullChatViewState extends ConsumerState<FullChatView> {
-  final _scrollController = ScrollController();
-  final _messages = <_ChatMsg>[];
-  List<DroppedFile> _attachedFiles = [];
+class _ChatContextResult {
+  final ChatContextInfo context;
+  final List<String> workspaceIds;
+  
+  _ChatContextResult({required this.context, required this.workspaceIds});
+}
 
+// ============================================================================
+// CHAT VIEW CONTENT
+// ============================================================================
+
+class _ChatViewContent extends ConsumerStatefulWidget {
+  final ChatContextInfo chatContext;
+  final List<String> workspaceIdsForGroup;
+  
+  const _ChatViewContent({
+    super.key,
+    required this.chatContext,
+    required this.workspaceIdsForGroup,
+  });
+  
+  @override
+  ConsumerState<_ChatViewContent> createState() => _ChatViewContentState();
+}
+
+class _ChatViewContentState extends ConsumerState<_ChatViewContent> {
+  final _scrollController = ScrollController();
+  final _messageController = TextEditingController();
+  final _focusNode = FocusNode();
+  
   @override
   void dispose() {
     _scrollController.dispose();
+    _messageController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
-
+  
   @override
   Widget build(BuildContext context) {
-    final chatContext = ref.watch(chatContextProvider);
-
-    return FileDropTarget(
-      onDrop: (files) => setState(() => _attachedFiles.addAll(files)),
-      builder: (ctx, isDragging, _) => Container(
-        color: const Color(0xFF1E1E1E),
-        child: Stack(
-          children: [
-            Column(
-              children: [
-                _ChatHeader(
-                  context: chatContext,
-                  onClose: () => ref.read(viewModeProvider.notifier).showAllBoards(),
-                ),
-                Expanded(
-                  child: _messages.isEmpty
-                      ? _EmptyChat(context: chatContext)
-                      : ListView.builder(
-                          controller: _scrollController,
-                          padding: const EdgeInsets.all(20),
-                          itemCount: _messages.length,
-                          itemBuilder: (ctx, i) => ChatMessageWidget(
-                            sender: _messages[i].sender,
-                            content: _messages[i].content,
-                            timestamp: _messages[i].timestamp,
-                            isMe: _messages[i].isMe,
-                            attachments: _messages[i].attachments.map((f) => f.name).toList(),
-                          ),
-                        ),
-                ),
-                if (_attachedFiles.isNotEmpty)
-                  _AttachedFilesBar(
-                    files: _attachedFiles,
-                    onRemove: (f) => setState(() => _attachedFiles.remove(f)),
+    // Use the provider with workspace IDs for proper group chat loading
+    final params = ChatWithWorkspacesParams(
+      context: widget.chatContext,
+      workspaceIds: widget.workspaceIdsForGroup,
+    );
+    final chatState = ref.watch(chatWithWorkspacesProvider(params));
+    
+    return Container(
+      color: MonokaiTheme.background,
+      child: Column(
+        children: [
+          _ChatHeader(
+            context: widget.chatContext,
+            isLoading: chatState.isLoadingHistory,
+            messageCount: chatState.messages.length,
+            onClose: () => ref.read(viewModeProvider.notifier).showExplorer(),
+          ),
+          
+          const Divider(height: 1, color: MonokaiTheme.divider),
+          
+          Expanded(
+            child: chatState.messages.isEmpty
+                ? _EmptyChat(context: widget.chatContext, isLoading: chatState.isLoadingHistory)
+                : _MessagesList(
+                    messages: chatState.messages,
+                    scrollController: _scrollController,
                   ),
-                MarkdownChatInput(
-                  onSend: _sendMessage,
-                  attachments: _attachedFiles.map((f) => f.name).toList(),
-                  onAttach: _pickFile,
-                ),
-              ],
-            ),
-            if (isDragging) _DropOverlay(),
-          ],
-        ),
+          ),
+          
+          const Divider(height: 1, color: MonokaiTheme.divider),
+          
+          _ChatInput(
+            controller: _messageController,
+            focusNode: _focusNode,
+            onSend: _sendMessage,
+            canSend: _canSend(),
+          ),
+        ],
       ),
-      child: const SizedBox(),
     );
   }
-
-  void _sendMessage(String text) {
-    if (text.trim().isEmpty && _attachedFiles.isEmpty) return;
-    setState(() {
-      _messages.add(_ChatMsg(
-        sender: 'You',
-        content: text,
-        timestamp: DateTime.now(),
-        attachments: List.from(_attachedFiles),
-        isMe: true,
-      ));
-      _attachedFiles.clear();
-    });
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+  
+  bool _canSend() {
+    // Can send if we have workspace context or workspaces in group
+    return widget.chatContext.workspaceId != null || 
+           widget.workspaceIdsForGroup.isNotEmpty;
+  }
+  
+  void _sendMessage() {
+    final text = _messageController.text.trim();
+    if (text.isEmpty) return;
+    
+    final params = ChatWithWorkspacesParams(
+      context: widget.chatContext,
+      workspaceIds: widget.workspaceIdsForGroup,
+    );
+    ref.read(chatWithWorkspacesProvider(params).notifier).sendMessage(text);
+    _messageController.clear();
+    _focusNode.requestFocus();
+    
+    Future.delayed(const Duration(milliseconds: 100), () {
       if (_scrollController.hasClients) {
         _scrollController.animateTo(
           _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 300),
+          duration: const Duration(milliseconds: 200),
           curve: Curves.easeOut,
         );
       }
     });
   }
-
-  void _pickFile() {
-    setState(() {
-      _attachedFiles.add(DroppedFile(
-        path: '/tmp/doc.pdf',
-        name: 'document.pdf',
-      ));
-    });
-  }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// MODELS
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _ChatMsg {
-  final String sender;
-  final String content;
-  final DateTime timestamp;
-  final List<DroppedFile> attachments;
-  final bool isMe;
-  
-  _ChatMsg({
-    required this.sender,
-    required this.content,
-    required this.timestamp,
-    this.attachments = const [],
-    this.isMe = false,
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// CHAT HEADER
-// ═══════════════════════════════════════════════════════════════════════════
+// ============================================================================
+// HEADER
+// ============================================================================
 
 class _ChatHeader extends StatelessWidget {
-  final ChatContextInfo? context;
+  final ChatContextInfo context;
+  final bool isLoading;
+  final int messageCount;
   final VoidCallback onClose;
   
-  const _ChatHeader({this.context, required this.onClose});
-
+  const _ChatHeader({
+    required this.context,
+    required this.isLoading,
+    required this.messageCount,
+    required this.onClose,
+  });
+  
   @override
   Widget build(BuildContext context) {
-    final ctx = this.context;
-    IconData icon;
-    Color iconColor;
-    String title;
-    String subtitle;
-    
-    if (ctx != null) {
-      title = ctx.title;
-      switch (ctx.type) {
-        case ChatContextType.group:
-          icon = Icons.folder;
-          iconColor = const Color(0xFF66D9EF);
-          subtitle = 'Group Chat';
-        case ChatContextType.workspace:
-          icon = Icons.workspaces_outline;
-          iconColor = const Color(0xFFA6E22E);
-          subtitle = 'Workspace Chat';
-        case ChatContextType.board:
-          icon = Icons.dashboard;
-          iconColor = const Color(0xFFF92672);
-          subtitle = 'Board Chat';
-        case ChatContextType.global:
-          icon = Icons.public;
-          iconColor = const Color(0xFFAE81FF);
-          subtitle = 'Global Chat';
-      }
-    } else {
-      icon = Icons.chat;
-      iconColor = const Color(0xFF808080);
-      title = 'Chat';
-      subtitle = 'Select a context';
-    }
-
     return Container(
-      height: 56,
+      height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: const BoxDecoration(
-        color: Color(0xFF252525),
-        border: Border(bottom: BorderSide(color: Color(0xFF3E3D32))),
-      ),
+      color: MonokaiTheme.surface,
       child: Row(
         children: [
-          Container(
-            width: 36,
-            height: 36,
-            decoration: BoxDecoration(
-              color: iconColor.withOpacity(0.15),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Icon(icon, size: 18, color: iconColor),
-          ),
-          const SizedBox(width: 12),
+          Icon(_iconForType(this.context.type), size: 18, color: MonokaiTheme.cyan),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFFF8F8F2),
-                  ),
+                  this.context.title,
+                  style: MonokaiTheme.titleSmall.copyWith(color: MonokaiTheme.textPrimary),
                   overflow: TextOverflow.ellipsis,
                 ),
-                Text(subtitle, style: TextStyle(fontSize: 11, color: iconColor)),
+                Text(
+                  '$messageCount messages',
+                  style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.textMuted),
+                ),
               ],
             ),
           ),
+          if (isLoading)
+            const Padding(
+              padding: EdgeInsets.only(right: 8),
+              child: SizedBox(
+                width: 16, height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: MonokaiTheme.cyan),
+              ),
+            ),
           IconButton(
-            icon: const Icon(Icons.people_outline, size: 18),
-            color: const Color(0xFF808080),
-            onPressed: () {},
-            tooltip: 'Members',
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 18),
-            color: const Color(0xFF808080),
+            icon: const Icon(Icons.close, size: 20),
+            color: MonokaiTheme.textMuted,
             onPressed: onClose,
-            tooltip: 'Close',
+          ),
+        ],
+      ),
+    );
+  }
+  
+  IconData _iconForType(ChatContextType type) {
+    switch (type) {
+      case ChatContextType.global: return Icons.public;
+      case ChatContextType.group: return Icons.folder;
+      case ChatContextType.workspace: return Icons.workspaces_outline;
+      case ChatContextType.board: return Icons.dashboard;
+      case ChatContextType.directMessage: return Icons.person;
+    }
+  }
+}
+
+// ============================================================================
+// MESSAGES LIST
+// ============================================================================
+
+class _MessagesList extends StatelessWidget {
+  final List<ChatMessage> messages;
+  final ScrollController scrollController;
+  
+  const _MessagesList({required this.messages, required this.scrollController});
+  
+  @override
+  Widget build(BuildContext context) {
+    return ListView.builder(
+      controller: scrollController,
+      padding: const EdgeInsets.all(16),
+      itemCount: messages.length,
+      itemBuilder: (ctx, i) => _MessageBubble(message: messages[i]),
+    );
+  }
+}
+
+class _MessageBubble extends StatelessWidget {
+  final ChatMessage message;
+  
+  const _MessageBubble({required this.message});
+  
+  @override
+  Widget build(BuildContext context) {
+    final isOwn = message.isOwn;
+    
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: isOwn ? MainAxisAlignment.end : MainAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (!isOwn) ...[
+            _Avatar(name: message.displayAuthor),
+            const SizedBox(width: 8),
+          ],
+          Flexible(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 500),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              decoration: BoxDecoration(
+                color: isOwn ? MonokaiTheme.cyan.withOpacity(0.2) : MonokaiTheme.surfaceLight,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(12),
+                  topRight: const Radius.circular(12),
+                  bottomLeft: Radius.circular(isOwn ? 12 : 4),
+                  bottomRight: Radius.circular(isOwn ? 4 : 12),
+                ),
+                border: message.mentionsMe ? Border.all(color: MonokaiTheme.yellow, width: 1) : null,
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (!isOwn)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        message.displayAuthor,
+                        style: MonokaiTheme.labelSmall.copyWith(
+                          color: MonokaiTheme.cyan,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  Text(message.message, style: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.textPrimary)),
+                  const SizedBox(height: 4),
+                  Text(
+                    message.displayTime,
+                    style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.textMuted, fontSize: 10),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (isOwn) ...[
+            const SizedBox(width: 8),
+            _Avatar(name: 'Me', isOwn: true),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _Avatar extends StatelessWidget {
+  final String name;
+  final bool isOwn;
+  
+  const _Avatar({required this.name, this.isOwn = false});
+  
+  @override
+  Widget build(BuildContext context) {
+    final initial = name.isNotEmpty ? name[0].toUpperCase() : '?';
+    
+    return Container(
+      width: 32, height: 32,
+      decoration: BoxDecoration(
+        color: isOwn ? MonokaiTheme.cyan : MonokaiTheme.purple,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Center(
+        child: Text(initial, style: MonokaiTheme.labelSmall.copyWith(color: Colors.white, fontWeight: FontWeight.bold)),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// INPUT
+// ============================================================================
+
+class _ChatInput extends StatelessWidget {
+  final TextEditingController controller;
+  final FocusNode focusNode;
+  final VoidCallback onSend;
+  final bool canSend;
+  
+  const _ChatInput({
+    required this.controller,
+    required this.focusNode,
+    required this.onSend,
+    required this.canSend,
+  });
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      color: MonokaiTheme.surface,
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              focusNode: focusNode,
+              enabled: canSend,
+              style: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.textPrimary),
+              decoration: InputDecoration(
+                hintText: canSend ? 'Type a message...' : 'Select a workspace to chat',
+                hintStyle: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.textMuted),
+                filled: true,
+                fillColor: MonokaiTheme.background,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide.none),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: MonokaiTheme.border)),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: MonokaiTheme.cyan)),
+                disabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(24), borderSide: BorderSide(color: MonokaiTheme.border.withOpacity(0.5))),
+              ),
+              maxLines: null,
+              textInputAction: TextInputAction.send,
+              onSubmitted: canSend ? (_) => onSend() : null,
+            ),
+          ),
+          const SizedBox(width: 8),
+          IconButton(
+            icon: const Icon(Icons.send),
+            color: canSend ? MonokaiTheme.cyan : MonokaiTheme.textMuted,
+            onPressed: canSend ? onSend : null,
           ),
         ],
       ),
@@ -231,123 +436,38 @@ class _ChatHeader extends StatelessWidget {
   }
 }
 
-// ═══════════════════════════════════════════════════════════════════════════
-// EMPTY CHAT
-// ═══════════════════════════════════════════════════════════════════════════
+// ============================================================================
+// EMPTY STATE
+// ============================================================================
 
 class _EmptyChat extends StatelessWidget {
-  final ChatContextInfo? context;
-  const _EmptyChat({this.context});
-
+  final ChatContextInfo context;
+  final bool isLoading;
+  
+  const _EmptyChat({required this.context, this.isLoading = false});
+  
   @override
   Widget build(BuildContext context) {
     return Center(
       child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
+        mainAxisSize: MainAxisSize.min,
         children: [
           Icon(
-            this.context != null ? Icons.chat_bubble_outline : Icons.forum_outlined,
+            isLoading ? Icons.hourglass_empty : Icons.chat_bubble_outline,
             size: 48,
-            color: const Color(0xFF606060),
+            color: MonokaiTheme.textMuted,
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 16),
           Text(
-            this.context != null ? 'Start the conversation' : 'Select a chat',
-            style: const TextStyle(fontSize: 16, color: Color(0xFF808080)),
+            isLoading ? 'Loading messages...' : 'No messages yet',
+            style: MonokaiTheme.titleMedium.copyWith(color: MonokaiTheme.textSecondary),
           ),
           const SizedBox(height: 8),
-          const Text(
-            'Type a message or drag files to attach',
-            style: TextStyle(fontSize: 12, color: Color(0xFF606060)),
+          Text(
+            isLoading ? 'Please wait...' : 'Be the first to send a message',
+            style: MonokaiTheme.bodySmall.copyWith(color: MonokaiTheme.textMuted),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// ATTACHED FILES BAR
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _AttachedFilesBar extends StatelessWidget {
-  final List<DroppedFile> files;
-  final ValueChanged<DroppedFile> onRemove;
-  
-  const _AttachedFilesBar({required this.files, required this.onRemove});
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      decoration: const BoxDecoration(
-        color: Color(0xFF252525),
-        border: Border(top: BorderSide(color: Color(0xFF3E3D32))),
-      ),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(
-          children: [
-            const Icon(Icons.attach_file, size: 14, color: Color(0xFF808080)),
-            const SizedBox(width: 8),
-            ...files.map((f) => Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF3E3D32),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(f.icon, size: 14, color: f.iconColor),
-                    const SizedBox(width: 6),
-                    Text(f.name, style: const TextStyle(fontSize: 11, color: Color(0xFFF8F8F2))),
-                    const SizedBox(width: 6),
-                    GestureDetector(
-                      onTap: () => onRemove(f),
-                      child: const Icon(Icons.close, size: 14, color: Color(0xFF808080)),
-                    ),
-                  ],
-                ),
-              ),
-            )),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// DROP OVERLAY
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _DropOverlay extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Positioned.fill(
-      child: Container(
-        color: const Color(0xFF66D9EF).withOpacity(0.1),
-        child: Center(
-          child: Container(
-            padding: const EdgeInsets.all(32),
-            decoration: BoxDecoration(
-              color: const Color(0xFF252525),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF66D9EF), width: 2),
-            ),
-            child: const Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(Icons.cloud_upload, size: 48, color: Color(0xFF66D9EF)),
-                SizedBox(height: 16),
-                Text('Drop files to attach', style: TextStyle(color: Color(0xFFF8F8F2), fontSize: 16)),
-              ],
-            ),
-          ),
-        ),
       ),
     );
   }

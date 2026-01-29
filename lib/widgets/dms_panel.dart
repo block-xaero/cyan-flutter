@@ -474,7 +474,7 @@ class _DMMessageBubble extends StatelessWidget {
               children: [
                 // Render content blocks
                 ...message.content.map((content) {
-                  if (content is TextContent) {
+                  if (content.type == MessagePartType.text) {
                     return Text(
                       content.text,
                       style: const TextStyle(
@@ -482,7 +482,7 @@ class _DMMessageBubble extends StatelessWidget {
                         color: Color(0xFFF8F8F2),
                       ),
                     );
-                  } else if (content is CodeContent) {
+                  } else if (content.type == MessagePartType.code || content.type == MessagePartType.codeBlock) {
                     return Container(
                       margin: const EdgeInsets.symmetric(vertical: 4),
                       padding: const EdgeInsets.all(8),
@@ -491,7 +491,7 @@ class _DMMessageBubble extends StatelessWidget {
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        content.code,
+                        content.text,
                         style: const TextStyle(
                           fontSize: 12,
                           fontFamily: 'monospace',

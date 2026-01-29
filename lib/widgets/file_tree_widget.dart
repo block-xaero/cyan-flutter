@@ -414,7 +414,7 @@ class _WorkspaceItemState extends ConsumerState<_WorkspaceItem> {
   Widget _buildEdit() => TextField(controller: _editCtrl, focusNode: _focusNode, style: const TextStyle(fontSize: 12, color: Color(0xFFF8F8F2)), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 4), border: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFFA6E22E))), filled: true, fillColor: Color(0xFF1E1E1E)), onSubmitted: (v) { if (v.trim().isNotEmpty) ref.read(fileTreeProvider.notifier).renameWorkspaceById(widget.workspace.id, v.trim()); else ref.read(fileTreeProvider.notifier).cancelEditing(); });
 
   void _startEdit() { _editCtrl.text = widget.workspace.name; ref.read(fileTreeProvider.notifier).startEditing(widget.workspace.id, widget.workspace.name); }
-  void _onTap() { ref.read(fileTreeProvider.notifier).toggleWorkspaceExpanded(widget.workspace.id); ref.read(selectionProvider.notifier).selectWorkspace(groupId: widget.groupId, workspaceId: widget.workspace.id, workspaceName: widget.workspace.name); }
+  void _onTap() { ref.read(fileTreeProvider.notifier).toggleWorkspaceExpanded(widget.workspace.id); ref.read(selectionProvider.notifier).selectWorkspace(widget.workspace.id, widget.workspace.name, widget.groupId, ''); }
 
   void _showMenu(BuildContext ctx, Offset pos) {
     final overlay = Overlay.of(ctx).context.findRenderObject() as RenderBox;
@@ -510,7 +510,7 @@ class _BoardItemState extends ConsumerState<_BoardItem> {
   Widget _buildEdit() => TextField(controller: _editCtrl, focusNode: _focusNode, style: const TextStyle(fontSize: 11, color: Color(0xFFF8F8F2)), decoration: const InputDecoration(isDense: true, contentPadding: EdgeInsets.symmetric(horizontal: 4, vertical: 4), border: OutlineInputBorder(borderSide: BorderSide(color: Color(0xFF66D9EF))), filled: true, fillColor: Color(0xFF1E1E1E)), onSubmitted: (v) { if (v.trim().isNotEmpty) ref.read(fileTreeProvider.notifier).renameBoardById(widget.board.id, v.trim()); else ref.read(fileTreeProvider.notifier).cancelEditing(); });
 
   void _startEdit() { _editCtrl.text = widget.board.name; ref.read(fileTreeProvider.notifier).startEditing(widget.board.id, widget.board.name); }
-  void _onTap() { ref.read(selectionProvider.notifier).selectBoard(groupId: widget.groupId, workspaceId: widget.workspaceId, workspaceName: '', boardId: widget.board.id, boardName: widget.board.name); }
+  void _onTap() { ref.read(selectionProvider.notifier).selectBoardNamed(groupId: widget.groupId, workspaceId: widget.workspaceId, workspaceName: '', boardId: widget.board.id, boardName: widget.board.name); }
 
   void _showMenu(BuildContext ctx, Offset pos) {
     final overlay = Overlay.of(ctx).context.findRenderObject() as RenderBox;

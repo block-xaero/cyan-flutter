@@ -140,8 +140,8 @@ class ProfileScreen extends ConsumerWidget {
                     _StatRow(
                       icon: Icons.check_circle,
                       label: 'Backend Status',
-                      value: backend.isReady ? 'Ready' : 'Not Ready',
-                      valueColor: backend.isReady
+                      value: backend.isConnected ? 'Ready' : 'Not Ready',
+                      valueColor: backend.isConnected
                           ? const Color(0xFFA6E22E)
                           : const Color(0xFFF92672),
                     ),

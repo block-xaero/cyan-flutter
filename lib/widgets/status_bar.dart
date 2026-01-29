@@ -1,246 +1,292 @@
 // widgets/status_bar.dart
-// Status bar matching Swift app - CyanLens, context, sync status, node ID
+// Status bar - 24px, shows sync status and node info
+// IMPORTANT: No provider modifications during build/initState
 
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../theme/monokai_theme.dart';
+import '../services/cyan_service.dart';
 import '../providers/selection_provider.dart';
 
-// Status bar state
-final syncStatusProvider = StateProvider<SyncStatus>((ref) => SyncStatus.synced);
-final nodeIdProvider = StateProvider<String>((ref) => 'EMQg8nmp'); // TODO: from FFI
-final viewCountProvider = StateProvider<int>((ref) => 20);
-final peerCountProvider = StateProvider<int>((ref) => 0);
-
-enum SyncStatus { synced, syncing, offline, error }
+// ============================================================================
+// STATUS BAR WIDGET - Stateless to avoid lifecycle issues
+// ============================================================================
 
 class StatusBar extends ConsumerWidget {
   const StatusBar({super.key});
-
+  
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selection = ref.watch(selectionProvider);
-    final syncStatus = ref.watch(syncStatusProvider);
-    final nodeId = ref.watch(nodeIdProvider);
-    final viewCount = ref.watch(viewCountProvider);
-    final peerCount = ref.watch(peerCountProvider);
-
+    
     return Container(
       height: 24,
-      color: const Color(0xFF252525),
-      padding: const EdgeInsets.symmetric(horizontal: 8),
+      color: MonokaiTheme.surface,
       child: Row(
         children: [
-          // CyanLens expandable
-          _CyanLensButton(),
+          const SizedBox(width: 8),
+          
+          // CyanLens badge
+          _CyanLensBadge(),
           
           const SizedBox(width: 12),
           
-          // Current context (group/workspace/board)
-          if (selection.selectedGroupName != null) ...[
-            Icon(
-              Icons.folder,
-              size: 12,
-              color: _getGroupColor(selection.selectedGroupId),
-            ),
-            const SizedBox(width: 4),
-            Text(
-              selection.selectedBoardName ?? 
-              selection.selectedWorkspaceName ?? 
-              selection.selectedGroupName ?? '',
-              style: const TextStyle(
-                fontSize: 11,
-                color: Color(0xFFF8F8F2),
-              ),
-            ),
-          ] else
-            const Text(
-              'No selection',
-              style: TextStyle(fontSize: 11, color: Color(0xFF808080)),
-            ),
-          
-          const Spacer(),
-          
-          // View count
-          Row(
-            children: [
-              const Icon(Icons.visibility_outlined, size: 12, color: Color(0xFF808080)),
-              const SizedBox(width: 4),
-              Text('$viewCount', style: const TextStyle(fontSize: 11, color: Color(0xFF808080))),
-            ],
+          // Selection breadcrumb
+          Expanded(
+            child: _SelectionBreadcrumb(selection: selection),
           ),
           
-          const SizedBox(width: 12),
-          const _StatusDivider(),
-          const SizedBox(width: 12),
+          // Sync status (static for now - avoids provider issues)
+          const _SyncStatusBadge(),
           
-          // Peer count
-          Row(
-            children: [
-              Container(
-                width: 6,
-                height: 6,
-                decoration: BoxDecoration(
-                  color: peerCount > 0 ? const Color(0xFFA6E22E) : const Color(0xFF808080),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.people_outline, size: 12, color: Color(0xFF808080)),
-              const SizedBox(width: 4),
-              Text('$peerCount', style: const TextStyle(fontSize: 11, color: Color(0xFF808080))),
-            ],
-          ),
+          const SizedBox(width: 16),
           
-          const SizedBox(width: 12),
-          const _StatusDivider(),
-          const SizedBox(width: 12),
+          // Stats - uses CyanService directly, no provider
+          const _StatsDisplay(),
           
-          // Sync status
-          _SyncStatusIndicator(status: syncStatus),
-          
-          const SizedBox(width: 12),
-          const _StatusDivider(),
-          const SizedBox(width: 12),
-          
-          // Node ID (clickable to copy)
-          _NodeIdBadge(nodeId: nodeId),
-        ],
-      ),
-    );
-  }
-
-  Color _getGroupColor(String? groupId) {
-    // TODO: Get from actual group data
-    return const Color(0xFF66D9EF);
-  }
-}
-
-class _CyanLensButton extends StatefulWidget {
-  @override
-  State<_CyanLensButton> createState() => _CyanLensButtonState();
-}
-
-class _CyanLensButtonState extends State<_CyanLensButton> {
-  bool _isExpanded = false;
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () => setState(() => _isExpanded = !_isExpanded),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.auto_awesome, size: 12, color: Color(0xFFFD971F)),
-          const SizedBox(width: 4),
-          const Text(
-            'CyanLens',
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w500,
-              color: Color(0xFFF8F8F2),
-            ),
-          ),
-          const SizedBox(width: 2),
-          Icon(
-            _isExpanded ? Icons.expand_less : Icons.expand_more,
-            size: 14,
-            color: const Color(0xFF808080),
-          ),
+          const SizedBox(width: 8),
         ],
       ),
     );
   }
 }
 
-class _SyncStatusIndicator extends StatelessWidget {
-  final SyncStatus status;
-
-  const _SyncStatusIndicator({required this.status});
-
-  @override
-  Widget build(BuildContext context) {
-    final (icon, color, label) = switch (status) {
-      SyncStatus.synced => (Icons.check_circle, const Color(0xFFA6E22E), 'Synced'),
-      SyncStatus.syncing => (Icons.sync, const Color(0xFF66D9EF), 'Syncing'),
-      SyncStatus.offline => (Icons.cloud_off, const Color(0xFF808080), 'Offline'),
-      SyncStatus.error => (Icons.error_outline, const Color(0xFFF92672), 'Error'),
-    };
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(icon, size: 12, color: color),
-        const SizedBox(width: 4),
-        Text(label, style: TextStyle(fontSize: 11, color: color)),
-      ],
-    );
-  }
-}
-
-class _NodeIdBadge extends StatelessWidget {
-  final String nodeId;
-
-  const _NodeIdBadge({required this.nodeId});
-
+class _CyanLensBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Click to copy Node ID',
-      child: GestureDetector(
-        onTap: () {
-          Clipboard.setData(ClipboardData(text: nodeId));
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('Node ID copied: $nodeId'),
-              duration: const Duration(seconds: 2),
-              backgroundColor: const Color(0xFF3E3D32),
-            ),
-          );
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-          decoration: BoxDecoration(
-            color: const Color(0xFF3E3D32),
-            borderRadius: BorderRadius.circular(4),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 6,
-                height: 6,
-                decoration: const BoxDecoration(
-                  color: Color(0xFFA6E22E),
-                  shape: BoxShape.circle,
-                ),
-              ),
-              const SizedBox(width: 6),
-              Text(
-                nodeId,
-                style: const TextStyle(
-                  fontSize: 10,
-                  fontFamily: 'monospace',
-                  color: Color(0xFFF8F8F2),
-                ),
-              ),
+      message: 'CyanLens AI',
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              MonokaiTheme.cyan.withOpacity(0.3),
+              MonokaiTheme.purple.withOpacity(0.3),
             ],
           ),
+          borderRadius: BorderRadius.circular(4),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: const BoxDecoration(
+                color: MonokaiTheme.cyan,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 4),
+            Text(
+              'CyanLens',
+              style: MonokaiTheme.labelSmall.copyWith(
+                color: MonokaiTheme.cyan,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 }
 
-class _StatusDivider extends StatelessWidget {
-  const _StatusDivider();
-
+class _SelectionBreadcrumb extends StatelessWidget {
+  final SelectionState selection;
+  
+  const _SelectionBreadcrumb({required this.selection});
+  
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: 1,
-      height: 12,
-      color: const Color(0xFF3E3D32),
+    final breadcrumb = selection.breadcrumb;
+    
+    if (breadcrumb.isEmpty) {
+      return Text(
+        'No selection',
+        style: MonokaiTheme.labelSmall.copyWith(
+          color: MonokaiTheme.textMuted,
+        ),
+      );
+    }
+    
+    return Text(
+      breadcrumb,
+      style: MonokaiTheme.labelSmall.copyWith(
+        color: MonokaiTheme.textSecondary,
+      ),
+      overflow: TextOverflow.ellipsis,
+    );
+  }
+}
+
+class _SyncStatusBadge extends StatelessWidget {
+  const _SyncStatusBadge();
+  
+  @override
+  Widget build(BuildContext context) {
+    // Static "Synced" display - no async provider modifications
+    return Tooltip(
+      message: 'Synced',
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.cloud_done_outlined,
+            size: 14,
+            color: MonokaiTheme.green,
+          ),
+          const SizedBox(width: 4),
+          Text(
+            'Synced',
+            style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.green),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// Stats display that polls CyanService directly without providers
+class _StatsDisplay extends StatefulWidget {
+  const _StatsDisplay();
+  
+  @override
+  State<_StatsDisplay> createState() => _StatsDisplayState();
+}
+
+class _StatsDisplayState extends State<_StatsDisplay> {
+  Timer? _timer;
+  int _objectCount = 0;
+  int _peerCount = 0;
+  String _nodeId = '...';
+  
+  @override
+  void initState() {
+    super.initState();
+    // Use addPostFrameCallback to avoid setState during build
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _refresh();
+      _startTimer();
+    });
+  }
+  
+  void _startTimer() {
+    _timer = Timer.periodic(const Duration(seconds: 3), (_) {
+      if (mounted) _refresh();
+    });
+  }
+  
+  void _refresh() {
+    if (!mounted) return;
+    
+    final service = CyanService.instance;
+    if (service.isReady) {
+      setState(() {
+        _objectCount = service.objectCount;
+        _peerCount = service.peerCount;
+        final fullId = service.nodeId;
+        _nodeId = (fullId != null && fullId.length >= 8) 
+            ? fullId.substring(0, 8) 
+            : '...';
+      });
+    }
+  }
+  
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Objects
+        Tooltip(
+          message: 'Objects in database',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.storage_outlined,
+                size: 12,
+                color: MonokaiTheme.textMuted,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                '$_objectCount',
+                style: MonokaiTheme.codeSmall.copyWith(
+                  color: MonokaiTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        const SizedBox(width: 12),
+        
+        // Peers
+        Tooltip(
+          message: 'Connected peers',
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.people_outline,
+                size: 12,
+                color: MonokaiTheme.textMuted,
+              ),
+              const SizedBox(width: 3),
+              Text(
+                '$_peerCount',
+                style: MonokaiTheme.codeSmall.copyWith(
+                  color: MonokaiTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+        
+        const SizedBox(width: 16),
+        
+        // Node ID
+        Tooltip(
+          message: 'Node ID (click to copy)',
+          child: GestureDetector(
+            onTap: () {
+              final service = CyanService.instance;
+              if (service.nodeId != null) {
+                Clipboard.setData(ClipboardData(text: service.nodeId!));
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Node ID copied: $_nodeId...'),
+                    duration: const Duration(seconds: 2),
+                  ),
+                );
+              }
+            },
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+              decoration: BoxDecoration(
+                color: MonokaiTheme.surfaceLight,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _nodeId,
+                style: MonokaiTheme.codeSmall.copyWith(
+                  color: MonokaiTheme.cyan,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

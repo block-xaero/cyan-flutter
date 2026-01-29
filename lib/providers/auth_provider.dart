@@ -6,6 +6,7 @@ import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../models/chat_models.dart';
+import '../services/cyan_service.dart';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // AUTH STATE
@@ -113,9 +114,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
   }
 
   Future<bool> _initializeBackend(XaeroIdentity identity) async {
-    // TODO: Call FFI to initialize backend
-    // return cyan_init_with_identity(dbPath, identity.secretKeyHex, relayUrl, discoveryKey);
-    return true; // Simulated
+    // Initialize Rust backend with identity
+    final service = CyanService.instance;
+    
+    return await service.initializeWithIdentity(
+      secretKeyHex: identity.secretKeyHex,
+      relayUrl: 'https://relay.iroh.network',
+      discoveryKey: 'cyan-prod',
+    );
   }
 
   // ═══════════════════════════════════════════════════════════════════════════
@@ -205,24 +211,26 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
-  /// Sign in as test user (no persistence)
+  /// Sign in as test user (no persistence, ephemeral identity)
   Future<bool> signInAsTest() async {
     state = state.copyWith(isLoading: true, clearError: true);
 
     try {
-      final now = DateTime.now();
-      final identity = XaeroIdentity(
-        secretKeyHex: _generateRandomHex(64),
-        publicKeyHex: _generateRandomHex(64),
-        did: 'did:peer:z${_generateRandomHex(32)}',
-        createdAt: now,
-        displayName: 'Test User',
-      );
-
-      // Don't persist test identity
-      final success = await _initializeBackend(identity);
-
+      // Initialize with ephemeral identity (new NodeID each launch)
+      final service = CyanService.instance;
+      final success = await service.initializeEphemeral();
+      
       if (success) {
+        // Create a display identity from the generated node ID
+        final now = DateTime.now();
+        final identity = XaeroIdentity(
+          secretKeyHex: 'ephemeral', // Not a real key
+          publicKeyHex: service.nodeId ?? 'unknown',
+          did: 'did:test:${service.nodeId?.substring(0, 16) ?? "unknown"}',
+          createdAt: now,
+          displayName: 'Test User',
+        );
+        
         state = state.copyWith(
           isAuthenticated: true,
           isLoading: false,
@@ -231,7 +239,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
         return true;
       }
       
-      state = state.copyWith(isLoading: false, error: 'Failed to initialize');
+      state = state.copyWith(isLoading: false, error: 'Failed to initialize backend');
+      return false;
       return false;
     } catch (e) {
       state = state.copyWith(isLoading: false, error: 'Test sign-in failed: $e');

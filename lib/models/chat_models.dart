@@ -257,6 +257,15 @@ class ChatContextInfo {
     this.groupId,
     required this.displayName,
   });
+  
+  @override
+  bool operator ==(Object other) {
+    if (identical(this, other)) return true;
+    return other is ChatContextInfo && other.id == id;
+  }
+  
+  @override
+  int get hashCode => id.hashCode;
 
   String get title {
     switch (type) {

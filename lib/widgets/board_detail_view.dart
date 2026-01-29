@@ -1,15 +1,19 @@
 // widgets/board_detail_view.dart
+// Board detail view with face selector (Canvas, Notebook, Notes)
+// Uses VSCodeNotesEditor for syntax highlighting
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/selection_provider.dart';
 import '../providers/navigation_provider.dart';
-import 'file_tree_widget.dart';
+import '../providers/chat_provider.dart';
+import '../theme/monokai_theme.dart';
+import 'vscode_markdown.dart';
 
 enum BoardFace {
   canvas('canvas', Icons.brush, 'Canvas'),
-  notebook('notebook', Icons.book, 'Notebook'),
-  notes('notes', Icons.article, 'Notes');
+  notebook('notebook', Icons.article, 'Notebook'),
+  notes('notes', Icons.description, 'Notes');
 
   final String value;
   final IconData icon;
@@ -28,15 +32,20 @@ class BoardDetailView extends ConsumerStatefulWidget {
 }
 
 class _BoardDetailViewState extends ConsumerState<BoardDetailView> {
-  BoardFace _activeFace = BoardFace.canvas;
+  BoardFace _activeFace = BoardFace.notes;
+  bool _showChat = false;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
         _buildHeader(),
-        const Divider(height: 1, color: Color(0xFF3E3D32)),
-        Expanded(child: _buildContent()),
+        const Divider(height: 1, color: MonokaiTheme.divider),
+        Expanded(
+          child: _showChat
+              ? _buildWithChat()
+              : _buildContent(),
+        ),
       ],
     );
   }
@@ -45,45 +54,52 @@ class _BoardDetailViewState extends ConsumerState<BoardDetailView> {
     return Container(
       height: 48,
       padding: const EdgeInsets.symmetric(horizontal: 8),
-      color: const Color(0xFF252525),
+      color: MonokaiTheme.surface,
       child: Row(
         children: [
+          // Back button
           IconButton(
             icon: const Icon(Icons.arrow_back, size: 18),
-            color: const Color(0xFF66D9EF),
+            color: MonokaiTheme.cyan,
             onPressed: () => ref.read(selectionProvider.notifier).clearBoard(),
             tooltip: 'Back',
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
           const SizedBox(width: 4),
+          
+          // Board name
           Flexible(
             child: Text(
               widget.boardName,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: Color(0xFFF8F8F2)),
+              style: MonokaiTheme.titleSmall.copyWith(color: MonokaiTheme.textPrimary),
               overflow: TextOverflow.ellipsis,
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 12),
+          
+          // Face selector
           _buildFaceSelector(),
+          
           const Spacer(),
-          IconButton(
-            icon: const Icon(Icons.chat_bubble_outline, size: 16),
-            color: const Color(0xFF808080),
-            onPressed: _openChat,
-            tooltip: 'Chat',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+          
+          // Chat toggle
+          _ChatToggle(
+            isActive: _showChat,
+            onToggle: () => setState(() => _showChat = !_showChat),
           ),
+          
+          // More menu
           PopupMenuButton<String>(
-            icon: const Icon(Icons.more_horiz, color: Color(0xFF808080), size: 16),
+            icon: const Icon(Icons.more_horiz, color: MonokaiTheme.textMuted, size: 18),
             padding: EdgeInsets.zero,
-            color: const Color(0xFF252525),
+            color: MonokaiTheme.surface,
+            onSelected: _handleMenuAction,
             itemBuilder: (ctx) => [
-              _menuItem('rename', Icons.edit, 'Rename'),
-              _menuItem('duplicate', Icons.copy, 'Duplicate'),
+              const PopupMenuItem(value: 'rename', child: Text('Rename', style: TextStyle(color: MonokaiTheme.textPrimary))),
+              const PopupMenuItem(value: 'duplicate', child: Text('Duplicate', style: TextStyle(color: MonokaiTheme.textPrimary))),
               const PopupMenuDivider(),
-              _menuItem('delete', Icons.delete, 'Delete', destructive: true),
+              const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: MonokaiTheme.red))),
             ],
           ),
         ],
@@ -91,34 +107,19 @@ class _BoardDetailViewState extends ConsumerState<BoardDetailView> {
     );
   }
 
-  PopupMenuItem<String> _menuItem(String v, IconData i, String l, {bool destructive = false}) {
-    final c = destructive ? const Color(0xFFF92672) : const Color(0xFFF8F8F2);
-    return PopupMenuItem(value: v, child: Row(children: [Icon(i, size: 14, color: c), const SizedBox(width: 8), Text(l, style: TextStyle(color: c, fontSize: 12))]));
-  }
-
   Widget _buildFaceSelector() {
     return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(6)),
+      decoration: BoxDecoration(
+        color: MonokaiTheme.background,
+        borderRadius: BorderRadius.circular(6),
+      ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
-        children: BoardFace.values.map((f) {
-          final active = f == _activeFace;
-          return Tooltip(
-            message: f.label,
-            child: GestureDetector(
-              onTap: () => setState(() => _activeFace = f),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: active ? const Color(0xFF3D3D3D) : Colors.transparent,
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Icon(f.icon, size: 14, color: active ? Colors.white : const Color(0xFF808080)),
-              ),
-            ),
-          );
-        }).toList(),
+        children: BoardFace.values.map((face) => _FaceButton(
+          face: face,
+          isActive: _activeFace == face,
+          onTap: () => setState(() => _activeFace = face),
+        )).toList(),
       ),
     );
   }
@@ -134,17 +135,127 @@ class _BoardDetailViewState extends ConsumerState<BoardDetailView> {
     }
   }
 
-  void _openChat() {
-    final sel = ref.read(selectionProvider);
-    ref.read(chatContextProvider.notifier).state = ChatContextInfo.board(
-      id: widget.boardId,
-      workspaceId: sel.selectedWorkspaceId ?? '',
-      groupId: sel.selectedGroupId ?? '',
-      name: widget.boardName,
+  Widget _buildWithChat() {
+    return Row(
+      children: [
+        Expanded(child: _buildContent()),
+        Container(width: 1, color: MonokaiTheme.divider),
+        SizedBox(
+          width: 320,
+          child: _BoardChatPanel(
+            boardId: widget.boardId,
+            boardName: widget.boardName,
+            onClose: () => setState(() => _showChat = false),
+          ),
+        ),
+      ],
     );
-    ref.read(viewModeProvider.notifier).showChat();
+  }
+
+  void _handleMenuAction(String action) {
+    switch (action) {
+      case 'delete':
+        // TODO: Implement delete
+        break;
+      case 'rename':
+        // TODO: Implement rename
+        break;
+      case 'duplicate':
+        // TODO: Implement duplicate
+        break;
+    }
   }
 }
+
+// ============================================================================
+// FACE BUTTON
+// ============================================================================
+
+class _FaceButton extends StatelessWidget {
+  final BoardFace face;
+  final bool isActive;
+  final VoidCallback onTap;
+
+  const _FaceButton({required this.face, required this.isActive, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: face.label,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive ? MonokaiTheme.cyan.withOpacity(0.2) : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Icon(
+            face.icon,
+            size: 16,
+            color: isActive ? MonokaiTheme.cyan : MonokaiTheme.textMuted,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// CHAT TOGGLE
+// ============================================================================
+
+class _ChatToggle extends StatelessWidget {
+  final bool isActive;
+  final VoidCallback onToggle;
+
+  const _ChatToggle({required this.isActive, required this.onToggle});
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: isActive ? 'Hide Chat' : 'Show Chat',
+      child: InkWell(
+        onTap: onToggle,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+          decoration: BoxDecoration(
+            color: isActive ? MonokaiTheme.cyan.withOpacity(0.2) : Colors.transparent,
+            borderRadius: BorderRadius.circular(4),
+            border: Border.all(
+              color: isActive ? MonokaiTheme.cyan : MonokaiTheme.border,
+              width: 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.chat_bubble_outline,
+                size: 14,
+                color: isActive ? MonokaiTheme.cyan : MonokaiTheme.textMuted,
+              ),
+              const SizedBox(width: 4),
+              Text(
+                'Chat',
+                style: TextStyle(
+                  fontSize: 12,
+                  color: isActive ? MonokaiTheme.cyan : MonokaiTheme.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// CANVAS VIEW (Whiteboard placeholder)
+// ============================================================================
 
 class _CanvasView extends StatelessWidget {
   final String boardId;
@@ -153,17 +264,34 @@ class _CanvasView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: const Color(0xFF1E1E1E),
-      child: const Center(
-        child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.brush, size: 48, color: Color(0xFF606060)),
-          SizedBox(height: 12),
-          Text('Canvas', style: TextStyle(fontSize: 16, color: Color(0xFF808080))),
-        ]),
+      color: MonokaiTheme.background,
+      child: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Container(
+              width: 80,
+              height: 80,
+              decoration: BoxDecoration(
+                color: MonokaiTheme.surfaceLight,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.brush, size: 40, color: MonokaiTheme.purple),
+            ),
+            const SizedBox(height: 16),
+            Text('Canvas', style: MonokaiTheme.titleMedium.copyWith(color: MonokaiTheme.textSecondary)),
+            const SizedBox(height: 8),
+            Text('Whiteboard coming soon', style: MonokaiTheme.bodySmall.copyWith(color: MonokaiTheme.textMuted)),
+          ],
+        ),
       ),
     );
   }
 }
+
+// ============================================================================
+// NOTEBOOK VIEW (Cells)
+// ============================================================================
 
 class _NotebookView extends StatefulWidget {
   final String boardId;
@@ -174,7 +302,9 @@ class _NotebookView extends StatefulWidget {
 }
 
 class _NotebookViewState extends State<_NotebookView> {
-  final _cells = <_Cell>[_Cell(type: 'markdown', content: '# Welcome\n\nStart writing...')];
+  final _cells = <_NotebookCell>[
+    _NotebookCell(type: CellType.markdown, content: '# Welcome\n\nStart writing markdown here...'),
+  ];
   int? _selectedIdx;
 
   @override
@@ -197,91 +327,231 @@ class _NotebookViewState extends State<_NotebookView> {
     return Container(
       height: 40,
       padding: const EdgeInsets.symmetric(horizontal: 12),
-      decoration: const BoxDecoration(color: Color(0xFF252525), border: Border(bottom: BorderSide(color: Color(0xFF3E3D32)))),
+      decoration: const BoxDecoration(
+        color: MonokaiTheme.surface,
+        border: Border(bottom: BorderSide(color: MonokaiTheme.divider)),
+      ),
       child: Row(
         children: [
-          const Text('Add:', style: TextStyle(fontSize: 11, color: Color(0xFF808080))),
+          Text('Add:', style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.textMuted)),
           const SizedBox(width: 8),
-          _addBtn('Markdown', Icons.text_fields, const Color(0xFF66D9EF), () => _addCell('markdown')),
-          _addBtn('Code', Icons.code, const Color(0xFFAE81FF), () => _addCell('code')),
+          _AddCellButton(
+            label: 'Markdown',
+            icon: Icons.text_fields,
+            color: MonokaiTheme.cyan,
+            onTap: () => _addCell(CellType.markdown),
+          ),
+          _AddCellButton(
+            label: 'Code',
+            icon: Icons.code,
+            color: MonokaiTheme.purple,
+            onTap: () => _addCell(CellType.code),
+          ),
+          _AddCellButton(
+            label: 'SQL',
+            icon: Icons.storage,
+            color: MonokaiTheme.yellow,
+            onTap: () => _addCell(CellType.sql),
+          ),
         ],
       ),
     );
   }
 
-  Widget _addBtn(String label, IconData icon, Color color, VoidCallback onTap) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 4),
-      child: GestureDetector(
-        onTap: onTap,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(4)),
-          child: Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(icon, size: 12, color: color),
-            const SizedBox(width: 4),
-            Text(label, style: TextStyle(fontSize: 10, color: color)),
-          ]),
-        ),
-      ),
-    );
-  }
+  Widget _buildCell(int idx) {
+    final cell = _cells[idx];
+    final isSelected = _selectedIdx == idx;
 
-  void _addCell(String type) {
-    setState(() {
-      _cells.add(_Cell(type: type, content: type == 'code' ? '# code' : ''));
-      _selectedIdx = _cells.length - 1;
-    });
-  }
-
-  Widget _buildCell(int i) {
-    final cell = _cells[i];
-    final selected = _selectedIdx == i;
     return GestureDetector(
-      onTap: () => setState(() => _selectedIdx = i),
+      onTap: () => setState(() => _selectedIdx = idx),
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         decoration: BoxDecoration(
-          color: const Color(0xFF252525),
+          border: Border.all(
+            color: isSelected ? MonokaiTheme.cyan : MonokaiTheme.border,
+            width: isSelected ? 2 : 1,
+          ),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: selected ? const Color(0xFF66D9EF) : const Color(0xFF3E3D32), width: selected ? 2 : 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Cell header
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              decoration: const BoxDecoration(color: Color(0xFF1E1E1E), borderRadius: BorderRadius.vertical(top: Radius.circular(7))),
-              child: Row(children: [
-                Icon(cell.type == 'code' ? Icons.code : Icons.text_fields, size: 12, color: cell.type == 'code' ? const Color(0xFFAE81FF) : const Color(0xFF66D9EF)),
-                const SizedBox(width: 6),
-                Text(cell.type == 'code' ? 'Code' : 'Markdown', style: TextStyle(fontSize: 11, color: cell.type == 'code' ? const Color(0xFFAE81FF) : const Color(0xFF66D9EF))),
-                const Spacer(),
-                if (selected) GestureDetector(onTap: () => setState(() => _cells.removeAt(i)), child: const Icon(Icons.delete_outline, size: 14, color: Color(0xFFF92672))),
-              ]),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(10),
-              child: TextField(
-                controller: TextEditingController(text: cell.content),
-                maxLines: null,
-                style: TextStyle(fontSize: 13, fontFamily: cell.type == 'code' ? 'monospace' : null, color: const Color(0xFFF8F8F2)),
-                decoration: const InputDecoration(border: InputBorder.none, isDense: true, contentPadding: EdgeInsets.zero),
-                onChanged: (v) => _cells[i] = _Cell(type: cell.type, content: v),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: MonokaiTheme.surface,
+                borderRadius: const BorderRadius.only(
+                  topLeft: Radius.circular(7),
+                  topRight: Radius.circular(7),
+                ),
               ),
+              child: Row(
+                children: [
+                  Icon(cell.type.icon, size: 14, color: cell.type.color),
+                  const SizedBox(width: 6),
+                  Text(
+                    cell.type.label,
+                    style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.textMuted),
+                  ),
+                  const Spacer(),
+                  if (isSelected) ...[
+                    IconButton(
+                      icon: const Icon(Icons.arrow_upward, size: 14),
+                      color: MonokaiTheme.textMuted,
+                      onPressed: idx > 0 ? () => _moveCell(idx, -1) : null,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.arrow_downward, size: 14),
+                      color: MonokaiTheme.textMuted,
+                      onPressed: idx < _cells.length - 1 ? () => _moveCell(idx, 1) : null,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    ),
+                    IconButton(
+                      icon: const Icon(Icons.delete_outline, size: 14),
+                      color: MonokaiTheme.red,
+                      onPressed: () => _deleteCell(idx),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            // Cell content
+            Container(
+              constraints: const BoxConstraints(minHeight: 100),
+              child: cell.type == CellType.markdown
+                  ? _MarkdownCell(
+                      content: cell.content,
+                      onChanged: (v) => _updateCell(idx, v),
+                    )
+                  : VSCodeBlock(
+                      code: cell.content.isEmpty ? '// Enter code here' : cell.content,
+                      language: cell.type == CellType.sql ? 'sql' : null,
+                      showLineNumbers: true,
+                      maxHeight: 300,
+                    ),
             ),
           ],
         ),
       ),
     );
   }
+
+  void _addCell(CellType type) {
+    setState(() {
+      _cells.add(_NotebookCell(type: type, content: ''));
+      _selectedIdx = _cells.length - 1;
+    });
+  }
+
+  void _updateCell(int idx, String content) {
+    setState(() {
+      _cells[idx] = _NotebookCell(type: _cells[idx].type, content: content);
+    });
+  }
+
+  void _moveCell(int idx, int delta) {
+    setState(() {
+      final cell = _cells.removeAt(idx);
+      _cells.insert(idx + delta, cell);
+      _selectedIdx = idx + delta;
+    });
+  }
+
+  void _deleteCell(int idx) {
+    setState(() {
+      _cells.removeAt(idx);
+      _selectedIdx = null;
+    });
+  }
 }
 
-class _Cell {
-  final String type;
-  final String content;
-  _Cell({required this.type, required this.content});
+class _AddCellButton extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _AddCellButton({required this.label, required this.icon, required this.color, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(4),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: MonokaiTheme.background,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 12, color: color),
+              const SizedBox(width: 4),
+              Text(label, style: TextStyle(fontSize: 11, color: color)),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }
+
+class _MarkdownCell extends StatelessWidget {
+  final String content;
+  final ValueChanged<String> onChanged;
+
+  const _MarkdownCell({required this.content, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: TextEditingController(text: content),
+      maxLines: null,
+      style: MonokaiTheme.bodyMedium.copyWith(
+        fontFamily: 'monospace',
+        color: MonokaiTheme.textPrimary,
+      ),
+      decoration: const InputDecoration(
+        contentPadding: EdgeInsets.all(12),
+        border: InputBorder.none,
+        hintText: 'Write markdown...',
+        hintStyle: TextStyle(color: MonokaiTheme.textMuted),
+      ),
+      onChanged: onChanged,
+    );
+  }
+}
+
+enum CellType {
+  markdown('Markdown', Icons.text_fields, MonokaiTheme.cyan),
+  code('Code', Icons.code, MonokaiTheme.purple),
+  sql('SQL', Icons.storage, MonokaiTheme.yellow);
+
+  final String label;
+  final IconData icon;
+  final Color color;
+  const CellType(this.label, this.icon, this.color);
+}
+
+class _NotebookCell {
+  final CellType type;
+  final String content;
+  _NotebookCell({required this.type, required this.content});
+}
+
+// ============================================================================
+// NOTES VIEW (VSCode-style editor)
+// ============================================================================
 
 class _NotesView extends StatefulWidget {
   final String boardId;
@@ -292,42 +562,97 @@ class _NotesView extends StatefulWidget {
 }
 
 class _NotesViewState extends State<_NotesView> {
-  final _controller = TextEditingController(text: '# Notes\n\n');
+  String _content = '''# Notes
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+Welcome to VSCode-style notes!
+
+## Code Examples
+
+\`\`\`sql
+SELECT * FROM users
+WHERE created_at > '2024-01-01'
+ORDER BY name;
+\`\`\`
+
+\`\`\`json
+{
+  "name": "Cyan",
+  "version": "1.0.0",
+  "features": ["P2P", "Offline-first"]
+}
+\`\`\`
+
+## TODO
+- [ ] Add more features
+- [x] Implement syntax highlighting
+''';
 
   @override
   Widget build(BuildContext context) {
-    final lines = _controller.text.split('\n');
+    return VSCodeNotesEditor(
+      initialContent: _content,
+      onChanged: (text) => setState(() => _content = text),
+    );
+  }
+}
+
+// ============================================================================
+// BOARD CHAT PANEL (Inline chat for board)
+// ============================================================================
+
+class _BoardChatPanel extends ConsumerWidget {
+  final String boardId;
+  final String boardName;
+  final VoidCallback onClose;
+
+  const _BoardChatPanel({
+    required this.boardId,
+    required this.boardName,
+    required this.onClose,
+  });
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     return Container(
-      color: const Color(0xFF1E1E1E),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      color: MonokaiTheme.background,
+      child: Column(
         children: [
+          // Header
           Container(
-            width: 40,
-            padding: const EdgeInsets.only(top: 12, right: 8),
-            color: const Color(0xFF252525),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: List.generate(lines.length.clamp(1, 999), (i) => SizedBox(
-                height: 20,
-                child: Text('${i + 1}', style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFF808080))),
-              )),
+            height: 40,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            color: MonokaiTheme.surface,
+            child: Row(
+              children: [
+                const Icon(Icons.chat_bubble_outline, size: 14, color: MonokaiTheme.cyan),
+                const SizedBox(width: 8),
+                Text('Board Chat', style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.textPrimary)),
+                const Spacer(),
+                IconButton(
+                  icon: const Icon(Icons.close, size: 14),
+                  color: MonokaiTheme.textMuted,
+                  onPressed: onClose,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                ),
+              ],
             ),
           ),
+          const Divider(height: 1, color: MonokaiTheme.divider),
+          
+          // Chat placeholder
           Expanded(
-            child: TextField(
-              controller: _controller,
-              maxLines: null,
-              expands: true,
-              style: const TextStyle(fontSize: 13, fontFamily: 'monospace', color: Color(0xFFF8F8F2), height: 1.54),
-              decoration: const InputDecoration(border: InputBorder.none, contentPadding: EdgeInsets.all(12)),
-              onChanged: (_) => setState(() {}),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.chat_bubble_outline, size: 32, color: MonokaiTheme.textMuted),
+                  const SizedBox(height: 8),
+                  Text('Board chat', style: MonokaiTheme.bodySmall.copyWith(color: MonokaiTheme.textMuted)),
+                  const SizedBox(height: 4),
+                  Text('Coming soon', style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.textMuted)),
+                ],
+              ),
             ),
           ),
         ],

@@ -1,7 +1,6 @@
 // ffi/component_bridge.dart
 // Generic bridge for component-based command/event communication
-// 
-// This mirrors the Swift ComponentActor<Command, Event> pattern exactly:
+// Mirrors Swift's ComponentActor pattern exactly:
 // 1. Commands are serialized to JSON and sent via cyan_send_command()
 // 2. Events are polled via cyan_poll_events() which dequeues from Rust VecDeque
 // 3. Each component has its own event buffer in Rust
@@ -17,17 +16,28 @@ import 'ffi_helpers.dart';
 /// Base interface for commands sent TO Rust
 /// Mirrors Swift's ComponentCommand protocol
 abstract class ComponentCommand {
-  /// Convert command to JSON string for FFI
   String toJson();
-  
-  /// Optional description for status bar (e.g., "Loading chat...")
   String? get syncDescription => null;
 }
 
 /// Base interface for events received FROM Rust
-/// Mirrors Swift's ComponentEvent protocol
 abstract class ComponentEvent {
   static ComponentEvent? fromJson(String json) => null;
+}
+
+// ============================================================================
+// SYNC ACTIVITY NOTIFICATION
+// ============================================================================
+
+typedef SyncActivityCallback = void Function(bool isActive, String description);
+SyncActivityCallback? _syncActivityCallback;
+
+void setSyncActivityCallback(SyncActivityCallback callback) {
+  _syncActivityCallback = callback;
+}
+
+void _postSyncActivity(bool isActive, String description) {
+  _syncActivityCallback?.call(isActive, description);
 }
 
 // ============================================================================
@@ -35,26 +45,15 @@ abstract class ComponentEvent {
 // ============================================================================
 
 /// Generic bridge for component-based FFI communication.
-/// 
-/// Mirrors Swift's ComponentActor:
-/// - Polls Rust event queue periodically (100ms default)
-/// - Sends commands via JSON
-/// - Dispatches events to listeners via Stream
-/// 
-/// Usage:
-/// ```dart
-/// final bridge = FileTreeBridge();
-/// bridge.start();
-/// bridge.events.listen((event) => handleEvent(event));
-/// bridge.send(FileTreeCommand.snapshot());
-/// ```
+/// Mirrors Swift's ComponentActor pattern with async streams.
 class ComponentBridge<C extends ComponentCommand, E extends ComponentEvent> {
   final String componentName;
   final E? Function(String json) eventParser;
   
-  /// Stream of events from Rust
   final _eventController = StreamController<E>.broadcast();
   Stream<E> get events => _eventController.stream;
+  
+  final _commandController = StreamController<C>();
   
   Timer? _pollTimer;
   bool _isActive = false;
@@ -63,10 +62,33 @@ class ComponentBridge<C extends ComponentCommand, E extends ComponentEvent> {
   ComponentBridge({
     required this.componentName,
     required this.eventParser,
-    this.pollIntervalMs = 100, // Same as Swift's 100ms
-  });
+    this.pollIntervalMs = 100,
+  }) {
+    // Process commands as they come in
+    _commandController.stream.listen(_processCommand);
+  }
   
-  /// Start polling for events
+  void _processCommand(C command) async {
+    final json = command.toJson();
+    
+    // Post sync activity if command has description
+    if (command.syncDescription != null) {
+      _postSyncActivity(true, command.syncDescription!);
+    }
+    
+    final success = CyanFFI.sendCommand(componentName, json);
+    
+    if (!success) {
+      print('⚠️ ComponentBridge[$componentName] failed to send: $json');
+    }
+    
+    // End sync activity after brief delay
+    if (command.syncDescription != null) {
+      await Future.delayed(const Duration(milliseconds: 300));
+      _postSyncActivity(false, '');
+    }
+  }
+  
   void start() {
     if (_isActive) return;
     _isActive = true;
@@ -76,10 +98,9 @@ class ComponentBridge<C extends ComponentCommand, E extends ComponentEvent> {
       (_) => _pollEvents(),
     );
     
-    print('🌉 ComponentBridge[$componentName] started (poll: ${pollIntervalMs}ms)');
+    print('🌉 ComponentBridge[$componentName] started');
   }
   
-  /// Stop polling for events
   void stop() {
     _isActive = false;
     _pollTimer?.cancel();
@@ -87,26 +108,19 @@ class ComponentBridge<C extends ComponentCommand, E extends ComponentEvent> {
     print('🌉 ComponentBridge[$componentName] stopped');
   }
   
-  /// Send a command to Rust (queues to command channel)
+  /// Send command to Rust (queued processing)
   bool send(C command) {
-    final json = command.toJson();
-    print('📤 ComponentBridge[$componentName] sending: $json');
-    final success = CyanFFI.sendCommand(componentName, json);
-    
-    if (!success) {
-      print('⚠️ ComponentBridge[$componentName] failed to send: $json');
-    } else {
-      print('✅ ComponentBridge[$componentName] sent successfully');
+    if (!_isActive) {
+      print('⚠️ ComponentBridge[$componentName] not active, starting...');
+      start();
     }
-    
-    return success;
+    _commandController.add(command);
+    return true;
   }
   
-  /// Poll for events (called by timer)
   void _pollEvents() {
     if (!_isActive) return;
     
-    // Poll until queue is empty (may have multiple events)
     while (true) {
       final json = CyanFFI.pollEvents(componentName);
       if (json == null || json.isEmpty) break;
@@ -118,18 +132,17 @@ class ComponentBridge<C extends ComponentCommand, E extends ComponentEvent> {
     }
   }
   
-  /// Clean up resources
   void dispose() {
     stop();
+    _commandController.close();
     _eventController.close();
   }
 }
 
 // ============================================================================
-// SPECIALIZED BRIDGES (match Swift components)
+// SPECIALIZED BRIDGES
 // ============================================================================
 
-/// Bridge for file_tree component
 class FileTreeBridge extends ComponentBridge<FileTreeCommand, FileTreeEvent> {
   FileTreeBridge() : super(
     componentName: 'file_tree',
@@ -137,7 +150,6 @@ class FileTreeBridge extends ComponentBridge<FileTreeCommand, FileTreeEvent> {
   );
 }
 
-/// Bridge for chat_panel component  
 class ChatBridge extends ComponentBridge<ChatCommand, ChatEvent> {
   ChatBridge() : super(
     componentName: 'chat_panel',
@@ -145,7 +157,6 @@ class ChatBridge extends ComponentBridge<ChatCommand, ChatEvent> {
   );
 }
 
-/// Bridge for whiteboard component
 class WhiteboardBridge extends ComponentBridge<WhiteboardCommand, WhiteboardEvent> {
   WhiteboardBridge() : super(
     componentName: 'whiteboard',
@@ -153,7 +164,6 @@ class WhiteboardBridge extends ComponentBridge<WhiteboardCommand, WhiteboardEven
   );
 }
 
-/// Bridge for board_grid component
 class BoardGridBridge extends ComponentBridge<BoardGridCommand, BoardGridEvent> {
   BoardGridBridge() : super(
     componentName: 'board_grid',
@@ -161,7 +171,6 @@ class BoardGridBridge extends ComponentBridge<BoardGridCommand, BoardGridEvent> 
   );
 }
 
-/// Bridge for network/status component
 class NetworkStatusBridge extends ComponentBridge<NetworkStatusCommand, NetworkStatusEvent> {
   NetworkStatusBridge() : super(
     componentName: 'network',
@@ -170,7 +179,7 @@ class NetworkStatusBridge extends ComponentBridge<NetworkStatusCommand, NetworkS
 }
 
 // ============================================================================
-// FILE TREE COMMAND/EVENT (matches Swift FileTreeTypes.swift)
+// FILE TREE COMMAND/EVENT (matches Rust CommandMsg enum)
 // ============================================================================
 
 class FileTreeCommand implements ComponentCommand {
@@ -179,12 +188,11 @@ class FileTreeCommand implements ComponentCommand {
   
   FileTreeCommand._(this.type, [this.data = const {}]);
   
-  // Factory constructors matching Swift
+  // Lifecycle
   factory FileTreeCommand.snapshot() => FileTreeCommand._('Snapshot');
   factory FileTreeCommand.seedDemoIfEmpty() => FileTreeCommand._('SeedDemoIfEmpty');
-  factory FileTreeCommand.loadGroups({bool recursive = true}) => 
-      FileTreeCommand._('LoadGroups', {'recursive': recursive});
   
+  // Groups
   factory FileTreeCommand.createGroup({
     required String name,
     String icon = 'folder.fill',
@@ -200,6 +208,7 @@ class FileTreeCommand implements ComponentCommand {
   factory FileTreeCommand.leaveGroup({required String id}) =>
       FileTreeCommand._('LeaveGroup', {'id': id});
   
+  // Workspaces
   factory FileTreeCommand.createWorkspace({required String groupId, required String name}) =>
       FileTreeCommand._('CreateWorkspace', {'group_id': groupId, 'name': name});
   
@@ -212,6 +221,7 @@ class FileTreeCommand implements ComponentCommand {
   factory FileTreeCommand.leaveWorkspace({required String id}) =>
       FileTreeCommand._('LeaveWorkspace', {'id': id});
   
+  // Boards
   factory FileTreeCommand.createBoard({required String workspaceId, required String name}) =>
       FileTreeCommand._('CreateBoard', {'workspace_id': workspaceId, 'name': name});
   
@@ -230,9 +240,11 @@ class FileTreeCommand implements ComponentCommand {
   @override
   String? get syncDescription {
     switch (type) {
-      case 'Snapshot': return 'Loading tree...';
+      case 'Snapshot': return 'Loading...';
       case 'SeedDemoIfEmpty': return 'Initializing...';
-      case 'LoadGroups': return 'Refreshing...';
+      case 'CreateGroup': return 'Creating group...';
+      case 'CreateWorkspace': return 'Creating workspace...';
+      case 'CreateBoard': return 'Creating board...';
       default: return null;
     }
   }
@@ -256,25 +268,28 @@ class FileTreeEvent implements ComponentEvent {
     }
   }
   
-  // Event type checks
   bool get isTreeLoaded => type == 'TreeLoaded';
   bool get isGroupCreated => type == 'GroupCreated';
   bool get isGroupRenamed => type == 'GroupRenamed';
   bool get isGroupDeleted => type == 'GroupDeleted';
   bool get isWorkspaceCreated => type == 'WorkspaceCreated';
+  bool get isWorkspaceRenamed => type == 'WorkspaceRenamed';
+  bool get isWorkspaceDeleted => type == 'WorkspaceDeleted';
   bool get isBoardCreated => type == 'BoardCreated';
-  bool get isSyncStarted => type == 'SyncStarted';
-  bool get isSyncComplete => type == 'SyncComplete';
+  bool get isBoardRenamed => type == 'BoardRenamed';
+  bool get isBoardDeleted => type == 'BoardDeleted';
+  bool get isFileUploaded => type == 'FileUploaded';
+  bool get isFileDownloaded => type == 'FileDownloaded';
+  bool get isNetwork => type == 'Network';
   bool get isError => type == 'Error';
   
-  // Data accessors
-  Map<String, dynamic>? get snapshot => data['snapshot'] as Map<String, dynamic>?;
   String? get errorMessage => data['message'] as String?;
   String? get id => data['id'] as String?;
+  Map<String, dynamic>? get treeData => data['data'] as Map<String, dynamic>?;
 }
 
 // ============================================================================
-// CHAT COMMAND/EVENT (matches Swift ChatTypes.swift)
+// CHAT COMMAND/EVENT (matches Rust CommandMsg enum)
 // ============================================================================
 
 class ChatCommand implements ComponentCommand {
@@ -283,6 +298,7 @@ class ChatCommand implements ComponentCommand {
   
   ChatCommand._(this.type, [this.data = const {}]);
   
+  // Group/Workspace chat
   factory ChatCommand.sendMessage({
     required String workspaceId,
     required String message,
@@ -296,11 +312,17 @@ class ChatCommand implements ComponentCommand {
   factory ChatCommand.deleteMessage({required String id}) =>
       ChatCommand._('DeleteChat', {'id': id});
   
-  factory ChatCommand.loadChatHistory({required String workspaceId}) =>
+  factory ChatCommand.loadHistory({required String workspaceId}) =>
       ChatCommand._('LoadChatHistory', {'workspace_id': workspaceId});
   
-  factory ChatCommand.startDirectChat({required String peerId, required String workspaceId}) =>
-      ChatCommand._('StartDirectChat', {'peer_id': peerId, 'workspace_id': workspaceId});
+  // Direct messages
+  factory ChatCommand.startDirectChat({
+    required String peerId,
+    required String workspaceId,
+  }) => ChatCommand._('StartDirectChat', {
+    'peer_id': peerId,
+    'workspace_id': workspaceId,
+  });
   
   factory ChatCommand.sendDirectMessage({
     required String peerId,
@@ -314,6 +336,10 @@ class ChatCommand implements ComponentCommand {
     if (parentId != null) 'parent_id': parentId,
   });
   
+  factory ChatCommand.loadDirectHistory({required String peerId}) =>
+      ChatCommand._('LoadDirectMessageHistory', {'peer_id': peerId});
+  
+  // Alias for compatibility
   factory ChatCommand.loadDirectMessageHistory({required String peerId}) =>
       ChatCommand._('LoadDirectMessageHistory', {'peer_id': peerId});
   
@@ -324,8 +350,8 @@ class ChatCommand implements ComponentCommand {
   String? get syncDescription {
     switch (type) {
       case 'LoadChatHistory': return 'Loading chat...';
-      case 'StartDirectChat': return 'Connecting...';
       case 'LoadDirectMessageHistory': return 'Loading messages...';
+      case 'StartDirectChat': return 'Connecting...';
       default: return null;
     }
   }
@@ -342,19 +368,65 @@ class ChatEvent implements ComponentEvent {
       final map = jsonDecode(json) as Map<String, dynamic>;
       final type = map['type'] as String?;
       if (type == null) return null;
-      return ChatEvent._(type, map);
+      
+      // Handle nested data like Swift does
+      Map<String, dynamic> data;
+      if (map.containsKey('data') && map['data'] is Map) {
+        data = Map<String, dynamic>.from(map['data'] as Map);
+        // Also include type in data for convenience
+        data['_event_type'] = type;
+      } else {
+        data = Map<String, dynamic>.from(map);
+      }
+      
+      // Handle Network wrapper events (Swift pattern)
+      if (type == 'Network' && data.containsKey('type')) {
+        final innerType = data['type'] as String?;
+        if (innerType != null) {
+          return ChatEvent._(innerType, data);
+        }
+      }
+      
+      return ChatEvent._(type, data);
     } catch (e) {
       print('⚠️ ChatEvent parse error: $e');
       return null;
     }
   }
   
-  bool get isMessage => type == 'ChatSent';
+  // Message types matching Swift ChatEvent cases
+  bool get isMessage => type == 'ChatReceived' || type == 'ChatSent';
   bool get isMessageDeleted => type == 'ChatDeleted';
+  bool get isHistory => type == 'ChatHistory';
   bool get isPeerJoined => type == 'PeerJoined';
   bool get isPeerLeft => type == 'PeerLeft';
-  bool get isChatStreamReady => type == 'ChatStreamReady';
+  bool get isStreamReady => type == 'ChatStreamReady';
+  bool get isChatStreamReady => type == 'ChatStreamReady'; // alias
+  bool get isChatStreamClosed => type == 'ChatStreamClosed';
   bool get isDirectMessage => type == 'DirectMessage' || type == 'DirectMessageReceived';
+  bool get isDirectHistory => type == 'DirectMessageHistory';
+  
+  // Data accessors matching Swift event structure
+  String? get messageId => data['id'] as String?;
+  String? get workspaceId => data['workspace_id'] as String?;
+  String? get message => data['message'] as String?;
+  String? get author => data['author'] as String?;
+  String? get parentId => data['parent_id'] as String?;
+  String? get peerId => data['peer_id'] as String?;
+  String? get groupId => data['group_id'] as String?;
+  List<String> get mentions => (data['mentions'] as List?)?.cast<String>() ?? [];
+  bool get isBroadcast => data['is_broadcast'] as bool? ?? false;
+  bool get mentionsMe => data['mentions_me'] as bool? ?? false;
+  
+  int get timestamp {
+    final ts = data['timestamp'];
+    if (ts is int) return ts;
+    if (ts is double) return ts.toInt();
+    if (ts is num) return ts.toInt();
+    return 0;
+  }
+  
+  DateTime get timestampDate => DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
 }
 
 // ============================================================================
@@ -370,16 +442,57 @@ class WhiteboardCommand implements ComponentCommand {
   factory WhiteboardCommand.loadElements({required String boardId}) =>
       WhiteboardCommand._('LoadElements', {'board_id': boardId});
   
-  factory WhiteboardCommand.saveElement({
+  factory WhiteboardCommand.createElement({
     required String boardId,
-    required Map<String, dynamic> element,
-  }) => WhiteboardCommand._('SaveElement', {'board_id': boardId, 'element': element});
+    required String elementType,
+    required double x,
+    required double y,
+    required double width,
+    required double height,
+    int zIndex = 0,
+    Map<String, dynamic>? style,
+    Map<String, dynamic>? content,
+  }) => WhiteboardCommand._('CreateWhiteboardElement', {
+    'board_id': boardId,
+    'element_type': elementType,
+    'x': x,
+    'y': y,
+    'width': width,
+    'height': height,
+    'z_index': zIndex,
+    if (style != null) 'style_json': jsonEncode(style),
+    if (content != null) 'content_json': jsonEncode(content),
+  });
   
-  factory WhiteboardCommand.deleteElement({required String boardId, required String elementId}) =>
-      WhiteboardCommand._('DeleteElement', {'board_id': boardId, 'element_id': elementId});
+  factory WhiteboardCommand.updateElement({
+    required String id,
+    required String boardId,
+    required String elementType,
+    required double x,
+    required double y,
+    required double width,
+    required double height,
+    int zIndex = 0,
+    Map<String, dynamic>? style,
+    Map<String, dynamic>? content,
+  }) => WhiteboardCommand._('UpdateWhiteboardElement', {
+    'id': id,
+    'board_id': boardId,
+    'element_type': elementType,
+    'x': x,
+    'y': y,
+    'width': width,
+    'height': height,
+    'z_index': zIndex,
+    if (style != null) 'style_json': jsonEncode(style),
+    if (content != null) 'content_json': jsonEncode(content),
+  });
+  
+  factory WhiteboardCommand.deleteElement({required String id, required String boardId}) =>
+      WhiteboardCommand._('DeleteWhiteboardElement', {'id': id, 'board_id': boardId});
   
   factory WhiteboardCommand.clear({required String boardId}) =>
-      WhiteboardCommand._('Clear', {'board_id': boardId});
+      WhiteboardCommand._('ClearWhiteboard', {'board_id': boardId});
   
   @override
   String toJson() => jsonEncode({'type': type, ...data});
@@ -404,6 +517,16 @@ class WhiteboardEvent implements ComponentEvent {
       return null;
     }
   }
+  
+  bool get isElementsLoaded => type == 'ElementsLoaded';
+  bool get isElementCreated => type == 'ElementCreated';
+  bool get isElementUpdated => type == 'ElementUpdated';
+  bool get isElementDeleted => type == 'ElementDeleted';
+  bool get isCleared => type == 'Cleared';
+  
+  List<dynamic>? get elements => data['elements'] as List<dynamic>?;
+  Map<String, dynamic>? get element => data['element'] as Map<String, dynamic>?;
+  String? get elementId => data['element_id'] as String?;
 }
 
 // ============================================================================
@@ -421,6 +544,26 @@ class BoardGridCommand implements ComponentCommand {
         if (groupId != null) 'group_id': groupId,
         if (workspaceId != null) 'workspace_id': workspaceId,
       });
+  
+  factory BoardGridCommand.updateMetadata({
+    required String boardId,
+    List<String>? labels,
+    int? rating,
+    bool? isPinned,
+    String? boardType,
+  }) => BoardGridCommand._('UpdateBoardMetadata', {
+    'board_id': boardId,
+    if (labels != null) 'labels': labels,
+    if (rating != null) 'rating': rating,
+    if (isPinned != null) 'is_pinned': isPinned,
+    if (boardType != null) 'board_type': boardType,
+  });
+  
+  factory BoardGridCommand.incrementViewCount({required String boardId}) =>
+      BoardGridCommand._('IncrementBoardViewCount', {'board_id': boardId});
+  
+  factory BoardGridCommand.setPinned({required String boardId, required bool isPinned}) =>
+      BoardGridCommand._('SetBoardPinned', {'board_id': boardId, 'is_pinned': isPinned});
   
   @override
   String toJson() => jsonEncode({'type': type, ...data});
@@ -440,11 +583,98 @@ class BoardGridEvent implements ComponentEvent {
       final map = jsonDecode(json) as Map<String, dynamic>;
       final type = map['type'] as String?;
       if (type == null) return null;
-      return BoardGridEvent._(type, map);
+      
+      // Handle nested data
+      Map<String, dynamic> data;
+      if (map.containsKey('data') && map['data'] is Map) {
+        data = Map<String, dynamic>.from(map['data'] as Map);
+      } else {
+        data = Map<String, dynamic>.from(map);
+      }
+      
+      return BoardGridEvent._(type, data);
     } catch (e) {
+      print('⚠️ BoardGridEvent parse error: $e');
       return null;
     }
   }
+  
+  bool get isBoardsLoaded => type == 'BoardsLoaded';
+  bool get isBoardCreated => type == 'BoardCreated';
+  bool get isBoardRenamed => type == 'BoardRenamed';
+  bool get isBoardDeleted => type == 'BoardDeleted';
+  bool get isBoardPinChanged => type == 'BoardPinChanged';
+  bool get isBoardRatingChanged => type == 'BoardRatingChanged';
+  bool get isBoardLabelsChanged => type == 'BoardLabelsChanged';
+  bool get isMetadataUpdated => type == 'MetadataUpdated';
+  
+  /// Parse boards array from BoardsLoaded event
+  List<BoardGridItem> get boards {
+    final boardsArray = data['boards'] as List<dynamic>? ?? [];
+    return boardsArray.map((b) {
+      final bMap = b as Map<String, dynamic>;
+      return BoardGridItem(
+        id: bMap['id'] as String? ?? '',
+        workspaceId: bMap['workspace_id'] as String? ?? '',
+        groupId: bMap['group_id'] as String? ?? '',
+        name: bMap['name'] as String? ?? 'Untitled',
+        createdAt: DateTime.fromMillisecondsSinceEpoch(
+          ((bMap['created_at'] as int?) ?? 0) * 1000,
+        ),
+        elementCount: bMap['element_count'] as int? ?? 0,
+        isPinned: bMap['is_pinned'] as bool? ?? false,
+        labels: _parseLabels(bMap['labels']),
+        rating: bMap['rating'] as int? ?? 0,
+        lastAccessed: bMap['last_accessed'] != null
+            ? DateTime.fromMillisecondsSinceEpoch(
+                ((bMap['last_accessed'] as int?) ?? 0) * 1000)
+            : null,
+      );
+    }).toList();
+  }
+  
+  List<String> _parseLabels(dynamic labels) {
+    if (labels == null) return [];
+    if (labels is List) return labels.cast<String>();
+    if (labels is String) {
+      try {
+        final parsed = jsonDecode(labels) as List;
+        return parsed.cast<String>();
+      } catch (_) {
+        return [];
+      }
+    }
+    return [];
+  }
+  
+  Map<String, dynamic>? get metadata => data['metadata'] as Map<String, dynamic>?;
+}
+
+/// Board item with full metadata
+class BoardGridItem {
+  final String id;
+  final String workspaceId;
+  final String groupId;
+  final String name;
+  final DateTime createdAt;
+  final int elementCount;
+  final bool isPinned;
+  final List<String> labels;
+  final int rating;
+  final DateTime? lastAccessed;
+  
+  const BoardGridItem({
+    required this.id,
+    required this.workspaceId,
+    required this.groupId,
+    required this.name,
+    required this.createdAt,
+    this.elementCount = 0,
+    this.isPinned = false,
+    this.labels = const [],
+    this.rating = 0,
+    this.lastAccessed,
+  });
 }
 
 // ============================================================================
@@ -457,6 +687,7 @@ class NetworkStatusCommand implements ComponentCommand {
   NetworkStatusCommand._(this.type);
   
   factory NetworkStatusCommand.getStatus() => NetworkStatusCommand._('GetStatus');
+  factory NetworkStatusCommand.getPeers() => NetworkStatusCommand._('GetPeers');
   
   @override
   String toJson() => jsonEncode({'type': type});
@@ -485,4 +716,66 @@ class NetworkStatusEvent implements ComponentEvent {
   bool get isPeerConnected => type == 'PeerConnected';
   bool get isPeerDisconnected => type == 'PeerDisconnected';
   bool get isNetworkStatus => type == 'NetworkStatus';
+  bool get isPeerList => type == 'PeerList';
+  
+  String? get peerId => data['peer_id'] as String?;
+  String? get peerName => data['peer_name'] as String?;
+  int? get peerCount => data['peer_count'] as int?;
+  int? get objectCount => data['object_count'] as int?;
+  List<dynamic>? get peers => data['peers'] as List<dynamic>?;
+}
+
+// ============================================================================
+// FILE COMMAND/EVENT (for uploads/downloads)
+// ============================================================================
+
+class FileCommand implements ComponentCommand {
+  final String type;
+  final Map<String, dynamic> data;
+  
+  FileCommand._(this.type, [this.data = const {}]);
+  
+  factory FileCommand.uploadToGroup({
+    required String path,
+    required String groupId,
+  }) => FileCommand._('UploadToGroup', {
+    'path': path,
+    'group_id': groupId,
+  });
+  
+  factory FileCommand.uploadToWorkspace({
+    required String path,
+    required String workspaceId,
+  }) => FileCommand._('UploadToWorkspace', {
+    'path': path,
+    'workspace_id': workspaceId,
+  });
+  
+  factory FileCommand.requestDownload({
+    required String fileId,
+  }) => FileCommand._('RequestFileDownload', {
+    'file_id': fileId,
+  });
+  
+  factory FileCommand.getFiles({String? groupId, String? workspaceId}) =>
+      FileCommand._('GetFiles', {
+        if (groupId != null) 'group_id': groupId,
+        if (workspaceId != null) 'workspace_id': workspaceId,
+      });
+  
+  @override
+  String toJson() => jsonEncode({'type': type, ...data});
+  
+  @override
+  String? get syncDescription {
+    switch (type) {
+      case 'UploadToGroup':
+      case 'UploadToWorkspace':
+        return 'Uploading file...';
+      case 'RequestFileDownload':
+        return 'Downloading file...';
+      default:
+        return null;
+    }
+  }
 }

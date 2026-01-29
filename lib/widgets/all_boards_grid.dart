@@ -2,11 +2,13 @@
 // Pinterest-style masonry grid showing ALL boards from all groups/workspaces
 // With grouping headers, search, filter, sort
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/file_tree_provider.dart';
 import '../providers/selection_provider.dart';
 import '../models/tree_item.dart';
+import '../ffi/ffi_helpers.dart';
 
 /// Board with context (which group/workspace it belongs to)
 class BoardWithContext {
@@ -47,10 +49,21 @@ class _AllBoardsGridState extends ConsumerState<AllBoardsGrid> {
     super.dispose();
   }
 
-  List<BoardWithContext> _getAllBoards(FileTreeState state) {
+  List<BoardWithContext> _getAllBoards(FileTreeState state, SelectionState selection) {
     final boards = <BoardWithContext>[];
+    
     for (final group in state.groups) {
+      // If group is selected, only show boards from that group
+      if (selection.groupId != null && group.id != selection.groupId) {
+        continue;
+      }
+      
       for (final workspace in group.workspaces) {
+        // If workspace is selected, only show boards from that workspace
+        if (selection.workspaceId != null && workspace.id != selection.workspaceId) {
+          continue;
+        }
+        
         for (final board in workspace.boards) {
           boards.add(BoardWithContext(board: board, group: group, workspace: workspace));
         }
@@ -80,27 +93,40 @@ class _AllBoardsGridState extends ConsumerState<AllBoardsGrid> {
           return a.workspace.name.compareTo(b.workspace.name);
         case BoardSortOption.lastModified:
         default:
-          final aTime = a.board.lastModified?.millisecondsSinceEpoch ?? a.board.createdAt;
-          final bTime = b.board.lastModified?.millisecondsSinceEpoch ?? b.board.createdAt;
+          final aTime = a.board.lastModified?.millisecondsSinceEpoch ?? a.board.createdAt.millisecondsSinceEpoch;
+          final bTime = b.board.lastModified?.millisecondsSinceEpoch ?? b.board.createdAt.millisecondsSinceEpoch;
           return bTime.compareTo(aTime);
       }
     });
 
     return filtered;
   }
+  
+  String _getScopeLabel(SelectionState selection) {
+    if (selection.workspaceId != null) {
+      return selection.workspaceName ?? 'Workspace';
+    }
+    if (selection.groupId != null) {
+      return selection.groupName ?? 'Group';
+    }
+    return 'All Boards';
+  }
 
   @override
   Widget build(BuildContext context) {
     final treeState = ref.watch(fileTreeProvider);
-    final allBoards = _getAllBoards(treeState);
+    final selection = ref.watch(selectionProvider);
+    final allBoards = _getAllBoards(treeState, selection);
     final filteredBoards = _filterAndSort(allBoards);
+    final scopeLabel = _getScopeLabel(selection);
 
     return Material(
       color: const Color(0xFF1E1E1E),
       child: Column(
         children: [
-          // Header
+          // Header with scope indicator
           _Header(
+            scopeLabel: scopeLabel,
             totalBoards: allBoards.length,
             filteredBoards: filteredBoards.length,
             onRefresh: () => ref.read(fileTreeProvider.notifier).refresh(),
@@ -122,7 +148,7 @@ class _AllBoardsGridState extends ConsumerState<AllBoardsGrid> {
             child: treeState.isLoading
                 ? const Center(child: CircularProgressIndicator(color: Color(0xFF66D9EF)))
                 : filteredBoards.isEmpty
-                    ? _EmptyView(hasBoards: allBoards.isNotEmpty)
+                    ? _EmptyView(hasBoards: allBoards.isNotEmpty, scopeLabel: scopeLabel)
                     : _groupByWorkspace
                         ? _GroupedGrid(boards: filteredBoards, onBoardTap: _onBoardTap)
                         : _FlatGrid(boards: filteredBoards, onBoardTap: _onBoardTap),
@@ -133,7 +159,7 @@ class _AllBoardsGridState extends ConsumerState<AllBoardsGrid> {
   }
 
   void _onBoardTap(BoardWithContext board) {
-    ref.read(selectionProvider.notifier).selectBoard(
+    ref.read(selectionProvider.notifier).selectBoardNamed(
       groupId: board.group.id,
       workspaceId: board.workspace.id,
       workspaceName: board.workspace.name,
@@ -144,11 +170,12 @@ class _AllBoardsGridState extends ConsumerState<AllBoardsGrid> {
 }
 
 class _Header extends StatelessWidget {
+  final String scopeLabel;
   final int totalBoards;
   final int filteredBoards;
   final VoidCallback onRefresh;
 
-  const _Header({required this.totalBoards, required this.filteredBoards, required this.onRefresh});
+  const _Header({required this.scopeLabel, required this.totalBoards, required this.filteredBoards, required this.onRefresh});
 
   @override
   Widget build(BuildContext context) {
@@ -161,9 +188,9 @@ class _Header extends StatelessWidget {
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
-                'All Boards',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFFF8F8F2)),
+              Text(
+                scopeLabel,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Color(0xFFF8F8F2)),
               ),
               Text(
                 filteredBoards == totalBoards
@@ -328,7 +355,8 @@ class _ToggleButtonState extends State<_ToggleButton> {
 
 class _EmptyView extends StatelessWidget {
   final bool hasBoards;
-  const _EmptyView({required this.hasBoards});
+  final String scopeLabel;
+  const _EmptyView({required this.hasBoards, required this.scopeLabel});
 
   @override
   Widget build(BuildContext context) {
@@ -339,12 +367,12 @@ class _EmptyView extends StatelessWidget {
           Icon(hasBoards ? Icons.search_off : Icons.dashboard_outlined, size: 64, color: const Color(0xFF606060)),
           const SizedBox(height: 16),
           Text(
-            hasBoards ? 'No boards match your search' : 'No boards yet',
+            hasBoards ? 'No boards match your search' : 'No boards in $scopeLabel',
             style: const TextStyle(fontSize: 18, color: Color(0xFF808080)),
           ),
           const SizedBox(height: 8),
           Text(
-            hasBoards ? 'Try a different search term' : 'Create a group and workspace to get started',
+            hasBoards ? 'Try a different search term' : 'Create a board to get started',
             style: const TextStyle(fontSize: 13, color: Color(0xFF606060)),
           ),
         ],
@@ -464,7 +492,7 @@ class _FlatGrid extends StatelessWidget {
   }
 }
 
-class _BoardCard extends StatefulWidget {
+class _BoardCard extends ConsumerStatefulWidget {
   final BoardWithContext board;
   final VoidCallback onTap;
   final bool showContext;
@@ -472,25 +500,238 @@ class _BoardCard extends StatefulWidget {
   const _BoardCard({required this.board, required this.onTap, this.showContext = false});
 
   @override
-  State<_BoardCard> createState() => _BoardCardState();
+  ConsumerState<_BoardCard> createState() => _BoardCardState();
 }
 
-class _BoardCardState extends State<_BoardCard> {
+class _BoardCardState extends ConsumerState<_BoardCard> {
   bool _hovered = false;
+  
+  // Loaded from FFI
+  bool _isPinned = false;
+  String _activeFace = 'canvas';
+  List<String> _labels = [];
+  int _rating = 0;
+  bool _metadataLoaded = false;
+  
+  @override
+  void initState() {
+    super.initState();
+    // Defer FFI calls to avoid blocking UI during grid render
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadMetadataAsync();
+    });
+  }
+  
+  @override
+  void didUpdateWidget(_BoardCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.board.board.id != widget.board.board.id) {
+      _metadataLoaded = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _loadMetadataAsync();
+      });
+    }
+  }
+  
+  Future<void> _loadMetadataAsync() async {
+    if (_metadataLoaded) return;
+    
+    final boardId = widget.board.board.id;
+    
+    // Run FFI calls in isolate-friendly way (still on main thread but yielding)
+    await Future.microtask(() {
+      if (!mounted) return;
+      
+      // Load pin status
+      _isPinned = CyanFFI.isBoardPinned(boardId);
+      
+      // Load active face/mode
+      final mode = CyanFFI.getBoardMode(boardId);
+      if (mode != null && mode.isNotEmpty) {
+        _activeFace = mode;
+      }
+      
+      // Load metadata (labels, rating, etc.)
+      final metadataJson = CyanFFI.getBoardMetadata(boardId);
+      if (metadataJson != null && metadataJson.isNotEmpty) {
+        try {
+          final metadata = json.decode(metadataJson) as Map<String, dynamic>;
+          _labels = (metadata['labels'] as List<dynamic>?)?.cast<String>() ?? [];
+          _rating = metadata['rating'] as int? ?? 0;
+        } catch (e) {
+          // Silent fail - use defaults
+        }
+      }
+      
+      _metadataLoaded = true;
+    });
+    
+    if (mounted) setState(() {});
+  }
 
-  IconData get _icon => switch (widget.board.board.boardType) {
+  IconData get _icon => switch (_activeFace) {
     'canvas' => Icons.brush,
-    'notebook' => Icons.book,
-    'notes' => Icons.article,
+    'notebook' => Icons.article,
+    'notes' => Icons.description,
     _ => Icons.dashboard,
   };
 
-  Color get _color => switch (widget.board.board.boardType) {
+  String get _faceLabel => switch (_activeFace) {
+    'canvas' => 'Canvas',
+    'notebook' => 'Notebook',
+    'notes' => 'Notes',
+    _ => 'Board',
+  };
+
+  Color get _color => switch (_activeFace) {
     'canvas' => const Color(0xFFFD971F),
     'notebook' => const Color(0xFF66D9EF),
     'notes' => const Color(0xFFA6E22E),
     _ => const Color(0xFF808080),
   };
+
+  void _togglePin() {
+    final boardId = widget.board.board.id;
+    final newPinned = !_isPinned;
+    
+    // Optimistic update
+    setState(() => _isPinned = newPinned);
+    
+    // Call FFI
+    final success = newPinned 
+        ? CyanFFI.pinBoard(boardId)
+        : CyanFFI.unpinBoard(boardId);
+    
+    if (!success) {
+      // Revert on failure
+      setState(() => _isPinned = !newPinned);
+    }
+  }
+  
+  void _addLabel(String label) {
+    if (label.isEmpty || _labels.contains(label)) return;
+    
+    final newLabels = [..._labels, label];
+    final success = CyanFFI.setBoardLabels(widget.board.board.id, newLabels);
+    
+    if (success) {
+      setState(() => _labels = newLabels);
+    }
+  }
+  
+  void _removeLabel(String label) {
+    final newLabels = _labels.where((l) => l != label).toList();
+    final success = CyanFFI.setBoardLabels(widget.board.board.id, newLabels);
+    
+    if (success) {
+      setState(() => _labels = newLabels);
+    }
+  }
+  
+  void _showLabelEditor(BuildContext context) {
+    final controller = TextEditingController();
+    
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF252525),
+        title: const Text('Edit Labels', style: TextStyle(color: Color(0xFFF8F8F2))),
+        content: SizedBox(
+          width: 300,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Current labels
+              if (_labels.isNotEmpty) ...[
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: _labels.map((label) => Chip(
+                    label: Text(label, style: TextStyle(fontSize: 12, color: _getLabelColor(label))),
+                    backgroundColor: _getLabelColor(label).withOpacity(0.2),
+                    deleteIcon: const Icon(Icons.close, size: 14),
+                    deleteIconColor: _getLabelColor(label),
+                    onDeleted: () {
+                      _removeLabel(label);
+                      Navigator.pop(ctx);
+                      _showLabelEditor(context);
+                    },
+                  )).toList(),
+                ),
+                const SizedBox(height: 16),
+              ],
+              
+              // Add new label
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: controller,
+                      autofocus: true,
+                      style: const TextStyle(color: Color(0xFFF8F8F2)),
+                      decoration: const InputDecoration(
+                        hintText: 'Add label...',
+                        hintStyle: TextStyle(color: Color(0xFF808080)),
+                        filled: true,
+                        fillColor: Color(0xFF1E1E1E),
+                        contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        border: OutlineInputBorder(borderSide: BorderSide.none),
+                      ),
+                      onSubmitted: (value) {
+                        if (value.trim().isNotEmpty) {
+                          _addLabel(value.trim());
+                          Navigator.pop(ctx);
+                          _showLabelEditor(context);
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton(
+                    icon: const Icon(Icons.add, color: Color(0xFF66D9EF)),
+                    onPressed: () {
+                      if (controller.text.trim().isNotEmpty) {
+                        _addLabel(controller.text.trim());
+                        Navigator.pop(ctx);
+                        _showLabelEditor(context);
+                      }
+                    },
+                  ),
+                ],
+              ),
+              
+              // Suggested labels
+              const SizedBox(height: 12),
+              const Text('Suggestions:', style: TextStyle(fontSize: 11, color: Color(0xFF808080))),
+              const SizedBox(height: 6),
+              Wrap(
+                spacing: 6,
+                runSpacing: 6,
+                children: ['important', 'work', 'personal', 'ideas', 'todo', 'archive']
+                    .where((l) => !_labels.contains(l))
+                    .map((label) => ActionChip(
+                      label: Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFFF8F8F2))),
+                      backgroundColor: const Color(0xFF3E3D32),
+                      onPressed: () {
+                        _addLabel(label);
+                        Navigator.pop(ctx);
+                        _showLabelEditor(context);
+                      },
+                    )).toList(),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Done', style: TextStyle(color: Color(0xFF66D9EF))),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -499,6 +740,7 @@ class _BoardCardState extends State<_BoardCard> {
       onExit: (_) => setState(() => _hovered = false),
       child: GestureDetector(
         onTap: widget.onTap,
+        onSecondaryTapUp: (details) => _showContextMenu(context, details.globalPosition),
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           decoration: BoxDecoration(
@@ -513,50 +755,158 @@ class _BoardCardState extends State<_BoardCard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // Preview
+              // Preview area with face indicator
               Expanded(
-                child: Container(
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF1E1E1E),
-                    borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
-                  ),
-                  child: Center(child: Icon(_icon, size: 40, color: _color.withOpacity(0.3))),
+                child: Stack(
+                  children: [
+                    // Background with face icon
+                    Container(
+                      decoration: const BoxDecoration(
+                        color: Color(0xFF1E1E1E),
+                        borderRadius: BorderRadius.vertical(top: Radius.circular(11)),
+                      ),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(_icon, size: 36, color: _color.withOpacity(0.5)),
+                            const SizedBox(height: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: _color.withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: _color.withOpacity(0.3)),
+                              ),
+                              child: Text(
+                                _faceLabel,
+                                style: TextStyle(fontSize: 11, color: _color, fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    
+                    // Pin button (shows on hover or when pinned)
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: AnimatedOpacity(
+                        duration: const Duration(milliseconds: 150),
+                        opacity: _hovered || _isPinned ? 1.0 : 0.0,
+                        child: GestureDetector(
+                          onTap: _togglePin,
+                          child: AnimatedContainer(
+                            duration: const Duration(milliseconds: 150),
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: _isPinned 
+                                  ? const Color(0xFFFD971F)
+                                  : const Color(0xFF000000).withOpacity(0.5),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              _isPinned ? Icons.push_pin : Icons.push_pin_outlined,
+                              size: 14,
+                              color: _isPinned ? Colors.white : const Color(0xFFF8F8F2),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    
+                    // Rating stars if any
+                    if (_rating > 0)
+                      Positioned(
+                        top: 8,
+                        left: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF000000).withOpacity(0.5),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: List.generate(
+                              _rating.clamp(0, 5),
+                              (_) => const Icon(Icons.star, size: 10, color: Color(0xFFE6DB74)),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
               ),
 
-              // Info
+              // Info section
               Padding(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.all(10),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Title row
                     Row(
                       children: [
-                        Icon(_icon, size: 14, color: _color),
-                        const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             widget.board.board.name,
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Color(0xFFF8F8F2)),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFF8F8F2)),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (widget.board.board.hasUnread)
-                          Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFFA6E22E), shape: BoxShape.circle)),
+                          Container(
+                            width: 8, height: 8,
+                            decoration: const BoxDecoration(color: Color(0xFFA6E22E), shape: BoxShape.circle),
+                          ),
                       ],
                     ),
+                    
+                    // Context (group/workspace)
                     if (widget.showContext) ...[
                       const SizedBox(height: 4),
                       Text(
-                        '${widget.board.group.name} / ${widget.board.workspace.name}',
+                        '${widget.board.group.name} › ${widget.board.workspace.name}',
                         style: const TextStyle(fontSize: 10, color: Color(0xFF808080)),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
-                    if (widget.board.board.lastModified != null) ...[
-                      const SizedBox(height: 4),
-                      Text(_formatDate(widget.board.board.lastModified!), style: const TextStyle(fontSize: 10, color: Color(0xFF808080))),
+                    
+                    // Labels
+                    if (_labels.isNotEmpty) ...[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: [
+                          ..._labels.take(3).map((label) => Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: _getLabelColor(label).withOpacity(0.2),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: Text(
+                              label,
+                              style: TextStyle(fontSize: 9, color: _getLabelColor(label), fontWeight: FontWeight.w500),
+                            ),
+                          )),
+                          if (_labels.length > 3)
+                            Text(
+                              '+${_labels.length - 3}',
+                              style: const TextStyle(fontSize: 9, color: Color(0xFF808080)),
+                            ),
+                        ],
+                      ),
                     ],
+                    
+                    // Date
+                    const SizedBox(height: 4),
+                    Text(
+                      _formatDate(widget.board.board.lastModified ?? widget.board.board.createdAt),
+                      style: const TextStyle(fontSize: 10, color: Color(0xFF606060)),
+                    ),
                   ],
                 ),
               ),
@@ -565,6 +915,108 @@ class _BoardCardState extends State<_BoardCard> {
         ),
       ),
     );
+  }
+  
+  void _showContextMenu(BuildContext ctx, Offset position) {
+    final RenderBox overlay = Overlay.of(ctx).context.findRenderObject() as RenderBox;
+    showMenu<String>(
+      context: ctx,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      color: const Color(0xFF252525),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      items: [
+        PopupMenuItem(
+          value: 'open',
+          child: Row(
+            children: const [
+              Icon(Icons.open_in_new, size: 16, color: Color(0xFF66D9EF)),
+              SizedBox(width: 8),
+              Text('Open', style: TextStyle(color: Color(0xFFF8F8F2))),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'pin',
+          child: Row(
+            children: [
+              Icon(_isPinned ? Icons.push_pin_outlined : Icons.push_pin, size: 16, color: const Color(0xFFFD971F)),
+              const SizedBox(width: 8),
+              Text(_isPinned ? 'Unpin' : 'Pin', style: const TextStyle(color: Color(0xFFF8F8F2))),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'labels',
+          child: Row(
+            children: const [
+              Icon(Icons.label_outline, size: 16, color: Color(0xFFAE81FF)),
+              SizedBox(width: 8),
+              Text('Edit Labels', style: TextStyle(color: Color(0xFFF8F8F2))),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'chat',
+          child: Row(
+            children: const [
+              Icon(Icons.chat_bubble_outline, size: 16, color: Color(0xFFA6E22E)),
+              SizedBox(width: 8),
+              Text('Open Chat', style: TextStyle(color: Color(0xFFF8F8F2))),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(
+          value: 'rename',
+          child: Row(
+            children: const [
+              Icon(Icons.edit, size: 16, color: Color(0xFF808080)),
+              SizedBox(width: 8),
+              Text('Rename', style: TextStyle(color: Color(0xFFF8F8F2))),
+            ],
+          ),
+        ),
+        PopupMenuItem(
+          value: 'delete',
+          child: Row(
+            children: const [
+              Icon(Icons.delete_outline, size: 16, color: Color(0xFFF92672)),
+              SizedBox(width: 8),
+              Text('Delete', style: TextStyle(color: Color(0xFFF92672))),
+            ],
+          ),
+        ),
+      ],
+    ).then((value) {
+      if (value == 'open') widget.onTap();
+      if (value == 'pin') _togglePin();
+      if (value == 'labels') _showLabelEditor(ctx);
+      if (value == 'chat') {
+        // TODO: Open chat for this board
+      }
+      if (value == 'rename') {
+        // TODO: Rename board
+      }
+      if (value == 'delete') {
+        // TODO: Delete board
+      }
+    });
+  }
+
+  Color _getLabelColor(String label) {
+    final hash = label.hashCode;
+    final colors = [
+      const Color(0xFF66D9EF),
+      const Color(0xFFA6E22E),
+      const Color(0xFFFD971F),
+      const Color(0xFFF92672),
+      const Color(0xFFAE81FF),
+      const Color(0xFFE6DB74),
+    ];
+    return colors[hash.abs() % colors.length];
   }
 
   String _formatDate(DateTime date) {
