@@ -57,7 +57,7 @@ class _MainLayoutState extends ConsumerState<_MainLayout> {
     return Row(
       children: [
         // Explorer panel (only in explorer mode)
-        if (showExplorer) ...[
+        if (showExplorer)
           _ResizablePanel(
             width: _explorerWidth,
             minWidth: 200,
@@ -65,8 +65,6 @@ class _MainLayoutState extends ConsumerState<_MainLayout> {
             onResize: (w) => setState(() => _explorerWidth = w),
             child: const _ExplorerPanel(),
           ),
-          const _VerticalDivider(),
-        ],
 
         // Main content
         Expanded(
@@ -125,11 +123,13 @@ class _ExplorerContent extends ConsumerWidget {
       );
     }
 
-    if (selection.selectedWorkspaceId != null) {
-      return const BoardGridWidget();
+    // Show board grid for workspace OR group selection
+    if (selection.selectedWorkspaceId != null || selection.selectedGroupId != null) {
+      return const AllBoardsGrid();
     }
 
-    return const _SelectWorkspacePrompt();
+    // Nothing selected - still show all boards
+    return const AllBoardsGrid();
   }
 }
 
@@ -451,39 +451,48 @@ class _ResizablePanel extends StatefulWidget {
 
 class _ResizablePanelState extends State<_ResizablePanel> {
   bool _isHovered = false;
+  bool _isDragging = false;
 
   @override
   Widget build(BuildContext context) {
-    return SizedBox(
-      width: widget.width,
-      child: Stack(
-        children: [
-          widget.child,
-          // Resize handle
-          Positioned(
-            right: 0,
-            top: 0,
-            bottom: 0,
-            child: MouseRegion(
-              cursor: SystemMouseCursors.resizeColumn,
-              onEnter: (_) => setState(() => _isHovered = true),
-              onExit: (_) => setState(() => _isHovered = false),
-              child: GestureDetector(
-                onHorizontalDragUpdate: (details) {
-                  final newWidth = widget.width + details.delta.dx;
-                  if (newWidth >= widget.minWidth && newWidth <= widget.maxWidth) {
-                    widget.onResize(newWidth);
-                  }
-                },
-                child: Container(
-                  width: 4,
-                  color: _isHovered ? const Color(0xFF66D9EF) : Colors.transparent,
-                ),
-              ),
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Main content
+        SizedBox(
+          width: widget.width,
+          child: widget.child,
+        ),
+        
+        // Resize handle
+        MouseRegion(
+          cursor: SystemMouseCursors.resizeColumn,
+          onEnter: (_) => setState(() => _isHovered = true),
+          onExit: (_) {
+            if (!_isDragging) setState(() => _isHovered = false);
+          },
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragStart: (_) => setState(() => _isDragging = true),
+            onHorizontalDragEnd: (_) => setState(() {
+              _isDragging = false;
+              _isHovered = false;
+            }),
+            onHorizontalDragUpdate: (details) {
+              final newWidth = widget.width + details.delta.dx;
+              if (newWidth >= widget.minWidth && newWidth <= widget.maxWidth) {
+                widget.onResize(newWidth);
+              }
+            },
+            child: Container(
+              width: 6,
+              color: (_isHovered || _isDragging) 
+                  ? const Color(0xFF66D9EF) 
+                  : const Color(0xFF3E3D32),
             ),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }

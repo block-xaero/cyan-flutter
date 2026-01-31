@@ -1,6 +1,6 @@
 // widgets/icon_rail.dart
-// Icon rail navigation - matches Swift IconRail.swift
-// 52px wide, dark background, keyboard shortcuts
+// Icon rail navigation - matches Swift IconRail.swift exactly
+// 56px wide (Swift: frame(width: 56)), dark background
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,89 +18,142 @@ class IconRail extends ConsumerWidget {
     final showDMs = ref.watch(showDMsPanelProvider);
     
     return Container(
-      width: 52,
-      color: MonokaiTheme.background,
+      width: 56,  // Match Swift: frame(width: 56)
+      color: const Color(0xFF1E1E1E),  // Match Swift: Color(hex: "1E1E1E")
       child: Column(
         children: [
-          const SizedBox(height: 8),
+          const SizedBox(height: 12),  // Match Swift: padding(.top, 12)
           
-          // Logo/brand
-          _LogoBadge(),
-          
-          const SizedBox(height: 16),
-          const Divider(height: 1, indent: 8, endIndent: 8),
-          const SizedBox(height: 12),
-          
-          // Main navigation
-          _NavButton(
-            icon: Icons.folder_outlined,
-            activeIcon: Icons.folder,
-            tooltip: 'Explorer (⌘1)',
-            isActive: currentMode == ViewMode.explorer,
+          // Top section: Navigation modes
+          _RailButton(
+            icon: Icons.description_outlined,
+            label: 'Explorer',
+            isSelected: currentMode == ViewMode.explorer,
+            shortcut: '⌘1',
             onTap: () => ref.read(viewModeProvider.notifier).showExplorer(),
           ),
-          _NavButton(
-            icon: Icons.grid_view_outlined,
-            activeIcon: Icons.grid_view,
-            tooltip: 'Boards (⌘2)',
-            isActive: currentMode == ViewMode.allBoards,
+          _RailButton(
+            icon: Icons.dashboard_outlined,  // rectangle.on.rectangle.angled
+            label: 'Boards',
+            isSelected: currentMode == ViewMode.allBoards,
+            shortcut: '⌘2',
             onTap: () => ref.read(viewModeProvider.notifier).showAllBoards(),
           ),
-          _NavButton(
-            icon: Icons.chat_bubble_outline,
-            activeIcon: Icons.chat_bubble,
-            tooltip: 'Chat (⌘3)',
-            isActive: currentMode == ViewMode.chat,
+          _RailButton(
+            icon: Icons.forum_outlined,  // bubble.left.and.bubble.right
+            label: 'Chat',
+            isSelected: currentMode == ViewMode.chat,
+            shortcut: '⌘3',
             onTap: () => ref.read(viewModeProvider.notifier).showChat(),
           ),
-          _NavButton(
-            icon: Icons.notifications_outlined,
-            activeIcon: Icons.notifications,
-            tooltip: 'Events (⌘4)',
-            isActive: currentMode == ViewMode.events,
+          _RailButton(
+            icon: Icons.auto_awesome_outlined,  // Lens AI / integrations
+            label: 'Lens AI',
+            isSelected: currentMode == ViewMode.events,
+            shortcut: '⌘4',
             onTap: () => ref.read(viewModeProvider.notifier).showEvents(),
           ),
           
-          const SizedBox(height: 12),
-          const Divider(height: 1, indent: 8, endIndent: 8),
-          const SizedBox(height: 12),
+          // Divider
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: const Color(0xFF2A2A2A),
+            ),
+          ),
           
-          // Secondary tools
-          _NavButton(
-            icon: Icons.terminal_outlined,
-            activeIcon: Icons.terminal,
-            tooltip: 'Console (⌘`)',
-            isActive: showConsole,
+          // Console toggle
+          _RailButton(
+            icon: Icons.terminal,
+            label: 'Console',
+            isSelected: showConsole,
+            shortcut: '⌘5',
+            accentColor: const Color(0xFF66D9EF),  // Cyan
             onTap: () => ref.read(showConsoleProvider.notifier).state = !showConsole,
           ),
-          _NavButton(
-            icon: Icons.mail_outline,
-            activeIcon: Icons.mail,
-            tooltip: 'Direct Messages',
-            isActive: showDMs,
-            badgeCount: 0,
+          
+          // DMs
+          _RailButton(
+            icon: Icons.mark_chat_unread_outlined,
+            label: 'DMs',
+            isSelected: showDMs,
+            accentColor: const Color(0xFFF92672),  // Pink/red
             onTap: () => ref.read(showDMsPanelProvider.notifier).state = !showDMs,
           ),
           
           const Spacer(),
           
-          // Bottom actions
-          _NavButton(
-            icon: Icons.settings_outlined,
-            activeIcon: Icons.settings,
-            tooltip: 'Settings',
-            isActive: false,
-            onTap: () => _showSettings(context),
-          ),
-          _NavButton(
-            icon: Icons.account_circle_outlined,
-            activeIcon: Icons.account_circle,
-            tooltip: 'Profile',
-            isActive: false,
-            onTap: () => _showProfile(context, ref),
+          // Bottom section: Actions
+          _RailButton(
+            icon: Icons.splitscreen,
+            label: 'Split',
+            isSelected: false,
+            shortcut: '⌘\\',
+            showLabel: true,
+            onTap: () {},  // TODO: split view toggle
           ),
           
-          const SizedBox(height: 8),
+          // Divider
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: const Color(0xFF2A2A2A),
+            ),
+          ),
+          
+          // New Board
+          _RailButton(
+            icon: Icons.add_box_outlined,
+            label: 'New Board',
+            isSelected: false,
+            accentColor: const Color(0xFF66D9EF),
+            showLabel: false,
+            onTap: () {},  // TODO
+          ),
+          
+          // New Chat
+          _RailButton(
+            icon: Icons.add_comment_outlined,
+            label: 'New Chat',
+            isSelected: false,
+            accentColor: const Color(0xFFA6E22E),  // Green
+            showLabel: false,
+            onTap: () {},  // TODO
+          ),
+          
+          // Divider
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Container(
+              height: 1,
+              margin: const EdgeInsets.symmetric(horizontal: 8),
+              color: const Color(0xFF2A2A2A),
+            ),
+          ),
+          
+          // Settings
+          _RailButton(
+            icon: Icons.settings_outlined,
+            label: 'Settings',
+            isSelected: false,
+            showLabel: false,
+            onTap: () => _showSettings(context),
+          ),
+          
+          // Profile
+          _RailButton(
+            icon: Icons.account_circle_outlined,
+            label: 'Profile',
+            isSelected: false,
+            showLabel: false,
+            onTap: () => Navigator.of(context).pushNamed('/profile'),
+          ),
+          
+          const SizedBox(height: 12),  // Match Swift: padding(.bottom, 12)
         ],
       ),
     );
@@ -111,130 +164,92 @@ class IconRail extends ConsumerWidget {
       const SnackBar(content: Text('Settings coming soon')),
     );
   }
-  
-  void _showProfile(BuildContext context, WidgetRef ref) {
-    Navigator.of(context).pushNamed('/profile');
-  }
 }
 
-class _LogoBadge extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 36,
-      height: 36,
-      decoration: BoxDecoration(
-        gradient: const LinearGradient(
-          colors: [MonokaiTheme.cyan, MonokaiTheme.purple],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: const Center(
-        child: Text(
-          'C',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 18,
-            fontWeight: FontWeight.bold,
-            fontFamily: MonokaiTheme.fontFamilyMono,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _NavButton extends StatefulWidget {
+/// Icon Rail Button - matches Swift IconRailButton exactly
+class _RailButton extends StatefulWidget {
   final IconData icon;
-  final IconData activeIcon;
-  final String tooltip;
-  final bool isActive;
+  final String label;
+  final bool isSelected;
+  final String shortcut;
+  final Color accentColor;
+  final bool showLabel;
   final VoidCallback onTap;
-  final int badgeCount;
   
-  const _NavButton({
+  const _RailButton({
     required this.icon,
-    required this.activeIcon,
-    required this.tooltip,
-    required this.isActive,
+    required this.label,
+    required this.isSelected,
+    this.shortcut = '',
+    this.accentColor = const Color(0xFFA6E22E),  // Default green
+    this.showLabel = true,
     required this.onTap,
-    this.badgeCount = 0,
   });
   
   @override
-  State<_NavButton> createState() => _NavButtonState();
+  State<_RailButton> createState() => _RailButtonState();
 }
 
-class _NavButtonState extends State<_NavButton> {
+class _RailButtonState extends State<_RailButton> {
   bool _isHovered = false;
+  
+  Color get iconColor {
+    if (widget.isSelected) return widget.accentColor;
+    if (_isHovered) return const Color(0xFFF8F8F2);
+    return const Color(0xFF808080);
+  }
+  
+  Color get labelColor {
+    if (widget.isSelected) return widget.accentColor;
+    return const Color(0xFF808080);
+  }
   
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: widget.tooltip,
+      message: widget.shortcut.isNotEmpty ? '${widget.label} (${widget.shortcut})' : widget.label,
       preferBelow: false,
-      waitDuration: const Duration(milliseconds: 300),
+      waitDuration: const Duration(milliseconds: 400),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+        padding: const EdgeInsets.symmetric(vertical: 2),
         child: MouseRegion(
           onEnter: (_) => setState(() => _isHovered = true),
           onExit: (_) => setState(() => _isHovered = false),
           child: GestureDetector(
             onTap: widget.onTap,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 150),
-              width: 36,
-              height: 36,
-              decoration: BoxDecoration(
-                color: widget.isActive
-                    ? MonokaiTheme.cyan.withOpacity(0.15)
-                    : _isHovered
-                        ? MonokaiTheme.hover
-                        : Colors.transparent,
-                borderRadius: BorderRadius.circular(8),
-                border: widget.isActive
-                    ? Border.all(color: MonokaiTheme.cyan.withOpacity(0.3))
-                    : null,
-              ),
-              child: Stack(
-                alignment: Alignment.center,
-                children: [
-                  Icon(
-                    widget.isActive ? widget.activeIcon : widget.icon,
-                    size: 20,
-                    color: widget.isActive
-                        ? MonokaiTheme.cyan
-                        : _isHovered
-                            ? MonokaiTheme.textSecondary
-                            : MonokaiTheme.textMuted,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Icon container - matches Swift: frame(width: 44, height: 28)
+                Container(
+                  width: 44,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: widget.isSelected 
+                        ? widget.accentColor.withOpacity(0.15) 
+                        : (_isHovered ? const Color(0xFF2A2A2A) : Colors.transparent),
+                    borderRadius: BorderRadius.circular(6),
                   ),
-                  if (widget.badgeCount > 0)
-                    Positioned(
-                      top: 4,
-                      right: 4,
-                      child: Container(
-                        width: 14,
-                        height: 14,
-                        decoration: const BoxDecoration(
-                          color: MonokaiTheme.red,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Center(
-                          child: Text(
-                            widget.badgeCount > 9 ? '9+' : '${widget.badgeCount}',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 9,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
-                      ),
+                  child: Icon(
+                    widget.icon,
+                    size: 18,  // Match Swift: font(.system(size: 18))
+                    color: iconColor,
+                  ),
+                ),
+                
+                // Label - matches Swift: font(.system(size: 9, weight: .medium))
+                if (widget.showLabel) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w500,
+                      color: labelColor,
                     ),
+                  ),
                 ],
-              ),
+              ],
             ),
           ),
         ),

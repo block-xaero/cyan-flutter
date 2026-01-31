@@ -5,13 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 class MonokaiTheme {
-  // Core Monokai Pro colors
-  static const Color background = Color(0xFF1A1A1A);
-  static const Color surface = Color(0xFF1E1E1E);
-  static const Color surfaceLight = Color(0xFF252526);
-  static const Color surfaceLighter = Color(0xFF2D2D2D);
-  static const Color foreground = Color(0xFFF8F8F2);
-  static const Color comment = Color(0xFF75715E);
+  // Core Monokai Pro colors - matching Swift CyanTheme.monokai exactly
+  static const Color background = Color(0xFF272822);  // Swift: "272822"
+  static const Color surface = Color(0xFF3E3D32);     // Swift: "3E3D32"
+  static const Color surfaceLight = Color(0xFF4E4D42); // Swift: surfaceHover
+  static const Color surfaceLighter = Color(0xFF2A2A2A);
+  static const Color foreground = Color(0xFFF8F8F2);  // Swift: "F8F8F2"
+  static const Color comment = Color(0xFF75715E);     // Swift: "75715E"
   
   // Accent colors (Monokai Pro)
   static const Color cyan = Color(0xFF66D9EF);
@@ -22,11 +22,11 @@ class MonokaiTheme {
   static const Color purple = Color(0xFFAE81FF);
   static const Color pink = Color(0xFFFF79C6);
   
-  // UI colors
+  // UI colors - matching Swift
   static const Color selection = Color(0xFF49483E);
-  static const Color border = Color(0xFF3E3D32);
-  static const Color divider = Color(0xFF2A2A2A);
-  static const Color hover = Color(0xFF323232);
+  static const Color border = Color(0xFF4A4A40);      // Swift: divider "4A4A40"
+  static const Color divider = Color(0xFF4A4A40);
+  static const Color hover = Color(0xFF2A2A2A);
   static const Color active = Color(0xFF264F78);
   
   // Text hierarchy

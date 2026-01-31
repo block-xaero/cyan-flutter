@@ -8,6 +8,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'ffi_helpers.dart';
+import '../models/chat_models.dart' show ChatMessage;
 
 // ============================================================================
 // BASE INTERFACES
@@ -312,8 +313,59 @@ class ChatCommand implements ComponentCommand {
   factory ChatCommand.deleteMessage({required String id}) =>
       ChatCommand._('DeleteChat', {'id': id});
   
-  factory ChatCommand.loadHistory({required String workspaceId}) =>
-      ChatCommand._('LoadChatHistory', {'workspace_id': workspaceId});
+  factory ChatCommand.loadHistory({
+    required String workspaceId,
+    String? scope,
+    String? scopeId,
+  }) => ChatCommand._('LoadChatHistory', {
+    'workspace_id': workspaceId,
+    if (scope != null) 'scope': scope,
+    if (scopeId != null) 'scope_id': scopeId,
+  });
+  
+  // Scoped chat - group/workspace/board
+  factory ChatCommand.loadScopedHistory({
+    required String scope,  // 'group', 'workspace', 'board'
+    required String scopeId,
+  }) => ChatCommand._('LoadChatHistory', {
+    'scope': scope,
+    'scope_id': scopeId,
+  });
+  
+  factory ChatCommand.send({
+    required String scope,
+    required String scopeId,
+    required String content,
+    String? parentId,
+  }) {
+    // Map scope to appropriate command type
+    switch (scope) {
+      case 'group':
+        return ChatCommand._('SendGroupChat', {
+          'group_id': scopeId,
+          'message': content,
+          if (parentId != null) 'parent_id': parentId,
+        });
+      case 'workspace':
+        return ChatCommand._('SendChat', {
+          'workspace_id': scopeId,
+          'message': content,
+          if (parentId != null) 'parent_id': parentId,
+        });
+      case 'board':
+        return ChatCommand._('SendBoardChat', {
+          'board_id': scopeId,
+          'message': content,
+          if (parentId != null) 'parent_id': parentId,
+        });
+      default:
+        return ChatCommand._('SendChat', {
+          'workspace_id': scopeId,
+          'message': content,
+          if (parentId != null) 'parent_id': parentId,
+        });
+    }
+  }
   
   // Direct messages
   factory ChatCommand.startDirectChat({
@@ -396,8 +448,10 @@ class ChatEvent implements ComponentEvent {
   
   // Message types matching Swift ChatEvent cases
   bool get isMessage => type == 'ChatReceived' || type == 'ChatSent';
+  bool get isMessageReceived => type == 'ChatReceived' || type == 'ChatSent';
   bool get isMessageDeleted => type == 'ChatDeleted';
   bool get isHistory => type == 'ChatHistory';
+  bool get isHistoryLoaded => type == 'ChatHistory' || type == 'ChatHistoryLoaded';
   bool get isPeerJoined => type == 'PeerJoined';
   bool get isPeerLeft => type == 'PeerLeft';
   bool get isStreamReady => type == 'ChatStreamReady';
@@ -427,6 +481,35 @@ class ChatEvent implements ComponentEvent {
   }
   
   DateTime get timestampDate => DateTime.fromMillisecondsSinceEpoch(timestamp * 1000);
+  
+  /// Parse messages array from history event
+  List<ChatMessage> get messages {
+    final messagesArray = data['messages'] as List<dynamic>? ?? data['history'] as List<dynamic>? ?? [];
+    return messagesArray.map((m) {
+      if (m is Map<String, dynamic>) {
+        return ChatMessage.fromJson(m);
+      }
+      return null;
+    }).whereType<ChatMessage>().toList();
+  }
+  
+  /// Get single message from event (for ChatReceived)
+  ChatMessage? get singleMessage {
+    if (messageId == null) return null;
+    return ChatMessage(
+      id: messageId!,
+      workspaceId: workspaceId ?? '',
+      message: message ?? '',
+      authorId: author ?? '',
+      authorName: data['author_name'] as String?,
+      parentId: parentId,
+      timestamp: timestampDate,
+      mentions: mentions,
+      isBroadcast: isBroadcast,
+      mentionsMe: mentionsMe,
+      isOwn: data['is_own'] as bool? ?? false,
+    );
+  }
 }
 
 // ============================================================================

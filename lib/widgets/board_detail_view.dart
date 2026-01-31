@@ -2,13 +2,16 @@
 // Board detail view with face selector (Canvas, Notebook, Notes)
 // Uses VSCodeNotesEditor for syntax highlighting
 
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/selection_provider.dart';
 import '../providers/navigation_provider.dart';
 import '../providers/chat_provider.dart';
 import '../theme/monokai_theme.dart';
-import 'vscode_markdown.dart';
+import '../ffi/ffi_helpers.dart';
+import 'vscode_markdown.dart' show VSCodeBlock;
+import 'vscode_notes_editor.dart';
 
 enum BoardFace {
   canvas('canvas', Icons.brush, 'Canvas'),
@@ -34,6 +37,47 @@ class BoardDetailView extends ConsumerStatefulWidget {
 class _BoardDetailViewState extends ConsumerState<BoardDetailView> {
   BoardFace _activeFace = BoardFace.notes;
   bool _showChat = false;
+  bool _faceLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadActiveFace();
+  }
+  
+  @override
+  void didUpdateWidget(BoardDetailView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.boardId != widget.boardId) {
+      _faceLoaded = false;
+      _loadActiveFace();
+    }
+  }
+  
+  void _loadActiveFace() {
+    if (_faceLoaded) return;
+    _faceLoaded = true;
+    
+    // Load saved face from FFI
+    final mode = CyanFFI.getBoardMode(widget.boardId);
+    if (mode != null && mode.isNotEmpty) {
+      setState(() {
+        _activeFace = BoardFace.values.firstWhere(
+          (f) => f.value == mode,
+          orElse: () => BoardFace.notes,
+        );
+      });
+    }
+  }
+  
+  void _setActiveFace(BoardFace face) {
+    if (_activeFace == face) return;
+    
+    // Save to FFI
+    CyanFFI.setBoardMode(widget.boardId, face.value);
+    
+    setState(() => _activeFace = face);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +162,7 @@ class _BoardDetailViewState extends ConsumerState<BoardDetailView> {
         children: BoardFace.values.map((face) => _FaceButton(
           face: face,
           isActive: _activeFace == face,
-          onTap: () => setState(() => _activeFace = face),
+          onTap: () => _setActiveFace(face),
         )).toList(),
       ),
     );
@@ -302,13 +346,69 @@ class _NotebookView extends StatefulWidget {
 }
 
 class _NotebookViewState extends State<_NotebookView> {
-  final _cells = <_NotebookCell>[
-    _NotebookCell(type: CellType.markdown, content: '# Welcome\n\nStart writing markdown here...'),
-  ];
+  List<_NotebookCell> _cells = [];
   int? _selectedIdx;
+  bool _loading = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCells();
+  }
+  
+  void _loadCells() {
+    final json = CyanFFI.loadNotebookCells(widget.boardId);
+    if (json != null && json.isNotEmpty) {
+      try {
+        final list = jsonDecode(json) as List<dynamic>;
+        _cells = list.map((c) {
+          final map = c as Map<String, dynamic>;
+          return _NotebookCell(
+            id: map['id'] as String? ?? DateTime.now().millisecondsSinceEpoch.toString(),
+            type: _parseCellType(map['cell_type'] as String? ?? 'markdown'),
+            content: map['content'] as String? ?? '',
+          );
+        }).toList();
+      } catch (e) {
+        debugPrint('Error loading cells: $e');
+      }
+    }
+    
+    // Add default cell if empty
+    if (_cells.isEmpty) {
+      _cells.add(_NotebookCell(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        type: CellType.markdown,
+        content: '# Welcome\n\nStart writing markdown here...',
+      ));
+      _saveCell(_cells.first);
+    }
+    
+    setState(() => _loading = false);
+  }
+  
+  CellType _parseCellType(String type) {
+    switch (type) {
+      case 'code': return CellType.code;
+      case 'sql': return CellType.sql;
+      default: return CellType.markdown;
+    }
+  }
+  
+  void _saveCell(_NotebookCell cell) {
+    CyanFFI.saveNotebookCell(widget.boardId, {
+      'id': cell.id,
+      'cell_type': cell.type.name,
+      'content': cell.content,
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    
     return Column(
       children: [
         _buildToolbar(),
@@ -443,16 +543,28 @@ class _NotebookViewState extends State<_NotebookView> {
   }
 
   void _addCell(CellType type) {
+    final cell = _NotebookCell(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      type: type,
+      content: '',
+    );
     setState(() {
-      _cells.add(_NotebookCell(type: type, content: ''));
+      _cells.add(cell);
       _selectedIdx = _cells.length - 1;
     });
+    _saveCell(cell);
   }
 
   void _updateCell(int idx, String content) {
+    final cell = _NotebookCell(
+      id: _cells[idx].id,
+      type: _cells[idx].type,
+      content: content,
+    );
     setState(() {
-      _cells[idx] = _NotebookCell(type: _cells[idx].type, content: content);
+      _cells[idx] = cell;
     });
+    _saveCell(cell);
   }
 
   void _moveCell(int idx, int delta) {
@@ -461,13 +573,17 @@ class _NotebookViewState extends State<_NotebookView> {
       _cells.insert(idx + delta, cell);
       _selectedIdx = idx + delta;
     });
+    // Save new order
+    CyanFFI.reorderNotebookCells(widget.boardId, _cells.map((c) => c.id).toList());
   }
 
   void _deleteCell(int idx) {
+    final cellId = _cells[idx].id;
     setState(() {
       _cells.removeAt(idx);
       _selectedIdx = null;
     });
+    CyanFFI.deleteNotebookCell(widget.boardId, cellId);
   }
 }
 
@@ -544,9 +660,14 @@ enum CellType {
 }
 
 class _NotebookCell {
+  final String id;
   final CellType type;
   final String content;
-  _NotebookCell({required this.type, required this.content});
+  _NotebookCell({
+    String? id,
+    required this.type,
+    required this.content,
+  }) : id = id ?? DateTime.now().millisecondsSinceEpoch.toString();
 }
 
 // ============================================================================
@@ -562,36 +683,74 @@ class _NotesView extends StatefulWidget {
 }
 
 class _NotesViewState extends State<_NotesView> {
-  String _content = '''# Notes
+  String _content = '';
+  String? _cellId;
+  bool _loading = true;
+  
+  static const _defaultContent = '''# Notes
 
 Welcome to VSCode-style notes!
 
-## Code Examples
-
-\`\`\`sql
-SELECT * FROM users
-WHERE created_at > '2024-01-01'
-ORDER BY name;
-\`\`\`
-
-\`\`\`json
-{
-  "name": "Cyan",
-  "version": "1.0.0",
-  "features": ["P2P", "Offline-first"]
-}
-\`\`\`
-
-## TODO
-- [ ] Add more features
-- [x] Implement syntax highlighting
+Start writing here...
 ''';
 
   @override
+  void initState() {
+    super.initState();
+    _loadContent();
+  }
+  
+  void _loadContent() {
+    // Notes view uses a single markdown cell
+    final json = CyanFFI.loadNotebookCells(widget.boardId);
+    if (json != null && json.isNotEmpty) {
+      try {
+        final list = jsonDecode(json) as List<dynamic>;
+        // Find first markdown cell
+        for (final c in list) {
+          final map = c as Map<String, dynamic>;
+          if (map['cell_type'] == 'markdown') {
+            _cellId = map['id'] as String?;
+            _content = map['content'] as String? ?? '';
+            break;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error loading notes: $e');
+      }
+    }
+    
+    // Create default cell if none exists
+    if (_content.isEmpty) {
+      _content = _defaultContent;
+      _cellId = DateTime.now().millisecondsSinceEpoch.toString();
+      _saveContent();
+    }
+    
+    setState(() => _loading = false);
+  }
+  
+  void _saveContent() {
+    if (_cellId == null) return;
+    CyanFFI.saveNotebookCell(widget.boardId, {
+      'id': _cellId,
+      'cell_type': 'markdown',
+      'content': _content,
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    
     return VSCodeNotesEditor(
       initialContent: _content,
-      onChanged: (text) => setState(() => _content = text),
+      onChanged: (text) {
+        setState(() => _content = text);
+      },
+      onSave: _saveContent,
     );
   }
 }

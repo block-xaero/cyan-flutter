@@ -311,6 +311,34 @@ class ChatContextInfo {
         return const Color(0xFFFD971F);
     }
   }
+  
+  /// Scope string for FFI (group/workspace/board)
+  String get scope {
+    switch (type) {
+      case ChatContextType.global:
+        return 'global';
+      case ChatContextType.group:
+        return 'group';
+      case ChatContextType.workspace:
+        return 'workspace';
+      case ChatContextType.board:
+        return 'board';
+      case ChatContextType.directMessage:
+        return 'dm';
+    }
+  }
+  
+  /// Display name
+  String get name => displayName;
+  
+  /// Raw ID without prefix (for FFI)
+  String get rawId {
+    if (id.startsWith('ws:')) return id.substring(3);
+    if (id.startsWith('g:')) return id.substring(2);
+    if (id.startsWith('b:')) return id.substring(2);
+    if (id.startsWith('dm:')) return id.substring(3);
+    return id;
+  }
 
   // Factory methods
   static ChatContextInfo global() => const ChatContextInfo(
