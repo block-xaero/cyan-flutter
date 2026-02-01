@@ -524,17 +524,11 @@ class _NotebookViewState extends State<_NotebookView> {
             // Cell content
             Container(
               constraints: const BoxConstraints(minHeight: 100),
-              child: cell.type == CellType.markdown
-                  ? _MarkdownCell(
-                      content: cell.content,
-                      onChanged: (v) => _updateCell(idx, v),
-                    )
-                  : VSCodeBlock(
-                      code: cell.content.isEmpty ? '// Enter code here' : cell.content,
-                      language: cell.type == CellType.sql ? 'sql' : null,
-                      showLineNumbers: true,
-                      maxHeight: 300,
-                    ),
+              child: _EditableCell(
+                content: cell.content,
+                cellType: cell.type,
+                onChanged: (v) => _updateCell(idx, v),
+              ),
             ),
           ],
         ),
@@ -622,28 +616,88 @@ class _AddCellButton extends StatelessWidget {
   }
 }
 
-class _MarkdownCell extends StatelessWidget {
+class _EditableCell extends StatefulWidget {
   final String content;
+  final CellType cellType;
   final ValueChanged<String> onChanged;
 
-  const _MarkdownCell({required this.content, required this.onChanged});
+  const _EditableCell({
+    required this.content,
+    required this.cellType,
+    required this.onChanged,
+  });
+
+  @override
+  State<_EditableCell> createState() => _EditableCellState();
+}
+
+class _EditableCellState extends State<_EditableCell> {
+  late TextEditingController _controller;
+  
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController(text: widget.content);
+  }
+  
+  @override
+  void didUpdateWidget(_EditableCell oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Only update if content changed externally (not from user typing)
+    if (oldWidget.content != widget.content && 
+        _controller.text != widget.content) {
+      _controller.text = widget.content;
+    }
+  }
+  
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  String get _hintText {
+    switch (widget.cellType) {
+      case CellType.markdown:
+        return 'Write markdown...';
+      case CellType.code:
+        return '# Python code here\nimport pandas as pd\n';
+      case CellType.sql:
+        return 'SELECT * FROM table;';
+    }
+  }
+  
+  Color get _accentColor => widget.cellType.color;
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: TextEditingController(text: content),
-      maxLines: null,
-      style: MonokaiTheme.bodyMedium.copyWith(
-        fontFamily: 'monospace',
-        color: MonokaiTheme.textPrimary,
+    return Container(
+      decoration: BoxDecoration(
+        color: widget.cellType == CellType.markdown 
+            ? Colors.transparent 
+            : const Color(0xFF1E1E1E),
+        borderRadius: const BorderRadius.only(
+          bottomLeft: Radius.circular(7),
+          bottomRight: Radius.circular(7),
+        ),
       ),
-      decoration: const InputDecoration(
-        contentPadding: EdgeInsets.all(12),
-        border: InputBorder.none,
-        hintText: 'Write markdown...',
-        hintStyle: TextStyle(color: MonokaiTheme.textMuted),
+      child: TextField(
+        controller: _controller,
+        maxLines: null,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 13,
+          height: 1.5,
+          color: MonokaiTheme.textPrimary,
+        ),
+        decoration: InputDecoration(
+          contentPadding: const EdgeInsets.all(12),
+          border: InputBorder.none,
+          hintText: _hintText,
+          hintStyle: TextStyle(color: MonokaiTheme.textMuted.withOpacity(0.5)),
+        ),
+        onChanged: widget.onChanged,
       ),
-      onChanged: onChanged,
     );
   }
 }
@@ -687,6 +741,10 @@ class _NotesViewState extends State<_NotesView> {
   String? _cellId;
   bool _loading = true;
   
+  // Debounce timer for auto-save
+  DateTime? _lastChange;
+  bool _pendingSave = false;
+  
   static const _defaultContent = '''# Notes
 
 Welcome to VSCode-style notes!
@@ -703,15 +761,19 @@ Start writing here...
   void _loadContent() {
     // Notes view uses a single markdown cell
     final json = CyanFFI.loadNotebookCells(widget.boardId);
+    debugPrint('_NotesView: loadNotebookCells returned: ${json?.substring(0, (json.length > 100 ? 100 : json.length))}...');
+    
     if (json != null && json.isNotEmpty) {
       try {
         final list = jsonDecode(json) as List<dynamic>;
+        debugPrint('_NotesView: Found ${list.length} cells');
         // Find first markdown cell
         for (final c in list) {
           final map = c as Map<String, dynamic>;
           if (map['cell_type'] == 'markdown') {
             _cellId = map['id'] as String?;
             _content = map['content'] as String? ?? '';
+            debugPrint('_NotesView: Loaded content length: ${_content.length}');
             break;
           }
         }
@@ -721,9 +783,10 @@ Start writing here...
     }
     
     // Create default cell if none exists
-    if (_content.isEmpty) {
+    if (_content.isEmpty && _cellId == null) {
       _content = _defaultContent;
       _cellId = DateTime.now().millisecondsSinceEpoch.toString();
+      debugPrint('_NotesView: Creating default cell with id $_cellId');
       _saveContent();
     }
     
@@ -732,10 +795,29 @@ Start writing here...
   
   void _saveContent() {
     if (_cellId == null) return;
-    CyanFFI.saveNotebookCell(widget.boardId, {
+    debugPrint('_NotesView: Saving content length ${_content.length} for cell $_cellId');
+    final result = CyanFFI.saveNotebookCell(widget.boardId, {
       'id': _cellId,
       'cell_type': 'markdown',
       'content': _content,
+    });
+    debugPrint('_NotesView: Save result: $result');
+    _pendingSave = false;
+  }
+  
+  void _onContentChanged(String text) {
+    _content = text;
+    _lastChange = DateTime.now();
+    _pendingSave = true;
+    
+    // Auto-save after 500ms of no changes
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (_pendingSave && mounted) {
+        final now = DateTime.now();
+        if (_lastChange != null && now.difference(_lastChange!).inMilliseconds >= 450) {
+          _saveContent();
+        }
+      }
     });
   }
 
@@ -747,9 +829,7 @@ Start writing here...
     
     return VSCodeNotesEditor(
       initialContent: _content,
-      onChanged: (text) {
-        setState(() => _content = text);
-      },
+      onChanged: _onContentChanged,
       onSave: _saveContent,
     );
   }

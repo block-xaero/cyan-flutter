@@ -9,9 +9,14 @@ import 'screens/login_screen.dart';
 import 'screens/workspace_screen.dart';
 import 'screens/profile_screen.dart';
 import 'providers/auth_provider.dart';
+import 'ffi/ffi_helpers.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  
+  // Initialize notebook cache for persistence
+  await CyanFFI.initializeCache();
+  
   runApp(
     const ProviderScope(
       child: CyanApp(),

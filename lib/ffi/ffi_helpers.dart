@@ -1,11 +1,137 @@
 // ffi/ffi_helpers.dart
 // Safe Dart wrappers for all FFI functions
 // Handles memory allocation/deallocation, null checks, string conversion
+//
+// NOTE: Requires path_provider package in pubspec.yaml:
+//   dependencies:
+//     path_provider: ^2.1.0
 
 import 'dart:convert';
 import 'dart:ffi';
+import 'dart:io';
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
+import 'package:path_provider/path_provider.dart';
 import 'cyan_bindings.dart';
+
+// ============================================================================
+// IN-MEMORY FALLBACK CACHE WITH FILE PERSISTENCE
+// ============================================================================
+import 'package:path_provider/path_provider.dart';
+
+/// In-memory cache for notebook cells with file persistence
+class _NotebookCache {
+  static final Map<String, List<Map<String, dynamic>>> _cells = {};
+  static final Map<String, String> _boardModes = {};
+  static bool _initialized = false;
+  static String? _cacheDir;
+  
+  static Future<void> _ensureInitialized() async {
+    if (_initialized) return;
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      _cacheDir = '${dir.path}/cyan_cache';
+      await Directory(_cacheDir!).create(recursive: true);
+      await _loadFromDisk();
+      _initialized = true;
+    } catch (e) {
+      debugPrint('_NotebookCache init error: $e');
+      _initialized = true; // Mark as initialized even on error to avoid retries
+    }
+  }
+  
+  static Future<void> _loadFromDisk() async {
+    if (_cacheDir == null) return;
+    try {
+      final cellsFile = File('$_cacheDir/cells.json');
+      if (await cellsFile.exists()) {
+        final content = await cellsFile.readAsString();
+        final data = jsonDecode(content) as Map<String, dynamic>;
+        data.forEach((boardId, cells) {
+          _cells[boardId] = (cells as List).cast<Map<String, dynamic>>();
+        });
+        debugPrint('_NotebookCache: Loaded ${_cells.length} boards from disk');
+      }
+      
+      final modesFile = File('$_cacheDir/modes.json');
+      if (await modesFile.exists()) {
+        final content = await modesFile.readAsString();
+        final data = jsonDecode(content) as Map<String, dynamic>;
+        data.forEach((boardId, mode) {
+          _boardModes[boardId] = mode as String;
+        });
+      }
+    } catch (e) {
+      debugPrint('_NotebookCache load error: $e');
+    }
+  }
+  
+  static Future<void> _saveToDisk() async {
+    if (_cacheDir == null) return;
+    try {
+      // Save cells
+      final cellsFile = File('$_cacheDir/cells.json');
+      await cellsFile.writeAsString(jsonEncode(_cells));
+      
+      // Save modes
+      final modesFile = File('$_cacheDir/modes.json');
+      await modesFile.writeAsString(jsonEncode(_boardModes));
+      
+      debugPrint('_NotebookCache: Saved to disk');
+    } catch (e) {
+      debugPrint('_NotebookCache save error: $e');
+    }
+  }
+  
+  static void saveCell(String boardId, Map<String, dynamic> cell) {
+    _cells.putIfAbsent(boardId, () => []);
+    final cellId = cell['id'] as String?;
+    if (cellId != null) {
+      final idx = _cells[boardId]!.indexWhere((c) => c['id'] == cellId);
+      if (idx >= 0) {
+        _cells[boardId]![idx] = Map<String, dynamic>.from(cell);
+      } else {
+        _cells[boardId]!.add(Map<String, dynamic>.from(cell));
+      }
+    }
+    debugPrint('_NotebookCache: Saved cell for $boardId, total cells: ${_cells[boardId]!.length}');
+    _saveToDisk(); // Persist immediately
+  }
+  
+  static Future<List<Map<String, dynamic>>?> getCellsAsync(String boardId) async {
+    await _ensureInitialized();
+    return _cells[boardId];
+  }
+  
+  static List<Map<String, dynamic>>? getCells(String boardId) {
+    // Synchronous version - may miss data if not initialized
+    return _cells[boardId];
+  }
+  
+  static void deleteCell(String boardId, String cellId) {
+    _cells[boardId]?.removeWhere((c) => c['id'] == cellId);
+    _saveToDisk();
+  }
+  
+  static void setBoardMode(String boardId, String mode) {
+    _boardModes[boardId] = mode;
+    _saveToDisk();
+  }
+  
+  static Future<String?> getBoardModeAsync(String boardId) async {
+    await _ensureInitialized();
+    return _boardModes[boardId];
+  }
+  
+  static String? getBoardMode(String boardId) {
+    return _boardModes[boardId];
+  }
+  
+  /// Initialize cache - call this early in app startup
+  static Future<void> initialize() async {
+    await _ensureInitialized();
+  }
+}
 
 // ============================================================================
 // STRING HELPERS
@@ -31,6 +157,15 @@ extension Utf8PointerExt on Pointer<Utf8> {
 /// - pollEvents() dequeues JSON event from Rust
 class CyanFFI {
   static final _b = CyanBindings.instance;
+  
+  // ==========================================================================
+  // CACHE INITIALIZATION
+  // ==========================================================================
+  
+  /// Initialize the notebook cache - call early in app startup
+  static Future<void> initializeCache() async {
+    await _NotebookCache.initialize();
+  }
   
   // ==========================================================================
   // LIFECYCLE
@@ -382,18 +517,31 @@ class CyanFFI {
     final bPtr = boardId.toNativeUtf8();
     try {
       final ptr = _b.getBoardMode(bPtr);
-      if (ptr == nullptr) return null;
-      return ptr.toDartStringAndFree();
+      if (ptr != nullptr) {
+        final mode = ptr.toDartStringAndFree();
+        if (mode.isNotEmpty) return mode;
+      }
+    } catch (e) {
+      debugPrint('CyanFFI.getBoardMode FFI error: $e');
     } finally {
       calloc.free(bPtr);
     }
+    
+    // Fallback to in-memory cache
+    return _NotebookCache.getBoardMode(boardId);
   }
   
   static bool setBoardMode(String boardId, String mode) {
+    // Always save to in-memory cache
+    _NotebookCache.setBoardMode(boardId, mode);
+    
     final bPtr = boardId.toNativeUtf8();
     final mPtr = mode.toNativeUtf8();
     try {
       return _b.setBoardMode(bPtr, mPtr);
+    } catch (e) {
+      debugPrint('CyanFFI.setBoardMode FFI error: $e');
+      return true; // Return true since we saved to cache
     } finally {
       calloc.free(bPtr);
       calloc.free(mPtr);
@@ -810,18 +958,42 @@ class CyanFFI {
     final ptr = boardId.toNativeUtf8();
     try {
       final result = _b.loadNotebookCells(ptr);
-      if (result == nullptr) return null;
-      return result.toDartStringAndFree();
+      if (result != nullptr) {
+        final json = result.toDartStringAndFree();
+        if (json.isNotEmpty && json != '[]') {
+          debugPrint('CyanFFI.loadNotebookCells: FFI returned $json');
+          return json;
+        }
+      }
+    } catch (e) {
+      debugPrint('CyanFFI.loadNotebookCells FFI error: $e');
     } finally {
       calloc.free(ptr);
     }
+    
+    // Fallback to in-memory cache
+    final cached = _NotebookCache.getCells(boardId);
+    if (cached != null && cached.isNotEmpty) {
+      debugPrint('CyanFFI.loadNotebookCells: Using cached data for $boardId');
+      return jsonEncode(cached);
+    }
+    
+    return null;
   }
   
   static bool saveNotebookCell(String boardId, Map<String, dynamic> cell) {
+    // Always save to in-memory cache first
+    _NotebookCache.saveCell(boardId, cell);
+    
     final bPtr = boardId.toNativeUtf8();
     final cPtr = jsonEncode(cell).toNativeUtf8();
     try {
-      return _b.saveNotebookCell(bPtr, cPtr);
+      final result = _b.saveNotebookCell(bPtr, cPtr);
+      debugPrint('CyanFFI.saveNotebookCell: FFI result=$result for $boardId');
+      return result;
+    } catch (e) {
+      debugPrint('CyanFFI.saveNotebookCell FFI error: $e');
+      return true; // Return true since we saved to cache
     } finally {
       calloc.free(bPtr);
       calloc.free(cPtr);
@@ -829,10 +1001,16 @@ class CyanFFI {
   }
   
   static bool deleteNotebookCell(String boardId, String cellId) {
+    // Delete from in-memory cache
+    _NotebookCache.deleteCell(boardId, cellId);
+    
     final bPtr = boardId.toNativeUtf8();
     final cPtr = cellId.toNativeUtf8();
     try {
       return _b.deleteNotebookCell(bPtr, cPtr);
+    } catch (e) {
+      debugPrint('CyanFFI.deleteNotebookCell FFI error: $e');
+      return true; // Return true since we deleted from cache
     } finally {
       calloc.free(bPtr);
       calloc.free(cPtr);

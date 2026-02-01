@@ -545,7 +545,7 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
   @override
   void initState() {
     super.initState();
-    // Defer FFI calls to avoid blocking UI during grid render
+    // Always load metadata on init
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _loadMetadataAsync();
     });
@@ -555,16 +555,22 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
   void didUpdateWidget(_BoardCard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.board.board.id != widget.board.board.id) {
-      _metadataLoaded = false;
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _loadMetadataAsync();
-      });
+      _resetAndReload();
     }
   }
   
+  // Force reload when we navigate back to the grid
+  void _resetAndReload() {
+    _metadataLoaded = false;
+    _notesPreview = '';
+    _notebookCells = [];
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _loadMetadataAsync();
+    });
+  }
+  
   Future<void> _loadMetadataAsync() async {
-    if (_metadataLoaded) return;
-    
+    // Allow reload by not checking _metadataLoaded at the start
     final boardId = widget.board.board.id;
     
     // Use Future.delayed to ensure this doesn't block initial render
@@ -578,6 +584,7 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
       final mode = CyanFFI.getBoardMode(boardId);
       if (mode != null && mode.isNotEmpty) {
         _activeFace = mode;
+        debugPrint('BoardCard[$boardId]: mode=$_activeFace');
       }
       
       final metadataJson = CyanFFI.getBoardMetadata(boardId);
@@ -589,9 +596,13 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
       
       // Load notebook cells for all face types (they share the same storage)
       final cellsJson = CyanFFI.loadNotebookCells(boardId);
+      debugPrint('BoardCard[$boardId]: loadNotebookCells returned ${cellsJson?.length ?? 0} bytes');
+      
       if (cellsJson != null && cellsJson.isNotEmpty) {
         try {
           final cells = json.decode(cellsJson) as List<dynamic>;
+          debugPrint('BoardCard[$boardId]: Found ${cells.length} cells');
+          
           _notebookCells = cells.map((cell) {
             final cellMap = cell as Map<String, dynamic>;
             final cellType = cellMap['cell_type'] as String? ?? 'markdown';
@@ -623,14 +634,17 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
               _notesPreview = content.length > 300 
                   ? '${content.substring(0, 300)}...' 
                   : content;
+              debugPrint('BoardCard[$boardId]: notesPreview length=${_notesPreview.length}');
             }
           }
         } catch (e) {
-          debugPrint('Error parsing cells: $e');
+          debugPrint('Error parsing cells for $boardId: $e');
         }
+      } else {
+        debugPrint('BoardCard[$boardId]: No cells found');
       }
     } catch (e) {
-      debugPrint('Board metadata load error: $e');
+      debugPrint('Board metadata load error for $boardId: $e');
     }
     
     _metadataLoaded = true;
@@ -697,53 +711,10 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
       );
     }
     
-    // Show actual notes content with VSCode styling
-    return Container(
+    // Show simple formatted markdown preview
+    return Padding(
       padding: const EdgeInsets.all(10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Mini VSCode title bar
-          Container(
-            height: 14,
-            margin: const EdgeInsets.only(bottom: 6),
-            decoration: BoxDecoration(
-              color: const Color(0xFF252525),
-              borderRadius: BorderRadius.circular(2),
-            ),
-            child: Row(
-              children: [
-                Container(width: 6, height: 6, margin: const EdgeInsets.only(left: 4), decoration: const BoxDecoration(color: Color(0xFFFF5F56), shape: BoxShape.circle)),
-                Container(width: 6, height: 6, margin: const EdgeInsets.only(left: 3), decoration: const BoxDecoration(color: Color(0xFFFFBD2E), shape: BoxShape.circle)),
-                Container(width: 6, height: 6, margin: const EdgeInsets.only(left: 3), decoration: const BoxDecoration(color: Color(0xFF27C93F), shape: BoxShape.circle)),
-              ],
-            ),
-          ),
-          // Content preview
-          Expanded(
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1E1E1E),
-                borderRadius: BorderRadius.circular(4),
-                border: Border.all(color: const Color(0xFF3E3D32).withOpacity(0.5)),
-              ),
-              child: Text(
-                _notesPreview,
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 8,
-                  height: 1.3,
-                  color: const Color(0xFFF8F8F2).withOpacity(0.7),
-                ),
-                maxLines: 8,
-                overflow: TextOverflow.fade,
-              ),
-            ),
-          ),
-        ],
-      ),
+      child: _SimpleMarkdownPreview(content: _notesPreview),
     );
   }
   
@@ -1520,4 +1491,137 @@ class _ConnectionPainter extends CustomPainter {
   
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+/// Simple markdown preview renderer for board cards
+class _SimpleMarkdownPreview extends StatelessWidget {
+  final String content;
+  
+  const _SimpleMarkdownPreview({required this.content});
+  
+  @override
+  Widget build(BuildContext context) {
+    final lines = content.split('\n');
+    final widgets = <Widget>[];
+    
+    for (int i = 0; i < lines.length && widgets.length < 10; i++) {
+      final line = lines[i];
+      if (line.trim().isEmpty) {
+        widgets.add(const SizedBox(height: 4));
+        continue;
+      }
+      
+      // Parse line
+      Widget lineWidget;
+      
+      if (line.startsWith('# ')) {
+        // H1
+        lineWidget = Text(
+          line.substring(2),
+          style: const TextStyle(
+            fontSize: 12,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFFF8F8F2),
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      } else if (line.startsWith('## ')) {
+        // H2
+        lineWidget = Text(
+          line.substring(3),
+          style: const TextStyle(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFF66D9EF),
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      } else if (line.startsWith('### ')) {
+        // H3
+        lineWidget = Text(
+          line.substring(4),
+          style: const TextStyle(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: Color(0xFFA6E22E),
+          ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      } else if (line.startsWith('- ') || line.startsWith('* ')) {
+        // List item
+        lineWidget = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('• ', style: TextStyle(fontSize: 9, color: Color(0xFF75715E))),
+            Expanded(
+              child: Text(
+                line.substring(2),
+                style: TextStyle(fontSize: 9, color: const Color(0xFFF8F8F2).withOpacity(0.8)),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        );
+      } else if (line.startsWith('```')) {
+        // Code block start/end - show indicator
+        lineWidget = Container(
+          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+          decoration: BoxDecoration(
+            color: const Color(0xFF1E1E1E),
+            borderRadius: BorderRadius.circular(2),
+          ),
+          child: Text(
+            line.length > 3 ? line.substring(3) : 'code',
+            style: const TextStyle(fontSize: 8, color: Color(0xFFAE81FF), fontFamily: 'monospace'),
+          ),
+        );
+      } else if (line.startsWith('>')) {
+        // Blockquote
+        lineWidget = Container(
+          padding: const EdgeInsets.only(left: 6),
+          decoration: const BoxDecoration(
+            border: Border(left: BorderSide(color: Color(0xFF75715E), width: 2)),
+          ),
+          child: Text(
+            line.substring(1).trim(),
+            style: TextStyle(fontSize: 9, fontStyle: FontStyle.italic, color: const Color(0xFFF8F8F2).withOpacity(0.6)),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        );
+      } else {
+        // Regular text
+        lineWidget = Text(
+          _parseInlineFormatting(line),
+          style: TextStyle(fontSize: 9, color: const Color(0xFFF8F8F2).withOpacity(0.8)),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+        );
+      }
+      
+      widgets.add(Padding(
+        padding: const EdgeInsets.only(bottom: 2),
+        child: lineWidget,
+      ));
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: widgets,
+    );
+  }
+  
+  String _parseInlineFormatting(String text) {
+    // Simple cleanup - remove markdown syntax for preview
+    return text
+        .replaceAll(RegExp(r'\*\*(.+?)\*\*'), r'\1')  // Bold
+        .replaceAll(RegExp(r'\*(.+?)\*'), r'\1')      // Italic
+        .replaceAll(RegExp(r'`(.+?)`'), r'\1')        // Inline code
+        .replaceAll(RegExp(r'\[(.+?)\]\(.+?\)'), r'\1'); // Links
+  }
 }
