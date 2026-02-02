@@ -43,6 +43,13 @@ typedef CyanGetXaeroIdDart = Pointer<Utf8> Function();
 typedef CyanSetXaeroIdNative = Bool Function(Pointer<Utf8> id);
 typedef CyanSetXaeroIdDart = bool Function(Pointer<Utf8> id);
 
+// Identity generation/derivation
+typedef CyanGenerateIdentityJsonNative = Pointer<Utf8> Function();
+typedef CyanGenerateIdentityJsonDart = Pointer<Utf8> Function();
+
+typedef CyanDeriveIdentityNative = Pointer<Utf8> Function(Pointer<Utf8> secretKeyHex);
+typedef CyanDeriveIdentityDart = Pointer<Utf8> Function(Pointer<Utf8> secretKeyHex);
+
 typedef CyanGetMyNodeIdNative = Pointer<Utf8> Function();
 typedef CyanGetMyNodeIdDart = Pointer<Utf8> Function();
 
@@ -299,6 +306,8 @@ typedef CyanPollAiInsightsDart = Pointer<Utf8> Function();
 // BINDINGS CLASS
 // ============================================================================
 
+final Pointer<Utf8> _nullptr = Pointer<Utf8>.fromAddress(0);
+
 class CyanBindings {
   static CyanBindings? _instance;
   late final DynamicLibrary _lib;
@@ -315,6 +324,8 @@ class CyanBindings {
   late final CyanGetNodeIdDart getNodeId;
   late final CyanGetXaeroIdDart getXaeroId;
   late final CyanSetXaeroIdDart setXaeroId;
+  late final CyanGenerateIdentityJsonDart generateIdentityJson;
+  late final CyanDeriveIdentityDart deriveIdentity;
   late final CyanGetMyNodeIdDart getMyNodeId;
   late final CyanGetMyProfileDart getMyProfile;
   late final CyanSetMyProfileDart setMyProfile;
@@ -430,16 +441,55 @@ class CyanBindings {
     return _instance!;
   }
   
+  bool _loaded = false;
+  bool get isLoaded => _loaded;
+  
   void _load() {
-    _lib = _loadLibrary();
-    _bindFunctions();
+    try {
+      _lib = _loadLibrary();
+      _bindFunctions();
+      _loaded = true;
+      print('✅ Cyan FFI bindings loaded');
+    } catch (e) {
+      print('⚠️ Cyan FFI library not available: $e');
+      print('   App will run with local-only fallbacks');
+      _setNoOps();
+      _loaded = false;
+    }
   }
   
   DynamicLibrary _loadLibrary() {
-    if (Platform.isAndroid) {
+    if (Platform.isMacOS) {
+      // Try loading dylib from known locations
+      final home = Platform.environment['HOME'] ?? '';
+      final exe = Platform.resolvedExecutable;
+      // exe is like .../cyan_flutter.app/Contents/MacOS/cyan_flutter
+      final appDir = exe.substring(0, exe.lastIndexOf('/MacOS/'));
+      
+      final dylibPaths = [
+        // App bundle Frameworks (where Xcode copies it)
+        '$appDir/Frameworks/libcyan_core.dylib',
+        // Source location
+        '$home/cyan_flutter/macos/Libraries/libcyan_core.dylib',
+      ];
+      
+      for (final path in dylibPaths) {
+        if (File(path).existsSync()) {
+          try {
+            print('🔗 Loading dylib: $path');
+            return DynamicLibrary.open(path);
+          } catch (e) {
+            print('⚠️ Failed to open $path: $e');
+          }
+        }
+      }
+      
+      // Fall back to process symbols (static lib linked via xcframework)
+      print('🔗 Falling back to DynamicLibrary.process()');
+      return DynamicLibrary.process();
+    } else if (Platform.isAndroid) {
       return DynamicLibrary.open('libcyan_backend.so');
-    } else if (Platform.isIOS || Platform.isMacOS) {
-      // Static library linked at build time
+    } else if (Platform.isIOS) {
       return DynamicLibrary.process();
     } else if (Platform.isWindows) {
       return DynamicLibrary.open('cyan_backend.dll');
@@ -450,125 +500,272 @@ class CyanBindings {
     }
   }
   
+  // Safe lookup helper - returns null on failure
+  CyanInitDart? _lookupInit(String s) { try { return _lib.lookupFunction<CyanInitNative, CyanInitDart>(s); } catch(_) { return null; } }
+  CyanInitWithIdentityDart? _lookupInitId(String s) { try { return _lib.lookupFunction<CyanInitWithIdentityNative, CyanInitWithIdentityDart>(s); } catch(_) { return null; } }
+  CyanSetDataDirDart? _lookupSetDataDir(String s) { try { return _lib.lookupFunction<CyanSetDataDirNative, CyanSetDataDirDart>(s); } catch(_) { return null; } }
+
   void _bindFunctions() {
+    // Instead of individual safe lookups for 87 functions, we wrap the whole
+    // thing. If any critical symbol is missing, we fall back to all no-ops.
+    // This is safe because DynamicLibrary.process() will have either ALL
+    // the cyan_* symbols (static lib linked) or NONE of them.
+    try {
+      _bindAllUnsafe();
+    } catch (e) {
+      print('⚠️ Some FFI symbols missing, using no-ops: $e');
+      _setNoOps();
+    }
+  }
+  
+  void _bindAllUnsafe() {
     // Lifecycle
-    init = _lib.lookup<NativeFunction<CyanInitNative>>('cyan_init').asFunction();
-    initWithIdentity = _lib.lookup<NativeFunction<CyanInitWithIdentityNative>>('cyan_init_with_identity').asFunction();
-    setDataDir = _lib.lookup<NativeFunction<CyanSetDataDirNative>>('cyan_set_data_dir').asFunction();
-    setDiscoveryKey = _lib.lookup<NativeFunction<CyanSetDiscoveryKeyNative>>('cyan_set_discovery_key').asFunction();
-    isReady = _lib.lookup<NativeFunction<CyanIsReadyNative>>('cyan_is_ready').asFunction();
-    freeString = _lib.lookup<NativeFunction<CyanFreeStringNative>>('cyan_free_string').asFunction();
+    init = _lib.lookupFunction<CyanInitNative, CyanInitDart>('cyan_init');
+    initWithIdentity = _lib.lookupFunction<CyanInitWithIdentityNative, CyanInitWithIdentityDart>('cyan_init_with_identity');
+    setDataDir = _lib.lookupFunction<CyanSetDataDirNative, CyanSetDataDirDart>('cyan_set_data_dir');
+    setDiscoveryKey = _lib.lookupFunction<CyanSetDiscoveryKeyNative, CyanSetDiscoveryKeyDart>('cyan_set_discovery_key');
+    isReady = _lib.lookupFunction<CyanIsReadyNative, CyanIsReadyDart>('cyan_is_ready');
+    freeString = _lib.lookupFunction<CyanFreeStringNative, CyanFreeStringDart>('cyan_free_string');
     
     // Identity
-    getNodeId = _lib.lookup<NativeFunction<CyanGetNodeIdNative>>('cyan_get_node_id').asFunction();
-    getXaeroId = _lib.lookup<NativeFunction<CyanGetXaeroIdNative>>('cyan_get_xaero_id').asFunction();
-    setXaeroId = _lib.lookup<NativeFunction<CyanSetXaeroIdNative>>('cyan_set_xaero_id').asFunction();
-    getMyNodeId = _lib.lookup<NativeFunction<CyanGetMyNodeIdNative>>('cyan_get_my_node_id').asFunction();
-    getMyProfile = _lib.lookup<NativeFunction<CyanGetMyProfileNative>>('cyan_get_my_profile').asFunction();
-    setMyProfile = _lib.lookup<NativeFunction<CyanSetMyProfileNative>>('cyan_set_my_profile').asFunction();
+    getNodeId = _lib.lookupFunction<CyanGetNodeIdNative, CyanGetNodeIdDart>('cyan_get_node_id');
+    getXaeroId = _lib.lookupFunction<CyanGetXaeroIdNative, CyanGetXaeroIdDart>('cyan_get_xaero_id');
+    setXaeroId = _lib.lookupFunction<CyanSetXaeroIdNative, CyanSetXaeroIdDart>('cyan_set_xaero_id');
+    getMyNodeId = _lib.lookupFunction<CyanGetMyNodeIdNative, CyanGetMyNodeIdDart>('cyan_get_my_node_id');
+    getMyProfile = _lib.lookupFunction<CyanGetMyProfileNative, CyanGetMyProfileDart>('cyan_get_my_profile');
+    setMyProfile = _lib.lookupFunction<CyanSetMyProfileNative, CyanSetMyProfileDart>('cyan_set_my_profile');
+    
+    // Identity generation (these may not exist in all builds)
+    try { generateIdentityJson = _lib.lookupFunction<CyanGenerateIdentityJsonNative, CyanGenerateIdentityJsonDart>('xaero_generate_json'); } catch(_) { generateIdentityJson = () => _nullptr; }
+    try { deriveIdentity = _lib.lookupFunction<CyanDeriveIdentityNative, CyanDeriveIdentityDart>('xaero_derive_identity'); } catch(_) { deriveIdentity = (Pointer<Utf8> k) => _nullptr; }
     
     // Command/Event
-    sendCommand = _lib.lookup<NativeFunction<CyanSendCommandNative>>('cyan_send_command').asFunction();
-    pollEvents = _lib.lookup<NativeFunction<CyanPollEventsNative>>('cyan_poll_events').asFunction();
-    seedDemoIfEmpty = _lib.lookup<NativeFunction<CyanSeedDemoIfEmptyNative>>('cyan_seed_demo_if_empty').asFunction();
+    sendCommand = _lib.lookupFunction<CyanSendCommandNative, CyanSendCommandDart>('cyan_send_command');
+    pollEvents = _lib.lookupFunction<CyanPollEventsNative, CyanPollEventsDart>('cyan_poll_events');
+    seedDemoIfEmpty = _lib.lookupFunction<CyanSeedDemoIfEmptyNative, CyanSeedDemoIfEmptyDart>('cyan_seed_demo_if_empty');
     
     // Stats
-    getObjectCount = _lib.lookup<NativeFunction<CyanGetObjectCountNative>>('cyan_get_object_count').asFunction();
-    getTotalPeerCount = _lib.lookup<NativeFunction<CyanGetTotalPeerCountNative>>('cyan_get_total_peer_count').asFunction();
-    getGroupPeerCount = _lib.lookup<NativeFunction<CyanGetGroupPeerCountNative>>('cyan_get_group_peer_count').asFunction();
+    getObjectCount = _lib.lookupFunction<CyanGetObjectCountNative, CyanGetObjectCountDart>('cyan_get_object_count');
+    getTotalPeerCount = _lib.lookupFunction<CyanGetTotalPeerCountNative, CyanGetTotalPeerCountDart>('cyan_get_total_peer_count');
+    getGroupPeerCount = _lib.lookupFunction<CyanGetGroupPeerCountNative, CyanGetGroupPeerCountDart>('cyan_get_group_peer_count');
     
     // Groups
-    createGroup = _lib.lookup<NativeFunction<CyanCreateGroupNative>>('cyan_create_group').asFunction();
-    renameGroup = _lib.lookup<NativeFunction<CyanRenameGroupNative>>('cyan_rename_group').asFunction();
-    deleteGroup = _lib.lookup<NativeFunction<CyanDeleteGroupNative>>('cyan_delete_group').asFunction();
-    leaveGroup = _lib.lookup<NativeFunction<CyanLeaveGroupNative>>('cyan_leave_group').asFunction();
-    isGroupOwner = _lib.lookup<NativeFunction<CyanIsGroupOwnerNative>>('cyan_is_group_owner').asFunction();
+    createGroup = _lib.lookupFunction<CyanCreateGroupNative, CyanCreateGroupDart>('cyan_create_group');
+    renameGroup = _lib.lookupFunction<CyanRenameGroupNative, CyanRenameGroupDart>('cyan_rename_group');
+    deleteGroup = _lib.lookupFunction<CyanDeleteGroupNative, CyanDeleteGroupDart>('cyan_delete_group');
+    leaveGroup = _lib.lookupFunction<CyanLeaveGroupNative, CyanLeaveGroupDart>('cyan_leave_group');
+    isGroupOwner = _lib.lookupFunction<CyanIsGroupOwnerNative, CyanIsGroupOwnerDart>('cyan_is_group_owner');
     
     // Workspaces
-    createWorkspace = _lib.lookup<NativeFunction<CyanCreateWorkspaceNative>>('cyan_create_workspace').asFunction();
-    renameWorkspace = _lib.lookup<NativeFunction<CyanRenameWorkspaceNative>>('cyan_rename_workspace').asFunction();
-    deleteWorkspace = _lib.lookup<NativeFunction<CyanDeleteWorkspaceNative>>('cyan_delete_workspace').asFunction();
-    leaveWorkspace = _lib.lookup<NativeFunction<CyanLeaveWorkspaceNative>>('cyan_leave_workspace').asFunction();
-    isWorkspaceOwner = _lib.lookup<NativeFunction<CyanIsWorkspaceOwnerNative>>('cyan_is_workspace_owner').asFunction();
-    getWorkspacesForGroup = _lib.lookup<NativeFunction<CyanGetWorkspacesForGroupNative>>('cyan_get_workspaces_for_group').asFunction();
+    createWorkspace = _lib.lookupFunction<CyanCreateWorkspaceNative, CyanCreateWorkspaceDart>('cyan_create_workspace');
+    renameWorkspace = _lib.lookupFunction<CyanRenameWorkspaceNative, CyanRenameWorkspaceDart>('cyan_rename_workspace');
+    deleteWorkspace = _lib.lookupFunction<CyanDeleteWorkspaceNative, CyanDeleteWorkspaceDart>('cyan_delete_workspace');
+    leaveWorkspace = _lib.lookupFunction<CyanLeaveWorkspaceNative, CyanLeaveWorkspaceDart>('cyan_leave_workspace');
+    isWorkspaceOwner = _lib.lookupFunction<CyanIsWorkspaceOwnerNative, CyanIsWorkspaceOwnerDart>('cyan_is_workspace_owner');
+    getWorkspacesForGroup = _lib.lookupFunction<CyanGetWorkspacesForGroupNative, CyanGetWorkspacesForGroupDart>('cyan_get_workspaces_for_group');
     
     // Boards
-    createBoard = _lib.lookup<NativeFunction<CyanCreateBoardNative>>('cyan_create_board').asFunction();
-    renameBoard = _lib.lookup<NativeFunction<CyanRenameBoardNative>>('cyan_rename_board').asFunction();
-    deleteBoard = _lib.lookup<NativeFunction<CyanDeleteBoardNative>>('cyan_delete_board').asFunction();
-    leaveBoard = _lib.lookup<NativeFunction<CyanLeaveBoardNative>>('cyan_leave_board').asFunction();
-    isBoardOwner = _lib.lookup<NativeFunction<CyanIsBoardOwnerNative>>('cyan_is_board_owner').asFunction();
-    getAllBoards = _lib.lookup<NativeFunction<CyanGetAllBoardsNative>>('cyan_get_all_boards').asFunction();
-    getBoardsForGroup = _lib.lookup<NativeFunction<CyanGetBoardsForGroupNative>>('cyan_get_boards_for_group').asFunction();
-    getBoardsForWorkspace = _lib.lookup<NativeFunction<CyanGetBoardsForWorkspaceNative>>('cyan_get_boards_for_workspace').asFunction();
-    getBoardMode = _lib.lookup<NativeFunction<CyanGetBoardModeNative>>('cyan_get_board_mode').asFunction();
-    setBoardMode = _lib.lookup<NativeFunction<CyanSetBoardModeNative>>('cyan_set_board_mode').asFunction();
-    isBoardPinned = _lib.lookup<NativeFunction<CyanIsBoardPinnedNative>>('cyan_is_board_pinned').asFunction();
-    pinBoard = _lib.lookup<NativeFunction<CyanPinBoardNative>>('cyan_pin_board').asFunction();
-    unpinBoard = _lib.lookup<NativeFunction<CyanUnpinBoardNative>>('cyan_unpin_board').asFunction();
-    rateBoard = _lib.lookup<NativeFunction<CyanRateBoardNative>>('cyan_rate_board').asFunction();
-    recordBoardView = _lib.lookup<NativeFunction<CyanRecordBoardViewNative>>('cyan_record_board_view').asFunction();
+    createBoard = _lib.lookupFunction<CyanCreateBoardNative, CyanCreateBoardDart>('cyan_create_board');
+    renameBoard = _lib.lookupFunction<CyanRenameBoardNative, CyanRenameBoardDart>('cyan_rename_board');
+    deleteBoard = _lib.lookupFunction<CyanDeleteBoardNative, CyanDeleteBoardDart>('cyan_delete_board');
+    leaveBoard = _lib.lookupFunction<CyanLeaveBoardNative, CyanLeaveBoardDart>('cyan_leave_board');
+    isBoardOwner = _lib.lookupFunction<CyanIsBoardOwnerNative, CyanIsBoardOwnerDart>('cyan_is_board_owner');
+    getAllBoards = _lib.lookupFunction<CyanGetAllBoardsNative, CyanGetAllBoardsDart>('cyan_get_all_boards');
+    getBoardsForGroup = _lib.lookupFunction<CyanGetBoardsForGroupNative, CyanGetBoardsForGroupDart>('cyan_get_boards_for_group');
+    getBoardsForWorkspace = _lib.lookupFunction<CyanGetBoardsForWorkspaceNative, CyanGetBoardsForWorkspaceDart>('cyan_get_boards_for_workspace');
+    getBoardMode = _lib.lookupFunction<CyanGetBoardModeNative, CyanGetBoardModeDart>('cyan_get_board_mode');
+    setBoardMode = _lib.lookupFunction<CyanSetBoardModeNative, CyanSetBoardModeDart>('cyan_set_board_mode');
+    isBoardPinned = _lib.lookupFunction<CyanIsBoardPinnedNative, CyanIsBoardPinnedDart>('cyan_is_board_pinned');
+    pinBoard = _lib.lookupFunction<CyanPinBoardNative, CyanPinBoardDart>('cyan_pin_board');
+    unpinBoard = _lib.lookupFunction<CyanUnpinBoardNative, CyanUnpinBoardDart>('cyan_unpin_board');
+    rateBoard = _lib.lookupFunction<CyanRateBoardNative, CyanRateBoardDart>('cyan_rate_board');
+    recordBoardView = _lib.lookupFunction<CyanRecordBoardViewNative, CyanRecordBoardViewDart>('cyan_record_board_view');
     
     // Board Metadata
-    getBoardMetadata = _lib.lookup<NativeFunction<CyanGetBoardMetadataNative>>('cyan_get_board_metadata').asFunction();
-    getBoardsMetadata = _lib.lookup<NativeFunction<CyanGetBoardsMetadataNative>>('cyan_get_boards_metadata').asFunction();
-    getTopBoards = _lib.lookup<NativeFunction<CyanGetTopBoardsNative>>('cyan_get_top_boards').asFunction();
-    getBoardLink = _lib.lookup<NativeFunction<CyanGetBoardLinkNative>>('cyan_get_board_link').asFunction();
-    searchBoardsByLabel = _lib.lookup<NativeFunction<CyanSearchBoardsByLabelNative>>('cyan_search_boards_by_label').asFunction();
-    setBoardLabels = _lib.lookup<NativeFunction<CyanSetBoardLabelsNative>>('cyan_set_board_labels').asFunction();
-    addBoardLabel = _lib.lookup<NativeFunction<CyanAddBoardLabelNative>>('cyan_add_board_label').asFunction();
-    removeBoardLabel = _lib.lookup<NativeFunction<CyanRemoveBoardLabelNative>>('cyan_remove_board_label').asFunction();
-    setBoardModel = _lib.lookup<NativeFunction<CyanSetBoardModelNative>>('cyan_set_board_model').asFunction();
-    setBoardSkills = _lib.lookup<NativeFunction<CyanSetBoardSkillsNative>>('cyan_set_board_skills').asFunction();
+    getBoardMetadata = _lib.lookupFunction<CyanGetBoardMetadataNative, CyanGetBoardMetadataDart>('cyan_get_board_metadata');
+    getBoardsMetadata = _lib.lookupFunction<CyanGetBoardsMetadataNative, CyanGetBoardsMetadataDart>('cyan_get_boards_metadata');
+    getTopBoards = _lib.lookupFunction<CyanGetTopBoardsNative, CyanGetTopBoardsDart>('cyan_get_top_boards');
+    getBoardLink = _lib.lookupFunction<CyanGetBoardLinkNative, CyanGetBoardLinkDart>('cyan_get_board_link');
+    searchBoardsByLabel = _lib.lookupFunction<CyanSearchBoardsByLabelNative, CyanSearchBoardsByLabelDart>('cyan_search_boards_by_label');
+    setBoardLabels = _lib.lookupFunction<CyanSetBoardLabelsNative, CyanSetBoardLabelsDart>('cyan_set_board_labels');
+    addBoardLabel = _lib.lookupFunction<CyanAddBoardLabelNative, CyanAddBoardLabelDart>('cyan_add_board_label');
+    removeBoardLabel = _lib.lookupFunction<CyanRemoveBoardLabelNative, CyanRemoveBoardLabelDart>('cyan_remove_board_label');
+    setBoardModel = _lib.lookupFunction<CyanSetBoardModelNative, CyanSetBoardModelDart>('cyan_set_board_model');
+    setBoardSkills = _lib.lookupFunction<CyanSetBoardSkillsNative, CyanSetBoardSkillsDart>('cyan_set_board_skills');
     
     // Peers
-    getGroupPeers = _lib.lookup<NativeFunction<CyanGetGroupPeersNative>>('cyan_get_group_peers').asFunction();
-    getAllPeers = _lib.lookup<NativeFunction<CyanGetAllPeersNative>>('cyan_get_all_peers').asFunction();
-    updatePeerStatus = _lib.lookup<NativeFunction<CyanUpdatePeerStatusNative>>('cyan_update_peer_status').asFunction();
+    getGroupPeers = _lib.lookupFunction<CyanGetGroupPeersNative, CyanGetGroupPeersDart>('cyan_get_group_peers');
+    getAllPeers = _lib.lookupFunction<CyanGetAllPeersNative, CyanGetAllPeersDart>('cyan_get_all_peers');
+    updatePeerStatus = _lib.lookupFunction<CyanUpdatePeerStatusNative, CyanUpdatePeerStatusDart>('cyan_update_peer_status');
     
     // Profile
-    getUserProfile = _lib.lookup<NativeFunction<CyanGetUserProfileNative>>('cyan_get_user_profile').asFunction();
-    getProfilesBatch = _lib.lookup<NativeFunction<CyanGetProfilesBatchNative>>('cyan_get_profiles_batch').asFunction();
+    getUserProfile = _lib.lookupFunction<CyanGetUserProfileNative, CyanGetUserProfileDart>('cyan_get_user_profile');
+    getProfilesBatch = _lib.lookupFunction<CyanGetProfilesBatchNative, CyanGetProfilesBatchDart>('cyan_get_profiles_batch');
     
     // Chat
-    sendChat = _lib.lookup<NativeFunction<CyanSendChatNative>>('cyan_send_chat').asFunction();
-    deleteChat = _lib.lookup<NativeFunction<CyanDeleteChatNative>>('cyan_delete_chat').asFunction();
-    startDirectChat = _lib.lookup<NativeFunction<CyanStartDirectChatNative>>('cyan_start_direct_chat').asFunction();
-    sendDirectChat = _lib.lookup<NativeFunction<CyanSendDirectChatNative>>('cyan_send_direct_chat').asFunction();
+    sendChat = _lib.lookupFunction<CyanSendChatNative, CyanSendChatDart>('cyan_send_chat');
+    deleteChat = _lib.lookupFunction<CyanDeleteChatNative, CyanDeleteChatDart>('cyan_delete_chat');
+    startDirectChat = _lib.lookupFunction<CyanStartDirectChatNative, CyanStartDirectChatDart>('cyan_start_direct_chat');
+    sendDirectChat = _lib.lookupFunction<CyanSendDirectChatNative, CyanSendDirectChatDart>('cyan_send_direct_chat');
     
     // Files
-    uploadFile = _lib.lookup<NativeFunction<CyanUploadFileNative>>('cyan_upload_file').asFunction();
-    uploadFileToGroup = _lib.lookup<NativeFunction<CyanUploadFileToGroupNative>>('cyan_upload_file_to_group').asFunction();
-    uploadFileToWorkspace = _lib.lookup<NativeFunction<CyanUploadFileToWorkspaceNative>>('cyan_upload_file_to_workspace').asFunction();
-    requestFileDownload = _lib.lookup<NativeFunction<CyanRequestFileDownloadNative>>('cyan_request_file_download').asFunction();
-    getFileStatus = _lib.lookup<NativeFunction<CyanGetFileStatusNative>>('cyan_get_file_status').asFunction();
-    getFiles = _lib.lookup<NativeFunction<CyanGetFilesNative>>('cyan_get_files').asFunction();
-    getFileLocalPath = _lib.lookup<NativeFunction<CyanGetFileLocalPathNative>>('cyan_get_file_local_path').asFunction();
+    uploadFile = _lib.lookupFunction<CyanUploadFileNative, CyanUploadFileDart>('cyan_upload_file');
+    uploadFileToGroup = _lib.lookupFunction<CyanUploadFileToGroupNative, CyanUploadFileToGroupDart>('cyan_upload_file_to_group');
+    uploadFileToWorkspace = _lib.lookupFunction<CyanUploadFileToWorkspaceNative, CyanUploadFileToWorkspaceDart>('cyan_upload_file_to_workspace');
+    requestFileDownload = _lib.lookupFunction<CyanRequestFileDownloadNative, CyanRequestFileDownloadDart>('cyan_request_file_download');
+    getFileStatus = _lib.lookupFunction<CyanGetFileStatusNative, CyanGetFileStatusDart>('cyan_get_file_status');
+    getFiles = _lib.lookupFunction<CyanGetFilesNative, CyanGetFilesDart>('cyan_get_files');
+    getFileLocalPath = _lib.lookupFunction<CyanGetFileLocalPathNative, CyanGetFileLocalPathDart>('cyan_get_file_local_path');
     
     // Whiteboard
-    loadWhiteboardElements = _lib.lookup<NativeFunction<CyanLoadWhiteboardElementsNative>>('cyan_load_whiteboard_elements').asFunction();
-    saveWhiteboardElement = _lib.lookup<NativeFunction<CyanSaveWhiteboardElementNative>>('cyan_save_whiteboard_element').asFunction();
-    deleteWhiteboardElement = _lib.lookup<NativeFunction<CyanDeleteWhiteboardElementNative>>('cyan_delete_whiteboard_element').asFunction();
-    clearWhiteboard = _lib.lookup<NativeFunction<CyanClearWhiteboardNative>>('cyan_clear_whiteboard').asFunction();
-    getWhiteboardElementCount = _lib.lookup<NativeFunction<CyanGetWhiteboardElementCountNative>>('cyan_get_whiteboard_element_count').asFunction();
+    loadWhiteboardElements = _lib.lookupFunction<CyanLoadWhiteboardElementsNative, CyanLoadWhiteboardElementsDart>('cyan_load_whiteboard_elements');
+    saveWhiteboardElement = _lib.lookupFunction<CyanSaveWhiteboardElementNative, CyanSaveWhiteboardElementDart>('cyan_save_whiteboard_element');
+    deleteWhiteboardElement = _lib.lookupFunction<CyanDeleteWhiteboardElementNative, CyanDeleteWhiteboardElementDart>('cyan_delete_whiteboard_element');
+    clearWhiteboard = _lib.lookupFunction<CyanClearWhiteboardNative, CyanClearWhiteboardDart>('cyan_clear_whiteboard');
+    getWhiteboardElementCount = _lib.lookupFunction<CyanGetWhiteboardElementCountNative, CyanGetWhiteboardElementCountDart>('cyan_get_whiteboard_element_count');
     
     // Notebook
-    loadNotebookCells = _lib.lookup<NativeFunction<CyanLoadNotebookCellsNative>>('cyan_load_notebook_cells').asFunction();
-    saveNotebookCell = _lib.lookup<NativeFunction<CyanSaveNotebookCellNative>>('cyan_save_notebook_cell').asFunction();
-    deleteNotebookCell = _lib.lookup<NativeFunction<CyanDeleteNotebookCellNative>>('cyan_delete_notebook_cell').asFunction();
-    reorderNotebookCells = _lib.lookup<NativeFunction<CyanReorderNotebookCellsNative>>('cyan_reorder_notebook_cells').asFunction();
-    loadCellElements = _lib.lookup<NativeFunction<CyanLoadCellElementsNative>>('cyan_load_cell_elements').asFunction();
+    loadNotebookCells = _lib.lookupFunction<CyanLoadNotebookCellsNative, CyanLoadNotebookCellsDart>('cyan_load_notebook_cells');
+    saveNotebookCell = _lib.lookupFunction<CyanSaveNotebookCellNative, CyanSaveNotebookCellDart>('cyan_save_notebook_cell');
+    deleteNotebookCell = _lib.lookupFunction<CyanDeleteNotebookCellNative, CyanDeleteNotebookCellDart>('cyan_delete_notebook_cell');
+    reorderNotebookCells = _lib.lookupFunction<CyanReorderNotebookCellsNative, CyanReorderNotebookCellsDart>('cyan_reorder_notebook_cells');
+    loadCellElements = _lib.lookupFunction<CyanLoadCellElementsNative, CyanLoadCellElementsDart>('cyan_load_cell_elements');
     
     // Integration
-    integrationCommand = _lib.lookup<NativeFunction<CyanIntegrationCommandNative>>('cyan_integration_command').asFunction();
-    pollIntegrationEvents = _lib.lookup<NativeFunction<CyanPollIntegrationEventsNative>>('cyan_poll_integration_events').asFunction();
-    getConnectedIntegrations = _lib.lookup<NativeFunction<CyanGetConnectedIntegrationsDart>>('cyan_get_connected_integrations').asFunction();
-    getIntegrationGraph = _lib.lookup<NativeFunction<CyanGetIntegrationGraphNative>>('cyan_get_integration_graph').asFunction();
-    setGraphFocus = _lib.lookup<NativeFunction<CyanSetGraphFocusNative>>('cyan_set_graph_focus').asFunction();
+    integrationCommand = _lib.lookupFunction<CyanIntegrationCommandNative, CyanIntegrationCommandDart>('cyan_integration_command');
+    pollIntegrationEvents = _lib.lookupFunction<CyanPollIntegrationEventsNative, CyanPollIntegrationEventsDart>('cyan_poll_integration_events');
+    getConnectedIntegrations = _lib.lookupFunction<CyanGetConnectedIntegrationsNative, CyanGetConnectedIntegrationsDart>('cyan_get_connected_integrations');
+    getIntegrationGraph = _lib.lookupFunction<CyanGetIntegrationGraphNative, CyanGetIntegrationGraphDart>('cyan_get_integration_graph');
+    setGraphFocus = _lib.lookupFunction<CyanSetGraphFocusNative, CyanSetGraphFocusDart>('cyan_set_graph_focus');
     
     // AI
-    aiCommand = _lib.lookup<NativeFunction<CyanAiCommandNative>>('cyan_ai_command').asFunction();
-    pollAiResponse = _lib.lookup<NativeFunction<CyanPollAiResponseNative>>('cyan_poll_ai_response').asFunction();
-    pollAiInsights = _lib.lookup<NativeFunction<CyanPollAiInsightsNative>>('cyan_poll_ai_insights').asFunction();
+    aiCommand = _lib.lookupFunction<CyanAiCommandNative, CyanAiCommandDart>('cyan_ai_command');
+    pollAiResponse = _lib.lookupFunction<CyanPollAiResponseNative, CyanPollAiResponseDart>('cyan_poll_ai_response');
+    pollAiInsights = _lib.lookupFunction<CyanPollAiInsightsNative, CyanPollAiInsightsDart>('cyan_poll_ai_insights');
+  }
+  
+  /// All no-ops with exact type signatures matching the typedefs
+  void _setNoOps() {
+    // Lifecycle
+    init = (Pointer<Utf8> p) => false;
+    initWithIdentity = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c, Pointer<Utf8> d) => false;
+    setDataDir = (Pointer<Utf8> p) => false;
+    setDiscoveryKey = (Pointer<Utf8> p) => false;
+    isReady = () => false;
+    freeString = (Pointer<Utf8> p) {};
+    
+    // Identity
+    getNodeId = () => _nullptr;
+    getXaeroId = () => _nullptr;
+    setXaeroId = (Pointer<Utf8> p) => false;
+    generateIdentityJson = () => _nullptr;
+    deriveIdentity = (Pointer<Utf8> p) => _nullptr;
+    getMyNodeId = () => _nullptr;
+    getMyProfile = () => _nullptr;
+    setMyProfile = (Pointer<Utf8> p) => false;
+    
+    // Command/Event
+    sendCommand = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    pollEvents = (Pointer<Utf8> p) => _nullptr;
+    seedDemoIfEmpty = () => false;
+    
+    // Stats
+    getObjectCount = () => 0;
+    getTotalPeerCount = () => 0;
+    getGroupPeerCount = (Pointer<Utf8> p) => 0;
+    
+    // Groups
+    createGroup = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) {};
+    renameGroup = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    deleteGroup = (Pointer<Utf8> p) {};
+    leaveGroup = (Pointer<Utf8> p) {};
+    isGroupOwner = (Pointer<Utf8> p) => false;
+    
+    // Workspaces
+    createWorkspace = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    renameWorkspace = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    deleteWorkspace = (Pointer<Utf8> p) {};
+    leaveWorkspace = (Pointer<Utf8> p) {};
+    isWorkspaceOwner = (Pointer<Utf8> p) => false;
+    getWorkspacesForGroup = (Pointer<Utf8> p) => _nullptr;
+    
+    // Boards
+    createBoard = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    renameBoard = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    deleteBoard = (Pointer<Utf8> p) {};
+    leaveBoard = (Pointer<Utf8> p) {};
+    isBoardOwner = (Pointer<Utf8> p) => false;
+    getAllBoards = () => _nullptr;
+    getBoardsForGroup = (Pointer<Utf8> p) => _nullptr;
+    getBoardsForWorkspace = (Pointer<Utf8> p) => _nullptr;
+    getBoardMode = (Pointer<Utf8> p) => _nullptr;
+    setBoardMode = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    isBoardPinned = (Pointer<Utf8> p) => false;
+    pinBoard = (Pointer<Utf8> p) => false;
+    unpinBoard = (Pointer<Utf8> p) => false;
+    rateBoard = (Pointer<Utf8> a, int b) => false;
+    recordBoardView = (Pointer<Utf8> p) => false;
+    
+    // Board Metadata
+    getBoardMetadata = (Pointer<Utf8> p) => _nullptr;
+    getBoardsMetadata = (Pointer<Utf8> p) => _nullptr;
+    getTopBoards = (int n) => _nullptr;
+    getBoardLink = (Pointer<Utf8> p) => _nullptr;
+    searchBoardsByLabel = (Pointer<Utf8> p) => _nullptr;
+    setBoardLabels = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    addBoardLabel = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    removeBoardLabel = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    setBoardModel = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    setBoardSkills = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    
+    // Peers
+    getGroupPeers = (Pointer<Utf8> p) => _nullptr;
+    getAllPeers = () => _nullptr;
+    updatePeerStatus = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    
+    // Profile
+    getUserProfile = (Pointer<Utf8> p) => _nullptr;
+    getProfilesBatch = (Pointer<Utf8> p) => _nullptr;
+    
+    // Chat
+    sendChat = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) {};
+    deleteChat = (Pointer<Utf8> p) {};
+    startDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    sendDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    
+    // Files
+    uploadFile = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    uploadFileToGroup = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    uploadFileToWorkspace = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    requestFileDownload = (Pointer<Utf8> p) => false;
+    getFileStatus = (Pointer<Utf8> p) => _nullptr;
+    getFiles = (Pointer<Utf8> p) => _nullptr;
+    getFileLocalPath = (Pointer<Utf8> p) => _nullptr;
+    
+    // Whiteboard
+    loadWhiteboardElements = (Pointer<Utf8> p) => _nullptr;
+    saveWhiteboardElement = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    deleteWhiteboardElement = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    clearWhiteboard = (Pointer<Utf8> p) => false;
+    getWhiteboardElementCount = (Pointer<Utf8> p) => 0;
+    
+    // Notebook
+    loadNotebookCells = (Pointer<Utf8> p) => _nullptr;
+    saveNotebookCell = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    deleteNotebookCell = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    reorderNotebookCells = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    loadCellElements = (Pointer<Utf8> p) => _nullptr;
+    
+    // Integration
+    integrationCommand = (Pointer<Utf8> p) => false;
+    pollIntegrationEvents = () => _nullptr;
+    getConnectedIntegrations = (Pointer<Utf8> p) => _nullptr;
+    getIntegrationGraph = (Pointer<Utf8> p) => _nullptr;
+    setGraphFocus = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    
+    // AI
+    aiCommand = (Pointer<Utf8> p) => false;
+    pollAiResponse = () => _nullptr;
+    pollAiInsights = () => _nullptr;
   }
 }

@@ -122,6 +122,13 @@ class CyanService {
   /// Check if backend is ready
   bool get isReady => _state == CyanInitState.ready && CyanFFI.isReady();
   
+  /// Mark service as ready (called when backend was initialized externally)
+  void markReady() {
+    _state = CyanInitState.ready;
+    _nodeId = CyanFFI.getNodeId();
+    print('✅ CyanService: Marked ready externally - NodeID: ${_nodeId ?? "unknown"}');
+  }
+  
   /// Get object count from database
   int get objectCount => isReady ? CyanFFI.getObjectCount() : 0;
   

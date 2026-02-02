@@ -28,6 +28,7 @@ dependencies:
   highlight: ^0.7.0
   desktop_drop: ^0.4.4
   file_picker: ^6.1.1
+  url_launcher: ^6.3.2
 
 dev_dependencies:
   flutter_test:

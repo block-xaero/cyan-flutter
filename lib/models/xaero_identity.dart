@@ -1,90 +1,100 @@
 // models/xaero_identity.dart
-// Identity model for XaeroID (Falcon-512 keypair)
+// XaeroIdentity - Matches Swift XaeroIdentity.swift exactly
+// Ed25519 secret key, derived public key, DID
+// Stored in flutter_secure_storage (equiv of Keychain)
 
 import 'dart:convert';
 
 class XaeroIdentity {
-  final String secretKeyHex;
-  final String shortId;
-  final String displayName;
-  final bool isTest;
-  final String? nodeId;
+  final String secretKeyHex;  // 64 hex chars = 32 bytes - THE secret
+  final String publicKeyHex;  // 64 hex chars = 32 bytes - derived from secret
+  final String did;           // did:peer:z{base58(blake3(pubkey))}
   final DateTime createdAt;
-  
+
+  // Optional metadata from OAuth
+  String? email;
+  String? displayName;
+  String? avatarUrl;
+
   XaeroIdentity({
     required this.secretKeyHex,
-    required this.shortId,
-    required this.displayName,
-    this.isTest = false,
-    this.nodeId,
-    DateTime? createdAt,
-  }) : createdAt = createdAt ?? DateTime.now();
-  
-  /// Public key is the node ID
-  String get publicKey => nodeId ?? shortId;
-  
+    required this.publicKeyHex,
+    required this.did,
+    required this.createdAt,
+    this.email,
+    this.displayName,
+    this.avatarUrl,
+  });
+
+  /// Short display ID (first 8 chars of DID suffix) - matches Swift
+  String get shortId {
+    final suffix = did.replaceFirst('did:peer:z', '');
+    return suffix.length > 8 ? suffix.substring(0, 8) : suffix;
+  }
+
+  /// Is this a test/ephemeral identity
+  bool get isTest => secretKeyHex == 'ephemeral' || secretKeyHex.startsWith('0000');
+
+  /// Full DID string
+  String get fullDid => did;
+
   factory XaeroIdentity.fromJson(Map<String, dynamic> json) {
     return XaeroIdentity(
-      secretKeyHex: json['secret_key_hex'] as String? ?? json['secretKeyHex'] as String? ?? '',
-      shortId: json['short_id'] as String? ?? json['shortId'] as String? ?? '',
-      displayName: json['display_name'] as String? ?? json['displayName'] as String? ?? 'Anonymous',
-      isTest: json['is_test'] as bool? ?? json['isTest'] as bool? ?? false,
-      nodeId: json['node_id'] as String? ?? json['nodeId'] as String?,
-      createdAt: json['created_at'] != null 
-          ? DateTime.tryParse(json['created_at'] as String) ?? DateTime.now()
-          : DateTime.now(),
+      secretKeyHex: json['secret_key'] as String? ?? json['secret_key_hex'] as String? ?? json['secretKeyHex'] as String? ?? '',
+      publicKeyHex: json['pubkey'] as String? ?? json['public_key'] as String? ?? json['publicKeyHex'] as String? ?? '',
+      did: json['did'] as String? ?? '',
+      createdAt: _parseDate(json['created_at'] ?? json['createdAt']),
+      email: json['email'] as String?,
+      displayName: json['display_name'] as String? ?? json['displayName'] as String?,
+      avatarUrl: json['avatar_url'] as String? ?? json['avatarUrl'] as String?,
     );
   }
-  
-  Map<String, dynamic> toJson() {
-    return {
-      'secret_key_hex': secretKeyHex,
-      'short_id': shortId,
-      'display_name': displayName,
-      'is_test': isTest,
-      'node_id': nodeId,
-      'created_at': createdAt.toIso8601String(),
-    };
-  }
-  
-  String toJsonString() => jsonEncode(toJson());
-  
-  static XaeroIdentity? fromJsonString(String jsonStr) {
-    try {
-      final data = jsonDecode(jsonStr) as Map<String, dynamic>;
-      return XaeroIdentity.fromJson(data);
-    } catch (_) {
-      return null;
-    }
-  }
-  
+
+  Map<String, dynamic> toJson() => {
+    'secret_key': secretKeyHex,
+    'pubkey': publicKeyHex,
+    'did': did,
+    'created_at': createdAt.millisecondsSinceEpoch ~/ 1000,
+    'email': email,
+    'display_name': displayName,
+    'avatar_url': avatarUrl,
+  };
+
   XaeroIdentity copyWith({
     String? secretKeyHex,
-    String? shortId,
-    String? displayName,
-    bool? isTest,
-    String? nodeId,
+    String? publicKeyHex,
+    String? did,
     DateTime? createdAt,
+    String? email,
+    String? displayName,
+    String? avatarUrl,
   }) {
     return XaeroIdentity(
       secretKeyHex: secretKeyHex ?? this.secretKeyHex,
-      shortId: shortId ?? this.shortId,
-      displayName: displayName ?? this.displayName,
-      isTest: isTest ?? this.isTest,
-      nodeId: nodeId ?? this.nodeId,
+      publicKeyHex: publicKeyHex ?? this.publicKeyHex,
+      did: did ?? this.did,
       createdAt: createdAt ?? this.createdAt,
+      email: email ?? this.email,
+      displayName: displayName ?? this.displayName,
+      avatarUrl: avatarUrl ?? this.avatarUrl,
     );
   }
-  
-  @override
-  bool operator ==(Object other) {
-    if (identical(this, other)) return true;
-    return other is XaeroIdentity && other.shortId == shortId;
+
+  static DateTime _parseDate(dynamic val) {
+    if (val == null) return DateTime.now();
+    if (val is int) return DateTime.fromMillisecondsSinceEpoch(val * 1000);
+    if (val is String) return DateTime.tryParse(val) ?? DateTime.now();
+    if (val is num) return DateTime.fromMillisecondsSinceEpoch(val.toInt() * 1000);
+    return DateTime.now();
   }
-  
+
   @override
-  int get hashCode => shortId.hashCode;
-  
+  bool operator ==(Object other) =>
+      identical(this, other) || other is XaeroIdentity && other.did == did;
+
   @override
-  String toString() => 'XaeroIdentity($shortId, $displayName)';
+  int get hashCode => did.hashCode;
+
+  @override
+  String toString() => 'XaeroIdentity(${shortId}, ${displayName ?? email ?? "anon"})';
 }

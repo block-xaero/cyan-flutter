@@ -245,6 +245,38 @@ class CyanFFI {
     }
   }
   
+  /// Generate new XaeroID via FFI
+  /// Returns JSON: {"secret_key":"hex","pubkey":"hex","did":"..."}
+  static String? generateIdentityJson() {
+    try {
+      final ptr = _b.generateIdentityJson();
+      if (ptr == nullptr) return null;
+      return ptr.toDartStringAndFree();
+    } catch (e) {
+      debugPrint('⚠️ FFI generateIdentityJson not available: $e');
+      return null;
+    }
+  }
+  
+  /// Derive pubkey and DID from secret key hex
+  /// Returns JSON: {"pubkey":"hex","did":"..."}
+  static String? deriveIdentity(String secretKeyHex) {
+    try {
+      final ptr = secretKeyHex.toNativeUtf8();
+      try {
+        final resultPtr = _b.deriveIdentity(ptr);
+        if (resultPtr == nullptr) return null;
+        return resultPtr.toDartStringAndFree();
+      } finally {
+        calloc.free(ptr);
+      }
+    } catch (e) {
+      debugPrint('⚠️ FFI deriveIdentity not available: $e');
+      return null;
+    }
+  }
+  
+  
   static String? getMyNodeId() {
     final ptr = _b.getMyNodeId();
     if (ptr == nullptr) return null;
