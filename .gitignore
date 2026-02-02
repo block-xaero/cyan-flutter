@@ -45,3 +45,14 @@ windows/flutter/ephemeral/
 *.pyc
 .DS_Store
 Thumbs.db
+# Native binaries / static libs
+**/*.a
+**/*.dylib
+**/*.xcframework/
+
+# Generated plugin registrants
+**/generated_plugin_registrant.*
+**/generated_plugins.cmake
+
+# macOS
+macos/Podfile.lock
