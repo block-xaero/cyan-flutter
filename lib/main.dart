@@ -10,12 +10,20 @@ import 'screens/workspace_screen.dart';
 import 'screens/profile_screen.dart';
 import 'providers/auth_provider.dart';
 import 'ffi/ffi_helpers.dart';
+import 'services/python_executor.dart';
+import 'services/model_registry.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   // Initialize notebook cache for persistence
   await CyanFFI.initializeCache();
+  
+  // Initialize Python environment detection (async, non-blocking)
+  PythonEnvironment.instance.initialize();
+  
+  // Initialize model registry
+  ModelRegistry.instance.initialize();
   
   runApp(
     const ProviderScope(
