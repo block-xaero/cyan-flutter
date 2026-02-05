@@ -405,8 +405,22 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
   // ==== ACTIONS SECTION (continued) ====
 
   Widget _actionsSection(AuthState authState) {
+    final hasGoogleLinked = authState.identity?.email != null && authState.identity!.email!.isNotEmpty;
+    
     return Column(
       children: [
+        // Link/Unlink Google Account
+        if (!hasGoogleLinked)
+          _actionButton(
+            icon: Icons.link,
+            label: 'Link Google Account',
+            color: MonokaiTheme.green,
+            onTap: () => _linkGoogleAccount(),
+          )
+        else
+          _linkedGoogleBadge(authState),
+        const SizedBox(height: 12),
+        
         // Show XaeroID QR
         _actionButton(
           icon: Icons.qr_code,
@@ -434,6 +448,58 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         ),
       ],
     );
+  }
+  
+  Widget _linkedGoogleBadge(AuthState authState) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: MonokaiTheme.green.withOpacity(0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: MonokaiTheme.green.withOpacity(0.3)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.check_circle, size: 18, color: MonokaiTheme.green),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Google Account Linked', style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: MonokaiTheme.green)),
+                const SizedBox(height: 2),
+                Text(
+                  authState.identity?.email ?? '',
+                  style: TextStyle(fontSize: 11, color: MonokaiTheme.comment),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+  
+  Future<void> _linkGoogleAccount() async {
+    final success = await ref.read(authProvider.notifier).linkGoogleAccount();
+    if (mounted) {
+      if (success) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Google account linked successfully!'),
+            backgroundColor: MonokaiTheme.green,
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(ref.read(authProvider).error ?? 'Failed to link account'),
+            backgroundColor: MonokaiTheme.red,
+          ),
+        );
+      }
+    }
   }
 
   Widget _actionButton({

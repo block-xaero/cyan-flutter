@@ -9,16 +9,18 @@ import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../config/secrets.dart';
 
 // ============================================================================
 // GOOGLE OAUTH CONFIG
 // ============================================================================
 
 class GoogleOAuthConfig {
-  // Your Google Cloud OAuth Client ID (Desktop/Web type)
-  // For macOS desktop: use "Desktop" application type in Google Cloud Console
-  // Redirect to localhost - Google allows this for native apps
-  static const clientId = '***REMOVED***';
+  // OAuth credentials loaded from config/secrets.dart (gitignored)
+  // See config/secrets.template.dart for setup instructions
+  static String get clientId => Secrets.googleClientId;
+  static String get clientSecret => Secrets.googleClientSecret;
+  
   static const scopes = 'openid email profile';
   static const tokenUrl = 'https://oauth2.googleapis.com/token';
 
@@ -219,7 +221,7 @@ class GoogleAuthManager {
         'code': code,
         'redirect_uri': redirectUri,
         'grant_type': 'authorization_code',
-        'client_secret': '***REMOVED***',
+        'client_secret': GoogleOAuthConfig.clientSecret,
         'code_verifier': codeVerifier,
       };
 

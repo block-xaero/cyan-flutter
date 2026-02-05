@@ -56,8 +56,8 @@ typedef CyanGetMyNodeIdDart = Pointer<Utf8> Function();
 typedef CyanGetMyProfileNative = Pointer<Utf8> Function();
 typedef CyanGetMyProfileDart = Pointer<Utf8> Function();
 
-typedef CyanSetMyProfileNative = Bool Function(Pointer<Utf8> json);
-typedef CyanSetMyProfileDart = bool Function(Pointer<Utf8> json);
+typedef CyanSetMyProfileNative = Bool Function(Pointer<Utf8> displayName, Pointer<Utf8> avatarPath);
+typedef CyanSetMyProfileDart = bool Function(Pointer<Utf8> displayName, Pointer<Utf8> avatarPath);
 
 // Command/Event (ComponentActor pattern)
 typedef CyanSendCommandNative = Bool Function(Pointer<Utf8> component, Pointer<Utf8> json);
@@ -662,7 +662,7 @@ class CyanBindings {
     deriveIdentity = (Pointer<Utf8> p) => _nullptr;
     getMyNodeId = () => _nullptr;
     getMyProfile = () => _nullptr;
-    setMyProfile = (Pointer<Utf8> p) => false;
+    setMyProfile = (Pointer<Utf8> name, Pointer<Utf8> avatar) => false;
     
     // Command/Event
     sendCommand = (Pointer<Utf8> a, Pointer<Utf8> b) => false;

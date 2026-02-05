@@ -49,9 +49,14 @@ class IdentityService {
   /// Load stored identity from secure storage
   Future<XaeroIdentity?> loadIdentity() async {
     try {
+      debugPrint('🔍 Attempting to load identity from secure storage...');
       final json = await _storage.read(key: _identityKey);
-      if (json == null) return null;
+      if (json == null) {
+        debugPrint('ℹ️ No stored identity found in Keychain');
+        return null;
+      }
 
+      debugPrint('✅ Found stored identity JSON, parsing...');
       final data = jsonDecode(json) as Map<String, dynamic>;
       _currentIdentity = XaeroIdentity.fromJson(data);
       debugPrint('✅ Loaded XaeroID from Keychain: ${_currentIdentity!.shortId}');
@@ -256,16 +261,17 @@ class IdentityService {
   // ---- UPDATE ----
 
   /// Update profile metadata
-  Future<void> updateProfile({String? displayName, String? avatarUrl}) async {
+  Future<void> updateProfile({String? displayName, String? avatarUrl, String? email}) async {
     if (_currentIdentity == null) return;
 
     _currentIdentity = _currentIdentity!.copyWith(
       displayName: displayName ?? _currentIdentity!.displayName,
       avatarUrl: avatarUrl ?? _currentIdentity!.avatarUrl,
+      email: email ?? _currentIdentity!.email,
     );
 
     await _saveToSecureStorage(_currentIdentity!);
-    debugPrint('✅ Updated profile metadata');
+    debugPrint('✅ Updated profile: ${_currentIdentity!.displayName} (${_currentIdentity!.email})');
   }
 
   // ---- SIGN OUT ----

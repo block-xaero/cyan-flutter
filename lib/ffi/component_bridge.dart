@@ -260,9 +260,37 @@ class FileTreeEvent implements ComponentEvent {
   static FileTreeEvent? fromJson(String json) {
     try {
       final map = jsonDecode(json) as Map<String, dynamic>;
-      final type = map['type'] as String?;
+      var type = map['type'] as String?;
       if (type == null) return null;
-      return FileTreeEvent._(type, map);
+      
+      var data = Map<String, dynamic>.from(map);
+      
+      // Handle Network wrapper events
+      // Rust serde serializes Network(GroupCreated(g)) as:
+      // {"type": "Network", "data": {"GroupCreated": {...}}}
+      if (type == 'Network' && map.containsKey('data')) {
+        final innerData = map['data'];
+        if (innerData is Map<String, dynamic>) {
+          // Check if inner data has a variant key (like "GroupCreated")
+          if (innerData.length == 1) {
+            final variantName = innerData.keys.first;
+            final variantData = innerData[variantName];
+            type = variantName;
+            if (variantData is Map<String, dynamic>) {
+              data = Map<String, dynamic>.from(variantData);
+              data['type'] = variantName; // Keep type in data for compatibility
+            } else {
+              data = {'type': variantName, 'value': variantData};
+            }
+          } else if (innerData.containsKey('type')) {
+            // Alternative format: {"type": "GroupCreated", ...}
+            type = innerData['type'] as String?;
+            data = Map<String, dynamic>.from(innerData);
+          }
+        }
+      }
+      
+      return FileTreeEvent._(type ?? 'Unknown', data);
     } catch (e) {
       print('⚠️ FileTreeEvent parse error: $e');
       return null;

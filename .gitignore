@@ -56,3 +56,4 @@ Thumbs.db
 
 # macOS
 macos/Podfile.lock
+lib/config/secrets.dart

@@ -9,7 +9,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-  
+
+  zxing2: ^0.2.0  
   flutter_riverpod: ^2.4.9
   ffi: ^2.1.0
   path_provider: ^2.1.2

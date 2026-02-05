@@ -8,6 +8,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/xaero_identity.dart';
 import '../services/identity_service.dart';
 import '../services/google_oauth.dart';
+import '../ffi/ffi_helpers.dart';
+import 'file_tree_provider.dart';
 
 // ============================================================================
 // AUTH STATE
@@ -85,14 +87,18 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   Future<void> _init() async {
     state = state.copyWith(isLoading: true);
+    print('🔐 AuthProvider._init() starting...');
 
     try {
       // Try to load existing identity from secure storage
       final identity = await _identityService.loadIdentity();
+      print('🔐 loadIdentity result: ${identity?.shortId ?? 'null'}');
 
       if (identity != null) {
         // Initialize backend with stored identity
+        print('🔐 Found stored identity, initializing backend...');
         final success = await _identityService.initializeBackend(identity);
+        print('🔐 Backend init success: $success');
 
         state = state.copyWith(
           isInitialized: true,
@@ -103,15 +109,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
           error: success ? null : 'Backend initialization failed',
         );
 
-        if (success) {
-          _identityService.seedDemoData();
-        }
+        // NOTE: Don't seed here - FileTreeProvider handles seeding via seedDemoIfEmpty
         return;
       }
 
       // No stored identity
+      print('🔐 No stored identity, showing login screen');
       state = state.copyWith(isInitialized: true, isLoading: false);
     } catch (e) {
+      print('🔐 Auth init error: $e');
       state = state.copyWith(
         isInitialized: true,
         isLoading: false,
@@ -125,6 +131,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
   /// Returns the identity + Google profile for BackupQR display
   /// Does NOT set authenticated yet - caller shows BackupQR first
   Future<({XaeroIdentity identity, String? displayName, String? avatarUrl})?> signUpWithGoogle() async {
+    // Guard against double-trigger
+    if (state.isLoading) {
+      print('⚠️ signUpWithGoogle already in progress, ignoring');
+      return null;
+    }
+    
     state = state.copyWith(isLoading: true, clearError: true);
 
     try {
@@ -172,12 +184,14 @@ class AuthNotifier extends StateNotifier<AuthState> {
     String? displayName,
     String? avatarUrl,
   }) async {
+    print('🔐 confirmGoogleSignUp called');
     state = state.copyWith(isLoading: true);
 
     final success = await _identityService.initializeBackend(identity);
+    print('🔐 Backend init result: $success');
 
     if (success) {
-      _identityService.seedDemoData();
+      print('🔐 Setting authenticated=true');
       state = state.copyWith(
         isAuthenticated: true,
         isLoading: false,
@@ -187,6 +201,12 @@ class AuthNotifier extends StateNotifier<AuthState> {
           avatarUrl: avatarUrl ?? identity.avatarUrl,
         ),
       );
+      print('🔐 State updated: isAuth=${state.isAuthenticated}');
+      
+      // Restart FileTreeProvider to seed demo data
+      print('🔐 Triggering FileTree restart for seeding...');
+      await _ref.read(fileTreeProvider.notifier).restartIfNeeded();
+      
       return true;
     }
 
@@ -196,6 +216,56 @@ class AuthNotifier extends StateNotifier<AuthState> {
 
   // ---- TEST ACCOUNT ----
 
+  /// Link Google account to existing XaeroID (for users who already signed up)
+  Future<bool> linkGoogleAccount() async {
+    if (state.identity == null) {
+      state = state.copyWith(error: 'No identity to link');
+      return false;
+    }
+    
+    state = state.copyWith(isLoading: true, clearError: true);
+    
+    try {
+      // Do Google OAuth
+      final credential = await _googleAuth.authenticate();
+      if (credential == null) {
+        state = state.copyWith(isLoading: false, error: 'Google auth cancelled');
+        return false;
+      }
+      
+      print('🔗 Linking Google account: ${credential.name} (${credential.email})');
+      
+      // Update identity with Google profile
+      final updatedIdentity = state.identity!.copyWith(
+        email: credential.email,
+        displayName: credential.name,
+        avatarUrl: credential.picture,
+      );
+      
+      // Save to secure storage
+      await _identityService.updateProfile(
+        displayName: credential.name,
+        avatarUrl: credential.picture,
+        email: credential.email,
+      );
+      
+      // Update profile in Rust backend (so chat messages show our name)
+      CyanFFI.setMyProfile(credential.name ?? 'Anonymous');
+      
+      state = state.copyWith(
+        isLoading: false,
+        identity: updatedIdentity,
+      );
+      
+      print('🔗 Google account linked successfully: ${updatedIdentity.displayName}');
+      return true;
+    } catch (e) {
+      print('🔗 Link Google failed: $e');
+      state = state.copyWith(isLoading: false, error: 'Link failed: $e');
+      return false;
+    }
+  }
+
   Future<bool> signInAsTest() async {
     state = state.copyWith(isLoading: true, clearError: true);
 
@@ -204,13 +274,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final success = await _identityService.initializeBackend(identity);
 
       if (success) {
-        _identityService.seedDemoData();
         state = state.copyWith(
           isAuthenticated: true,
           isLoading: false,
           isTestAccount: true,
           identity: identity,
         );
+        
+        // Restart FileTreeProvider to seed demo data
+        print('🔐 Triggering FileTree restart for seeding (test account)...');
+        await _ref.read(fileTreeProvider.notifier).restartIfNeeded();
+        
         return true;
       }
 
@@ -238,13 +312,17 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final success = await _identityService.initializeBackend(identity);
 
       if (success) {
-        _identityService.seedDemoData();
         state = state.copyWith(
           isAuthenticated: true,
           isLoading: false,
           isTestAccount: false,
           identity: identity,
         );
+        
+        // Restart FileTreeProvider to seed demo data
+        print('🔐 Triggering FileTree restart for seeding (restore)...');
+        await _ref.read(fileTreeProvider.notifier).restartIfNeeded();
+        
         return true;
       }
 

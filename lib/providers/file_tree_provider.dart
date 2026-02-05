@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ffi/component_bridge.dart';
 import '../models/tree_item.dart';
 import '../services/cyan_service.dart';
+import '../services/demo_data_seeder.dart';
 
 // ============================================================================
 // STATE
@@ -15,6 +16,7 @@ import '../services/cyan_service.dart';
 
 class FileTreeState {
   final List<TreeGroup> groups;
+  final List<TreeFile> files; // All files across all scopes
   final Set<String> expandedGroups;
   final Set<String> expandedWorkspaces;
   final bool isLoading;
@@ -32,6 +34,7 @@ class FileTreeState {
   
   const FileTreeState({
     this.groups = const [],
+    this.files = const [],
     this.expandedGroups = const {},
     this.expandedWorkspaces = const {},
     this.isLoading = false,
@@ -44,8 +47,19 @@ class FileTreeState {
     this.syncingBoards = const {},
   });
   
+  /// Get files for a specific scope
+  List<TreeFile> filesForGroup(String groupId) =>
+      files.where((f) => f.groupId == groupId && f.workspaceId == null).toList();
+  
+  List<TreeFile> filesForWorkspace(String workspaceId) =>
+      files.where((f) => f.workspaceId == workspaceId && f.boardId == null).toList();
+  
+  List<TreeFile> filesForBoard(String boardId) =>
+      files.where((f) => f.boardId == boardId).toList();
+  
   FileTreeState copyWith({
     List<TreeGroup>? groups,
+    List<TreeFile>? files,
     Set<String>? expandedGroups,
     Set<String>? expandedWorkspaces,
     bool? isLoading,
@@ -62,6 +76,7 @@ class FileTreeState {
   }) {
     return FileTreeState(
       groups: groups ?? this.groups,
+      files: files ?? this.files,
       expandedGroups: expandedGroups ?? this.expandedGroups,
       expandedWorkspaces: expandedWorkspaces ?? this.expandedWorkspaces,
       isLoading: isLoading ?? this.isLoading,
@@ -184,8 +199,8 @@ class FileTreeNotifier extends StateNotifier<FileTreeState> {
     }
     
     print('✅ FileTree: Backend ready, requesting snapshot');
-    _bridge.send(FileTreeCommand.seedDemoIfEmpty());
-    await Future.delayed(const Duration(milliseconds: 200));
+    
+    // Just request snapshot - seeding will be done after login via restartIfNeeded
     _bridge.send(FileTreeCommand.snapshot());
     
     // Timeout fallback
@@ -196,8 +211,135 @@ class FileTreeNotifier extends StateNotifier<FileTreeState> {
     }
   }
   
+  /// Called after successful login to restart seeding/loading
+  /// Creates comprehensive demo data with departments, workspaces, and boards
+  Future<void> restartIfNeeded() async {
+    final service = CyanService.instance;
+    if (!service.isReady) {
+      print('⚠️ FileTree.restartIfNeeded: Backend not ready');
+      return;
+    }
+    
+    // Request snapshot first
+    print('🌲 FileTree: Requesting snapshot...');
+    _bridge.send(FileTreeCommand.snapshot());
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    if (state.groups.isNotEmpty) {
+      print('🌲 FileTree: Already have ${state.groups.length} groups');
+      return;
+    }
+    
+    print('🌲 FileTree: No groups, creating comprehensive demo data...');
+    state = state.copyWith(isLoading: true);
+    
+    await _seedComprehensiveDemoData();
+    
+    print('🌲 Demo data complete: ${state.groups.length} groups');
+    state = state.copyWith(isLoading: false);
+  }
+  
+  /// Create comprehensive demo data: 6 departments, 3 workspaces each, 3 boards each
+  Future<void> _seedComprehensiveDemoData() async {
+    final departments = DemoDataSeeder.departments;
+    
+    // Create all groups first
+    for (final (name, icon, color) in departments) {
+      print('🌱 Creating group: $name');
+      _bridge.send(FileTreeCommand.createGroup(name: name));
+      await _waitForGroupByName(name);
+    }
+    
+    // Now create workspaces and boards for each group
+    for (final group in state.groups) {
+      final workspaceNames = DemoDataSeeder.getWorkspaceTemplates(group.name);
+      if (workspaceNames == null) continue;
+      
+      for (final wsName in workspaceNames) {
+        print('🌱 Creating workspace: $wsName in ${group.name}');
+        _bridge.send(FileTreeCommand.createWorkspace(groupId: group.id, name: wsName));
+        await _waitForWorkspaceByName(group.id, wsName);
+      }
+    }
+    
+    // Refresh state
+    _bridge.send(FileTreeCommand.snapshot());
+    await Future.delayed(const Duration(milliseconds: 300));
+    
+    // Now create boards for each workspace
+    for (final group in state.groups) {
+      for (final workspace in group.workspaces) {
+        final boardTemplates = DemoDataSeeder.getBoardTemplates(workspace.name);
+        if (boardTemplates == null) continue;
+        
+        for (final (boardName, face, labels, pinned, rating) in boardTemplates) {
+          print('🌱 Creating board: $boardName in ${workspace.name}');
+          _bridge.send(FileTreeCommand.createBoard(workspaceId: workspace.id, name: boardName));
+          
+          // Wait for board and add content
+          final boardId = await _waitForBoardByName(workspace.id, boardName);
+          if (boardId != null) {
+            await DemoDataSeeder.seedBoardContent(
+              boardId, 
+              boardName, 
+              face, 
+              labels,
+              pinned: pinned,
+              rating: rating,
+            );
+          }
+        }
+      }
+    }
+    
+    // Final snapshot refresh
+    _bridge.send(FileTreeCommand.snapshot());
+    await Future.delayed(const Duration(milliseconds: 300));
+  }
+  
+  /// Wait for a group to appear by name
+  Future<String?> _waitForGroupByName(String name) async {
+    for (int i = 0; i < 30; i++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      final group = state.groups.where((g) => g.name == name).firstOrNull;
+      if (group != null) return group.id;
+    }
+    print('⚠️ Timeout waiting for group: $name');
+    return null;
+  }
+  
+  /// Wait for a workspace to appear by name in a group
+  Future<String?> _waitForWorkspaceByName(String groupId, String name) async {
+    for (int i = 0; i < 30; i++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      final group = state.groups.where((g) => g.id == groupId).firstOrNull;
+      if (group != null) {
+        final ws = group.workspaces.where((w) => w.name == name).firstOrNull;
+        if (ws != null) return ws.id;
+      }
+    }
+    print('⚠️ Timeout waiting for workspace: $name');
+    return null;
+  }
+  
+  /// Wait for a board to appear by name in a workspace
+  Future<String?> _waitForBoardByName(String workspaceId, String name) async {
+    for (int i = 0; i < 30; i++) {
+      await Future.delayed(const Duration(milliseconds: 100));
+      for (final group in state.groups) {
+        final ws = group.workspaces.where((w) => w.id == workspaceId).firstOrNull;
+        if (ws != null) {
+          final board = ws.boards.where((b) => b.name == name).firstOrNull;
+          if (board != null) return board.id;
+        }
+      }
+    }
+    print('⚠️ Timeout waiting for board: $name');
+    return null;
+  }
+  
   void _handleEvent(FileTreeEvent event) {
-    print('📥 FileTree event: ${event.type}');
+    print('📥 FileTree event: ${event.type} data=${event.data.keys}');
     
     if (event.isTreeLoaded) {
       _handleTreeLoaded(event);
@@ -217,11 +359,32 @@ class FileTreeNotifier extends StateNotifier<FileTreeState> {
       _handleBoardCreated(event.data);
     } else if (event.isBoardDeleted) {
       _removeBoard(event.data['id'] as String?);
+    } else if (event.type == 'FileAvailable' || event.type == 'FileAdded' || event.type == 'FileUploaded') {
+      print('📁 Received file event: ${event.type}');
+      _handleFileAvailable(event.data);
     } else if (event.isError) {
       state = state.copyWith(
         error: event.errorMessage ?? 'Unknown error',
         isLoading: false,
       );
+    } else {
+      print('⚠️ Unhandled event type: ${event.type}');
+    }
+  }
+  
+  void _handleFileAvailable(Map<String, dynamic> data) {
+    try {
+      print('📁 _handleFileAvailable called with: $data');
+      final file = TreeFile.fromJson(data);
+      print('📁 File available: ${file.name} (${file.sizeFormatted}) groupId=${file.groupId} wsId=${file.workspaceId}');
+      
+      // Add to files list, replacing if exists
+      final newFiles = state.files.where((f) => f.id != file.id).toList()..add(file);
+      print('📁 Total files now: ${newFiles.length}');
+      state = state.copyWith(files: newFiles);
+    } catch (e, stack) {
+      print('⚠️ Failed to parse file: $e');
+      print('⚠️ Stack: $stack');
     }
   }
   
@@ -241,20 +404,39 @@ class FileTreeNotifier extends StateNotifier<FileTreeState> {
         snapshot = dataStr as Map<String, dynamic>;
       }
       
-      final groups = _parseGroups(snapshot);
+      // Debug: show what keys are in snapshot
+      print('🔍 Snapshot keys: ${snapshot.keys}');
+      final filesRaw = snapshot['files'];
+      print('🔍 Files in snapshot: ${filesRaw?.runtimeType} count=${(filesRaw as List?)?.length ?? 0}');
       
-      print('🌳 TreeLoaded: ${groups.length} groups');
+      final groups = _parseGroups(snapshot);
+      final files = _parseFiles(snapshot);
+      
+      print('🌳 TreeLoaded: ${groups.length} groups, ${files.length} files');
+      for (final f in files) {
+        print('   📄 ${f.name} groupId=${f.groupId} wsId=${f.workspaceId}');
+      }
       
       state = state.copyWith(
         groups: groups,
+        files: files,
         isLoading: false,
         isLoaded: true,
         clearError: true,
       );
-    } catch (e) {
+    } catch (e, stack) {
       print('⚠️ TreeLoaded parse error: $e');
+      print('⚠️ Stack: $stack');
       _loadDemoData();
     }
+  }
+  
+  List<TreeFile> _parseFiles(Map<String, dynamic> snapshot) {
+    final filesData = snapshot['files'] as List<dynamic>? ?? [];
+    return filesData.map((f) {
+      final fMap = f as Map<String, dynamic>;
+      return TreeFile.fromJson(fMap);
+    }).toList();
   }
   
   List<TreeGroup> _parseGroups(Map<String, dynamic> snapshot) {

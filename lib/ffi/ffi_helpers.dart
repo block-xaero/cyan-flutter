@@ -289,13 +289,14 @@ class CyanFFI {
     return ptr.toDartStringAndFree();
   }
   
-  static bool setMyProfile(Map<String, dynamic> profile) {
-    final json = jsonEncode(profile);
-    final ptr = json.toNativeUtf8();
+  static bool setMyProfile(String displayName, {String? avatarPath}) {
+    final namePtr = displayName.toNativeUtf8();
+    final avatarPtr = (avatarPath ?? '').toNativeUtf8();
     try {
-      return _b.setMyProfile(ptr);
+      return _b.setMyProfile(namePtr, avatarPtr);
     } finally {
-      calloc.free(ptr);
+      calloc.free(namePtr);
+      calloc.free(avatarPtr);
     }
   }
   

@@ -711,10 +711,21 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
       );
     }
     
-    // Show simple formatted markdown preview
-    return Padding(
-      padding: const EdgeInsets.all(10),
-      child: _SimpleMarkdownPreview(content: _notesPreview),
+    // Show simple formatted markdown preview - use LayoutBuilder to constrain
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        return ClipRect(
+          child: OverflowBox(
+            alignment: Alignment.topLeft,
+            maxHeight: constraints.maxHeight,
+            maxWidth: constraints.maxWidth,
+            child: Padding(
+              padding: const EdgeInsets.all(8),
+              child: _SimpleMarkdownPreview(content: _notesPreview, maxLines: 5),
+            ),
+          ),
+        );
+      },
     );
   }
   
@@ -1117,7 +1128,7 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
                       ),
                     ),
                     
-                    // Pin button (top right)
+                    // Pin button (top right) - visible on hover or when pinned
                     Positioned(
                       top: 8,
                       right: 8,
@@ -1125,7 +1136,8 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
                         duration: const Duration(milliseconds: 150),
                         opacity: _hovered || _isPinned ? 1.0 : 0.0,
                         child: GestureDetector(
-                          onTap: _togglePin,
+                          behavior: HitTestBehavior.opaque,
+                          onTap: (_hovered || _isPinned) ? _togglePin : null,
                           child: Container(
                             padding: const EdgeInsets.all(6),
                             decoration: BoxDecoration(
@@ -1216,33 +1228,17 @@ class _BoardCardState extends ConsumerState<_BoardCard> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title row with rating
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            widget.board.board.name,
-                            style: const TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w500,
-                              fontFamily: 'monospace',
-                              color: Color(0xFFF8F8F2),
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (_rating > 0) ...[
-                          const SizedBox(width: 6),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: List.generate(
-                              _rating.clamp(0, 5),
-                              (_) => const Icon(Icons.star, size: 8, color: Color(0xFFE6DB74)),
-                            ),
-                          ),
-                        ],
-                      ],
+                    // Title row (rating moved to preview overlay)
+                    Text(
+                      widget.board.board.name,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w500,
+                        fontFamily: 'monospace',
+                        color: Color(0xFFF8F8F2),
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     
                     // Labels row (horizontal scroll)
@@ -1496,18 +1492,20 @@ class _ConnectionPainter extends CustomPainter {
 /// Simple markdown preview renderer for board cards
 class _SimpleMarkdownPreview extends StatelessWidget {
   final String content;
+  final int maxLines;
   
-  const _SimpleMarkdownPreview({required this.content});
+  const _SimpleMarkdownPreview({required this.content, this.maxLines = 6});
   
   @override
   Widget build(BuildContext context) {
     final lines = content.split('\n');
     final widgets = <Widget>[];
     
-    for (int i = 0; i < lines.length && widgets.length < 10; i++) {
+    // Limit to maxLines to prevent overflow
+    for (int i = 0; i < lines.length && widgets.length < maxLines; i++) {
       final line = lines[i];
       if (line.trim().isEmpty) {
-        widgets.add(const SizedBox(height: 4));
+        // Skip empty lines but don't count them
         continue;
       }
       
@@ -1519,7 +1517,7 @@ class _SimpleMarkdownPreview extends StatelessWidget {
         lineWidget = Text(
           line.substring(2),
           style: const TextStyle(
-            fontSize: 12,
+            fontSize: 11,
             fontWeight: FontWeight.bold,
             color: Color(0xFFF8F8F2),
           ),
@@ -1531,7 +1529,7 @@ class _SimpleMarkdownPreview extends StatelessWidget {
         lineWidget = Text(
           line.substring(3),
           style: const TextStyle(
-            fontSize: 11,
+            fontSize: 10,
             fontWeight: FontWeight.w600,
             color: Color(0xFF66D9EF),
           ),
@@ -1543,7 +1541,7 @@ class _SimpleMarkdownPreview extends StatelessWidget {
         lineWidget = Text(
           line.substring(4),
           style: const TextStyle(
-            fontSize: 10,
+            fontSize: 9,
             fontWeight: FontWeight.w600,
             color: Color(0xFFA6E22E),
           ),
@@ -1603,15 +1601,14 @@ class _SimpleMarkdownPreview extends StatelessWidget {
         );
       }
       
-      widgets.add(Padding(
-        padding: const EdgeInsets.only(bottom: 2),
-        child: lineWidget,
-      ));
+      widgets.add(lineWidget);
     }
     
+    // Use a simple column with tight spacing - caller wraps in ClipRect
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       mainAxisSize: MainAxisSize.min,
+      mainAxisAlignment: MainAxisAlignment.start,
       children: widgets,
     );
   }
