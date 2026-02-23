@@ -218,26 +218,113 @@ class MarkdownRenderer extends StatelessWidget {
           child: _InlineText(b.content, TextStyle(fontSize: fontSize, fontStyle: FontStyle.italic, color: const Color(0xFFAAAAAA))),
         );
       case _BType.code:
-        return Container(
-          margin: const EdgeInsets.symmetric(vertical: 6),
-          decoration: BoxDecoration(color: const Color(0xFF1E1E1E), borderRadius: BorderRadius.circular(6), border: Border.all(color: const Color(0xFF3E3D32))),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-            if (b.lang.isNotEmpty)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: const BoxDecoration(color: Color(0xFF2D2D2D), borderRadius: BorderRadius.vertical(top: Radius.circular(5))),
-                child: Row(children: [
-                  Text(b.lang, style: const TextStyle(fontSize: 10, color: Color(0xFF808080), fontFamily: 'monospace')),
-                  const Spacer(),
-                  GestureDetector(onTap: () => Clipboard.setData(ClipboardData(text: b.content)), child: const Icon(Icons.copy, size: 12, color: Color(0xFF808080))),
-                ]),
-              ),
-            Padding(padding: const EdgeInsets.all(10), child: SelectableText(b.content, style: const TextStyle(fontSize: 12, fontFamily: 'monospace', color: Color(0xFFA6E22E), height: 1.4))),
-          ]),
-        );
+        return _CodeBlockWidget(content: b.content, language: b.lang);
       case _BType.empty:
         return const SizedBox(height: 6);
     }
+  }
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CODE BLOCK WIDGET (with working copy button)
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _CodeBlockWidget extends StatefulWidget {
+  final String content;
+  final String language;
+  
+  const _CodeBlockWidget({required this.content, required this.language});
+  
+  @override
+  State<_CodeBlockWidget> createState() => _CodeBlockWidgetState();
+}
+
+class _CodeBlockWidgetState extends State<_CodeBlockWidget> {
+  bool _copied = false;
+  
+  void _copyToClipboard() {
+    Clipboard.setData(ClipboardData(text: widget.content));
+    setState(() => _copied = true);
+    Future.delayed(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+  
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A1A),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: const Color(0xFF333333), width: 0.5),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Language header with copy button
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF222222),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(7)),
+              border: Border(bottom: BorderSide(color: const Color(0xFF333333).withOpacity(0.5), width: 0.5)),
+            ),
+            child: Row(
+              children: [
+                Text(
+                  widget.language.isNotEmpty ? widget.language : 'code',
+                  style: const TextStyle(fontSize: 11, color: Color(0xFF888888), fontFamily: 'monospace', fontWeight: FontWeight.w500),
+                ),
+                const Spacer(),
+                Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    onTap: _copyToClipboard,
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            _copied ? Icons.check : Icons.copy_outlined,
+                            size: 12,
+                            color: _copied ? const Color(0xFFA6E22E) : const Color(0xFF888888),
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            _copied ? 'Copied!' : 'Copy',
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: _copied ? const Color(0xFFA6E22E) : const Color(0xFF888888),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          // Code content
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: SelectableText(
+              widget.content,
+              style: const TextStyle(
+                fontSize: 12,
+                fontFamily: 'monospace',
+                color: Color(0xFFE0E0E0),
+                height: 1.5,
+                letterSpacing: 0,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

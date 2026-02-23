@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../theme/monokai_theme.dart';
 import '../services/cyan_service.dart';
 import '../providers/selection_provider.dart';
+import '../providers/auth_provider.dart';
 
 // ============================================================================
 // STATUS BAR WIDGET - Stateless to avoid lifecycle issues
@@ -151,14 +152,14 @@ class _SyncStatusBadge extends StatelessWidget {
 }
 
 // Stats display that polls CyanService directly without providers
-class _StatsDisplay extends StatefulWidget {
+class _StatsDisplay extends ConsumerStatefulWidget {
   const _StatsDisplay();
   
   @override
-  State<_StatsDisplay> createState() => _StatsDisplayState();
+  ConsumerState<_StatsDisplay> createState() => _StatsDisplayState();
 }
 
-class _StatsDisplayState extends State<_StatsDisplay> {
+class _StatsDisplayState extends ConsumerState<_StatsDisplay> {
   Timer? _timer;
   int _objectCount = 0;
   int _peerCount = 0;
@@ -204,6 +205,10 @@ class _StatsDisplayState extends State<_StatsDisplay> {
   
   @override
   Widget build(BuildContext context) {
+    // Get display name from auth state
+    final authState = ref.watch(authProvider);
+    final displayName = authState.identity?.displayName ?? authState.identity?.email ?? _nodeId;
+    
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -255,9 +260,9 @@ class _StatsDisplayState extends State<_StatsDisplay> {
         
         const SizedBox(width: 16),
         
-        // Node ID
+        // User display name / Node ID
         Tooltip(
-          message: 'Node ID (click to copy)',
+          message: 'Signed in as $displayName\n(click to copy Node ID)',
           child: GestureDetector(
             onTap: () {
               final service = CyanService.instance;
@@ -278,7 +283,7 @@ class _StatsDisplayState extends State<_StatsDisplay> {
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                _nodeId,
+                displayName,
                 style: MonokaiTheme.codeSmall.copyWith(
                   color: MonokaiTheme.cyan,
                 ),

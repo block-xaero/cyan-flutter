@@ -14,6 +14,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/chat_provider.dart';
 import '../providers/file_tree_provider.dart';
 import '../providers/selection_provider.dart';
+import '../providers/auth_provider.dart';
+import '../services/cyan_service.dart';
 import '../ffi/ffi_helpers.dart';
 import '../ffi/component_bridge.dart';
 import '../theme/monokai_theme.dart';
@@ -109,13 +111,7 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
   bool _showFilesPanel = true;
   bool _isSidebarCollapsed = false;
   double _sidebarWidth = 160;
-  
-  /// Chat scope filter: 'all' shows hierarchy, 'current' shows only this scope
-  String _scopeFilter = 'current';
-  
-  /// Whether user is currently typing inside a code fence
-  bool _isInCodeBlock = false;
-  String _codeBlockLang = '';
+  String _scopeFilter = 'all'; // 'all' or 'current'
   
   List<ChatMessage> _messages = [];
   List<ScopedFile> _files = [];
@@ -129,7 +125,6 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
     super.initState();
     _initChat();
     _loadMockFiles();
-    _messageController.addListener(_detectCodeBlock);
   }
   
   @override
@@ -165,8 +160,9 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
         // ChatSent - individual message from history or new message
         final msg = event.singleMessage;
         if (msg != null && _shouldIncludeMessage(msg)) {
-          if (!_messages.any((m) => m.id == msg.id)) {
-            _messages.add(msg);
+          final fixedMsg = _fixMessageOwnership(msg);
+          if (!_messages.any((m) => m.id == fixedMsg.id)) {
+            _messages.add(fixedMsg);
             _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
           }
           if (mounted) {
@@ -179,7 +175,8 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
         final newMessages = event.messages;
         for (final msg in newMessages) {
           if (_shouldIncludeMessage(msg) && !_messages.any((m) => m.id == msg.id)) {
-            _messages.add(msg);
+            final fixedMsg = _fixMessageOwnership(msg);
+            _messages.add(fixedMsg);
           }
         }
         _messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -228,6 +225,31 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
     if (_allowedWorkspaceIds.isEmpty) return true;
     // Check if message workspace is in allowed set
     return _allowedWorkspaceIds.contains(msg.workspaceId);
+  }
+  
+  /// Fix message ownership by comparing authorId to our nodeId
+  ChatMessage _fixMessageOwnership(ChatMessage msg) {
+    if (msg.isOwn) return msg; // Already marked as own
+    
+    // Compare authorId to our nodeId
+    final myNodeId = CyanService.instance.nodeId;
+    if (myNodeId != null && msg.authorId == myNodeId) {
+      // This is our message - create a copy with isOwn = true
+      return ChatMessage(
+        id: msg.id,
+        workspaceId: msg.workspaceId,
+        message: msg.message,
+        authorId: msg.authorId,
+        authorName: msg.authorName,
+        parentId: msg.parentId,
+        timestamp: msg.timestamp,
+        mentions: msg.mentions,
+        isBroadcast: msg.isBroadcast,
+        mentionsMe: msg.mentionsMe,
+        isOwn: true,
+      );
+    }
+    return msg;
   }
   
   Set<String> _allowedWorkspaceIds = {};
@@ -312,13 +334,6 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
     final text = _messageController.text.trim();
     if (text.isEmpty) return;
     
-    // Tag board-level messages with board ID prefix
-    String messageBody = text;
-    if (widget.context.scope == 'board') {
-      final boardId = widget.context.rawId;
-      messageBody = '§board:$boardId§$text';
-    }
-    
     // Get workspace ID for sending
     String? workspaceId;
     switch (widget.context.scope) {
@@ -329,6 +344,7 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
         workspaceId = widget.context.workspaceId;
         break;
       case 'group':
+        // For group chat, need to pick a workspace - use first one
         final fileTreeState = ref.read(fileTreeProvider);
         final group = fileTreeState.groups.where((g) => g.id == widget.context.rawId).firstOrNull;
         workspaceId = group?.workspaces.firstOrNull?.id;
@@ -344,57 +360,11 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
     
     _chatBridge.send(ChatCommand.sendMessage(
       workspaceId: workspaceId,
-      message: messageBody,
+      message: text,
     ));
     
     _messageController.clear();
-    setState(() => _isInCodeBlock = false);
     _focusNode.requestFocus();
-  }
-  
-  void _detectCodeBlock() {
-    final text = _messageController.text;
-    final fenceCount = RegExp(r'```').allMatches(text).length;
-    final inCode = fenceCount.isOdd;
-    
-    String lang = '';
-    if (inCode) {
-      // Extract language from last opening fence
-      final lastFence = text.lastIndexOf('```');
-      if (lastFence >= 0) {
-        final afterFence = text.substring(lastFence + 3);
-        final newline = afterFence.indexOf('\n');
-        final langStr = newline >= 0 ? afterFence.substring(0, newline).trim() : afterFence.trim();
-        if (langStr.isNotEmpty && langStr.length < 20 && !langStr.contains(' ')) {
-          lang = langStr;
-        }
-      }
-    }
-    
-    if (inCode != _isInCodeBlock || lang != _codeBlockLang) {
-      setState(() {
-        _isInCodeBlock = inCode;
-        _codeBlockLang = lang;
-      });
-    }
-  }
-  
-  /// Strip board tag prefix from message for display
-  static String _stripBoardTag(String message) {
-    if (message.startsWith('§board:')) {
-      final endTag = message.indexOf('§', 7);
-      if (endTag > 0) return message.substring(endTag + 1);
-    }
-    return message;
-  }
-  
-  /// Extract board ID from message tag
-  static String? _extractBoardId(String message) {
-    if (message.startsWith('§board:')) {
-      final endTag = message.indexOf('§', 7);
-      if (endTag > 0) return message.substring(7, endTag);
-    }
-    return null;
   }
   
   void _handleFileDrop(List<String> paths) {
@@ -545,14 +515,6 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
       _ => MonokaiTheme.textSecondary,
     };
     
-    final showFilter = widget.context.scope == 'board' || widget.context.scope == 'workspace';
-    
-    final filterLabel = switch (widget.context.scope) {
-      'board' => 'Board only',
-      'workspace' => 'Workspace only',
-      _ => 'Current',
-    };
-    
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       color: MonokaiTheme.surface,
@@ -567,15 +529,15 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
             ),
             onPressed: () => setState(() => _isSidebarCollapsed = !_isSidebarCollapsed),
             tooltip: _isSidebarCollapsed ? 'Show sidebar' : 'Hide sidebar',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
           ),
           
-          const SizedBox(width: 4),
+          const SizedBox(width: 8),
           
-          // Scope icon + title
-          Icon(scopeIcon, size: 16, color: scopeColor),
-          const SizedBox(width: 6),
+          // Scope icon
+          Icon(scopeIcon, size: 18, color: scopeColor),
+          const SizedBox(width: 8),
+          
+          // Title
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -583,26 +545,48 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
                 Text(
                   widget.context.name,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: MonokaiTheme.foreground,
                   ),
-                  overflow: TextOverflow.ellipsis,
                 ),
                 Text(
                   '${widget.context.scope} chat',
-                  style: TextStyle(fontSize: 9, color: scopeColor),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: scopeColor,
+                  ),
                 ),
               ],
             ),
           ),
           
-          // Scope filter toggle (board and workspace only)
-          if (showFilter)
-            _buildFilterToggle(scopeColor, filterLabel),
+          // Scope filter toggle (for workspace and board scopes)
+          if (widget.context.scope == 'workspace' || widget.context.scope == 'board') ...[
+            Container(
+              height: 28,
+              margin: const EdgeInsets.only(right: 8),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: MonokaiTheme.divider.withOpacity(0.5)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  _buildFilterChip('All', 'all', scopeColor),
+                  _buildFilterChip(
+                    widget.context.scope == 'board' ? 'Board only' : 'Workspace only',
+                    'current',
+                    scopeColor,
+                  ),
+                ],
+              ),
+            ),
+          ],
           
+          // More options
           IconButton(
-            icon: const Icon(Icons.more_vert, size: 16),
+            icon: const Icon(Icons.more_vert, size: 18),
             color: MonokaiTheme.textSecondary,
             onPressed: () {},
             padding: EdgeInsets.zero,
@@ -613,42 +597,21 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
     );
   }
   
-  Widget _buildFilterToggle(Color scopeColor, String filterLabel) {
-    return Container(
-      margin: const EdgeInsets.only(right: 4),
-      height: 28,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: MonokaiTheme.divider.withOpacity(0.5)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _filterChip('All', 'all', scopeColor),
-          _filterChip(filterLabel, 'current', scopeColor),
-        ],
-      ),
-    );
-  }
-  
-  Widget _filterChip(String label, String value, Color activeColor) {
+  Widget _buildFilterChip(String label, String value, Color activeColor) {
     final isActive = _scopeFilter == value;
     return GestureDetector(
-      onTap: () {
-        print('🎯 Filter tapped: $value (was $_scopeFilter)');
-        setState(() => _scopeFilter = value);
-      },
+      onTap: () => setState(() => _scopeFilter = value),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10),
         decoration: BoxDecoration(
-          color: isActive ? activeColor.withOpacity(0.2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(14),
+          color: isActive ? activeColor.withOpacity(0.15) : Colors.transparent,
+          borderRadius: BorderRadius.circular(5),
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: TextStyle(
-            fontSize: 10,
+            fontSize: 11,
             fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
             color: isActive ? activeColor : MonokaiTheme.textSecondary,
           ),
@@ -917,10 +880,7 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
       );
     }
     
-    // Apply scope filter
-    final filtered = _getFilteredMessages();
-    
-    if (filtered.isEmpty) {
+    if (_messages.isEmpty) {
       return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -933,9 +893,7 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
             ),
             const SizedBox(height: 8),
             Text(
-              _scopeFilter == 'current' 
-                ? 'No messages in this ${widget.context.scope}' 
-                : 'Start the conversation!',
+              'Start the conversation!',
               style: TextStyle(fontSize: 12, color: MonokaiTheme.textSecondary.withOpacity(0.7)),
             ),
           ],
@@ -943,185 +901,220 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
       );
     }
     
-    // Build items with workspace headers when showing "all" in group scope
-    final items = <Widget>[];
-    String? lastWorkspaceId;
-    
-    for (final msg in filtered) {
-      // Insert workspace header when workspace changes (group scope + all filter)
-      if (widget.context.scope == 'group' && _scopeFilter == 'all' && msg.workspaceId != lastWorkspaceId) {
-        lastWorkspaceId = msg.workspaceId;
-        final wsName = _getWorkspaceName(msg.workspaceId);
-        items.add(Padding(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Row(
-            children: [
-              Expanded(child: Divider(color: MonokaiTheme.divider)),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: MonokaiTheme.green.withOpacity(0.15),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: MonokaiTheme.green.withOpacity(0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.workspaces, size: 10, color: MonokaiTheme.green),
-                      const SizedBox(width: 4),
-                      Text(wsName, style: TextStyle(fontSize: 9, color: MonokaiTheme.green, fontWeight: FontWeight.w600)),
-                    ],
-                  ),
-                ),
-              ),
-              Expanded(child: Divider(color: MonokaiTheme.divider)),
-            ],
-          ),
-        ));
-      }
-      items.add(_buildMessageBubble(msg));
-    }
-    
-    return ListView(
+    return ListView.builder(
       controller: _scrollController,
       padding: const EdgeInsets.all(12),
-      children: items,
+      itemCount: _messages.length,
+      itemBuilder: (context, index) => _buildMessageBubble(_messages[index]),
     );
-  }
-  
-  /// Get filtered messages based on scope filter
-  List<ChatMessage> _getFilteredMessages() {
-    print('🔍 Filter: scope=${widget.context.scope}, filter=$_scopeFilter, total=${_messages.length}');
-    
-    if (_scopeFilter == 'all') {
-      print('🔍 Returning all ${_messages.length} messages');
-      return _messages;
-    }
-    
-    // 'current' filter — only messages matching this exact scope
-    switch (widget.context.scope) {
-      case 'board':
-        // Only show messages tagged with this board ID
-        final boardId = widget.context.rawId;
-        final filtered = _messages.where((m) {
-          final taggedBoard = _extractBoardId(m.message);
-          return taggedBoard == boardId;
-        }).toList();
-        print('🔍 Board filter: boardId=$boardId, found ${filtered.length} tagged messages');
-        return filtered;
-      case 'workspace':
-        // Only messages in this workspace that are NOT tagged to a specific board
-        final wsId = widget.context.rawId;
-        final filtered = _messages.where((m) {
-          final isThisWs = m.workspaceId == wsId;
-          final isBoardTagged = m.message.startsWith('§board:');
-          return isThisWs && !isBoardTagged;
-        }).toList();
-        print('🔍 Workspace filter: wsId=$wsId, found ${filtered.length} workspace-only messages');
-        return filtered;
-      case 'group':
-        // Group = all (no further filtering needed)
-        return _messages;
-      default:
-        return _messages;
-    }
-  }
-  
-  /// Look up workspace name from file tree
-  String _getWorkspaceName(String workspaceId) {
-    final fileTreeState = ref.read(fileTreeProvider);
-    for (final group in fileTreeState.groups) {
-      for (final ws in group.workspaces) {
-        if (ws.id == workspaceId) return ws.name;
-      }
-    }
-    return workspaceId.substring(0, 8);
   }
   
   Widget _buildMessageBubble(ChatMessage message) {
     final isMe = message.isOwn;
-    final displayMessage = _stripBoardTag(message.message);
-    final authorName = message.authorName ?? 'Unknown';
+    
+    // Get author name - use our display name for own messages
+    String authorName;
+    if (isMe) {
+      final authState = ref.read(authProvider);
+      authorName = authState.identity?.displayName ?? authState.identity?.email ?? 'Me';
+    } else {
+      authorName = message.authorName ?? 'Unknown';
+    }
     
     return Padding(
-      padding: const EdgeInsets.only(bottom: 2),
-      child: Row(
-        mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.only(bottom: 16, left: 8, right: 8),
+      child: Column(
+        crossAxisAlignment: isMe ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          if (!isMe) ...[
-            Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: CircleAvatar(
-                radius: 14,
-                backgroundColor: _getAvatarColor(authorName),
-                child: Text(
-                  authorName[0].toUpperCase(),
-                  style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.w600),
-                ),
-              ),
+          // Author + timestamp header (outside bubble)
+          Padding(
+            padding: EdgeInsets.only(
+              left: isMe ? 0 : 40,
+              right: isMe ? 8 : 0,
+              bottom: 4,
             ),
-            const SizedBox(width: 8),
-          ],
-          
-          Flexible(
-            child: Container(
-              constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.65),
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: isMe 
-                  ? MonokaiTheme.cyan.withOpacity(0.12) 
-                  : const Color(0xFF2D2D2D),
-                borderRadius: BorderRadius.only(
-                  topLeft: const Radius.circular(16),
-                  topRight: const Radius.circular(16),
-                  bottomLeft: Radius.circular(isMe ? 16 : 4),
-                  bottomRight: Radius.circular(isMe ? 4 : 16),
-                ),
-                border: Border.all(
-                  color: isMe 
-                    ? MonokaiTheme.cyan.withOpacity(0.15) 
-                    : const Color(0xFF3E3D32).withOpacity(0.4),
-                  width: 0.5,
-                ),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Author + time row
-                  Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      if (!isMe)
-                        Text(
-                          authorName,
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w600,
-                            color: _getAvatarColor(authorName),
-                          ),
-                        ),
-                      if (!isMe) const SizedBox(width: 8),
-                      Text(
-                        _formatTime(message.timestamp),
-                        style: TextStyle(fontSize: 9, color: MonokaiTheme.textSecondary.withOpacity(0.6)),
-                      ),
-                    ],
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  isMe ? authorName : authorName,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w500,
+                    color: isMe ? MonokaiTheme.cyan.withOpacity(0.8) : MonokaiTheme.textSecondary,
                   ),
-                  
-                  const SizedBox(height: 4),
-                  
-                  // Markdown-rendered content (with board tag stripped)
-                  MarkdownRenderer(markdown: displayMessage, fontSize: 13),
-                ],
-              ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  _formatTime(message.timestamp),
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: MonokaiTheme.textSecondary.withOpacity(0.5),
+                  ),
+                ),
+              ],
             ),
           ),
           
-          if (isMe) const SizedBox(width: 8),
+          // Message row with avatar
+          Row(
+            mainAxisAlignment: isMe ? MainAxisAlignment.end : MainAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Avatar for others
+              if (!isMe) ...[
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: _getAvatarColor(authorName).withOpacity(0.15),
+                    border: Border.all(
+                      color: _getAvatarColor(authorName).withOpacity(0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      authorName[0].toUpperCase(),
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: _getAvatarColor(authorName),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+              ],
+              
+              // Message bubble - thin border, minimal fill, no teal
+              Flexible(
+                child: Container(
+                  constraints: BoxConstraints(maxWidth: MediaQuery.of(context).size.width * 0.65),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF2A2A2A),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: const Color(0xFF3A3A3A),
+                      width: 0.5,
+                    ),
+                  ),
+                  child: MarkdownRenderer(markdown: message.message, fontSize: 13),
+                ),
+              ),
+            ],
+          ),
         ],
+      ),
+    );
+  }
+  
+  Widget _buildMarkdownContent(String content) {
+    // Simple markdown rendering
+    // TODO: Use flutter_markdown for full support
+    
+    final lines = content.split('\n');
+    final widgets = <Widget>[];
+    
+    for (final line in lines) {
+      if (line.startsWith('# ')) {
+        widgets.add(Text(
+          line.substring(2),
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: MonokaiTheme.foreground),
+        ));
+      } else if (line.startsWith('## ')) {
+        widgets.add(Text(
+          line.substring(3),
+          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: MonokaiTheme.foreground),
+        ));
+      } else if (line.startsWith('- ') || line.startsWith('* ')) {
+        widgets.add(Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('• ', style: TextStyle(color: MonokaiTheme.cyan)),
+            Expanded(child: _buildInlineMarkdown(line.substring(2))),
+          ],
+        ));
+      } else if (line.startsWith('```')) {
+        // Code block start/end - simplified
+        widgets.add(Container(
+          margin: const EdgeInsets.symmetric(vertical: 4),
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: MonokaiTheme.background,
+            borderRadius: BorderRadius.circular(4),
+          ),
+          child: Text(
+            line.replaceAll('```', ''),
+            style: TextStyle(fontFamily: 'monospace', fontSize: 12, color: MonokaiTheme.green),
+          ),
+        ));
+      } else if (line.startsWith('> ')) {
+        widgets.add(Container(
+          margin: const EdgeInsets.symmetric(vertical: 2),
+          padding: const EdgeInsets.only(left: 8),
+          decoration: BoxDecoration(
+            border: Border(left: BorderSide(color: MonokaiTheme.textSecondary, width: 2)),
+          ),
+          child: _buildInlineMarkdown(line.substring(2)),
+        ));
+      } else {
+        widgets.add(_buildInlineMarkdown(line));
+      }
+    }
+    
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: widgets,
+    );
+  }
+  
+  Widget _buildInlineMarkdown(String text) {
+    // Handle **bold**, *italic*, `code`, [links](url)
+    final spans = <TextSpan>[];
+    
+    // Simplified - just render as plain text with basic formatting
+    // Full implementation would use regex to parse inline markdown
+    
+    String remaining = text;
+    
+    // Bold
+    final boldRegex = RegExp(r'\*\*(.+?)\*\*');
+    // Italic
+    final italicRegex = RegExp(r'\*(.+?)\*');
+    // Code
+    final codeRegex = RegExp(r'`(.+?)`');
+    
+    // For simplicity, just show text with code highlighting
+    if (codeRegex.hasMatch(remaining)) {
+      final parts = remaining.split(codeRegex);
+      final codes = codeRegex.allMatches(remaining).map((m) => m.group(1)!).toList();
+      
+      for (int i = 0; i < parts.length; i++) {
+        if (parts[i].isNotEmpty) {
+          spans.add(TextSpan(text: parts[i]));
+        }
+        if (i < codes.length) {
+          spans.add(TextSpan(
+            text: codes[i],
+            style: TextStyle(
+              fontFamily: 'monospace',
+              backgroundColor: MonokaiTheme.background,
+              color: MonokaiTheme.orange,
+            ),
+          ));
+        }
+      }
+    } else {
+      spans.add(TextSpan(text: remaining));
+    }
+    
+    return RichText(
+      text: TextSpan(
+        style: TextStyle(fontSize: 13, color: MonokaiTheme.foreground, height: 1.4),
+        children: spans,
       ),
     );
   }
@@ -1142,130 +1135,110 @@ class _ScopedChatPanelState extends ConsumerState<ScopedChatPanel> {
   // ============================================================================
   
   Widget _buildInputArea() {
+    final text = _messageController.text;
+    final hasCodeBlock = text.contains('```');
+    
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
         color: MonokaiTheme.surface,
-        border: Border(top: BorderSide(color: MonokaiTheme.divider.withOpacity(0.5))),
+        border: Border(top: BorderSide(color: MonokaiTheme.divider)),
       ),
       child: Column(
-        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Code block indicator bar
-          if (_isInCodeBlock)
+          // Live markdown preview (only for code blocks)
+          if (hasCodeBlock)
             Container(
-              margin: const EdgeInsets.only(bottom: 6),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              constraints: const BoxConstraints(maxHeight: 150),
+              margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+              padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF1A1A2E),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(8)),
-                border: Border.all(color: MonokaiTheme.green.withOpacity(0.3)),
+                color: const Color(0xFF1A1A1A),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: const Color(0xFF333333), width: 0.5),
               ),
-              child: Row(
-                children: [
-                  Icon(Icons.code, size: 12, color: MonokaiTheme.green),
-                  const SizedBox(width: 6),
-                  Text(
-                    _codeBlockLang.isNotEmpty ? _codeBlockLang : 'code',
-                    style: TextStyle(fontSize: 10, color: MonokaiTheme.green, fontFamily: 'monospace', fontWeight: FontWeight.w600),
-                  ),
-                  const Spacer(),
-                  Text(
-                    'Enter for newline · Close with \`\`\`',
-                    style: TextStyle(fontSize: 9, color: MonokaiTheme.textSecondary),
-                  ),
-                ],
+              child: SingleChildScrollView(
+                child: MarkdownRenderer(markdown: text, fontSize: 12),
               ),
             ),
           
           // Input row
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              // Main input container
-              Expanded(
-                child: Container(
-                  constraints: const BoxConstraints(maxHeight: 200),
-                  decoration: BoxDecoration(
-                    color: _isInCodeBlock ? const Color(0xFF1A1A2E) : MonokaiTheme.background,
-                    borderRadius: BorderRadius.circular(_isInCodeBlock ? 0 : 12),
-                    border: Border.all(
-                      color: _isInCodeBlock 
-                        ? MonokaiTheme.green.withOpacity(0.3) 
-                        : MonokaiTheme.divider.withOpacity(0.5),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // Attach button
+                IconButton(
+                  icon: const Icon(Icons.attach_file, size: 20),
+                  color: MonokaiTheme.textSecondary,
+                  onPressed: () {},
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                ),
+                
+                // Input field with keyboard handler
+                Expanded(
+                  child: Container(
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    decoration: BoxDecoration(
+                      color: MonokaiTheme.background,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: MonokaiTheme.divider.withOpacity(0.5)),
                     ),
-                  ),
-                  child: Focus(
-                    onKeyEvent: (node, event) {
-                      if (event is KeyDownEvent && 
-                          event.logicalKey == LogicalKeyboardKey.enter &&
-                          !HardwareKeyboard.instance.isShiftPressed &&
-                          !_isInCodeBlock) {
-                        _sendMessage();
-                        return KeyEventResult.handled;
-                      }
-                      return KeyEventResult.ignored;
-                    },
-                    child: TextField(
-                      controller: _messageController,
-                      focusNode: _focusNode,
-                      maxLines: null,
-                      style: TextStyle(
-                        fontSize: 13, 
-                        color: MonokaiTheme.foreground,
-                        fontFamily: _isInCodeBlock ? 'monospace' : null,
-                        height: _isInCodeBlock ? 1.5 : 1.3,
-                      ),
-                      decoration: InputDecoration(
-                        hintText: _isInCodeBlock 
-                          ? 'Type code...' 
-                          : 'Message${_getScopeHint()}',
-                        hintStyle: TextStyle(
-                          color: MonokaiTheme.textSecondary.withOpacity(0.5),
-                          fontFamily: _isInCodeBlock ? 'monospace' : null,
+                    child: Focus(
+                      onKeyEvent: (node, event) {
+                        // Enter without Shift sends message
+                        if (event is KeyDownEvent && 
+                            event.logicalKey == LogicalKeyboardKey.enter &&
+                            !HardwareKeyboard.instance.isShiftPressed) {
+                          if (_messageController.text.trim().isNotEmpty) {
+                            _sendMessage();
+                            return KeyEventResult.handled;
+                          }
+                        }
+                        return KeyEventResult.ignored;
+                      },
+                      child: TextField(
+                        controller: _messageController,
+                        focusNode: _focusNode,
+                        maxLines: null,
+                        style: TextStyle(fontSize: 13, color: MonokaiTheme.foreground),
+                        decoration: InputDecoration(
+                          hintText: 'Type a message... (Enter to send, Shift+Enter for newline)',
+                          hintStyle: TextStyle(color: MonokaiTheme.textSecondary.withOpacity(0.6), fontSize: 12),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          border: InputBorder.none,
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                        border: InputBorder.none,
+                        onChanged: (_) => setState(() {}), // Trigger rebuild for preview
                       ),
                     ),
                   ),
                 ),
-              ),
-              
-              const SizedBox(width: 8),
-              
-              // Send button - circular like Claude
-              Container(
-                decoration: BoxDecoration(
-                  color: _messageController.text.trim().isNotEmpty 
-                    ? MonokaiTheme.cyan 
-                    : MonokaiTheme.divider,
-                  shape: BoxShape.circle,
+                
+                const SizedBox(width: 8),
+                
+                // Send button
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: text.trim().isNotEmpty ? MonokaiTheme.cyan : MonokaiTheme.surface,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.send, size: 18),
+                    color: text.trim().isNotEmpty ? Colors.white : MonokaiTheme.textSecondary,
+                    onPressed: text.trim().isNotEmpty ? _sendMessage : null,
+                    padding: EdgeInsets.zero,
+                  ),
                 ),
-                child: IconButton(
-                  icon: Icon(Icons.arrow_upward, size: 18, 
-                    color: _messageController.text.trim().isNotEmpty 
-                      ? MonokaiTheme.background 
-                      : MonokaiTheme.textSecondary),
-                  onPressed: _messageController.text.trim().isNotEmpty ? _sendMessage : null,
-                  padding: const EdgeInsets.all(8),
-                  constraints: const BoxConstraints(),
-                ),
-              ),
-            ],
+              ],
+            ),
           ),
         ],
       ),
     );
-  }
-  
-  String _getScopeHint() {
-    switch (widget.context.scope) {
-      case 'board': return ' this board...';
-      case 'workspace': return ' this workspace...';
-      case 'group': return ' this group...';
-      default: return '...';
-    }
   }
 }
 

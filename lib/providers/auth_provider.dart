@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/xaero_identity.dart';
 import '../services/identity_service.dart';
 import '../services/google_oauth.dart';
+import '../services/demo_data_seeder.dart';
 import '../ffi/ffi_helpers.dart';
 import 'file_tree_provider.dart';
 
@@ -109,7 +110,9 @@ class AuthNotifier extends StateNotifier<AuthState> {
           error: success ? null : 'Backend initialization failed',
         );
 
-        // NOTE: Don't seed here - FileTreeProvider handles seeding via seedDemoIfEmpty
+        if (success) {
+          _identityService.seedDemoData();
+        }
         return;
       }
 
@@ -191,6 +194,10 @@ class AuthNotifier extends StateNotifier<AuthState> {
     print('🔐 Backend init result: $success');
 
     if (success) {
+      // TODO: Re-enable rich demo seeding once auth flow is stable
+      // For now, just use the basic Rust-side seeding
+      _identityService.seedDemoData();
+      
       print('🔐 Setting authenticated=true');
       state = state.copyWith(
         isAuthenticated: true,
@@ -202,11 +209,6 @@ class AuthNotifier extends StateNotifier<AuthState> {
         ),
       );
       print('🔐 State updated: isAuth=${state.isAuthenticated}');
-      
-      // Restart FileTreeProvider to seed demo data
-      print('🔐 Triggering FileTree restart for seeding...');
-      await _ref.read(fileTreeProvider.notifier).restartIfNeeded();
-      
       return true;
     }
 
@@ -214,7 +216,7 @@ class AuthNotifier extends StateNotifier<AuthState> {
     return false;
   }
 
-  // ---- TEST ACCOUNT ----
+  // ---- LINK GOOGLE ACCOUNT ----
 
   /// Link Google account to existing XaeroID (for users who already signed up)
   Future<bool> linkGoogleAccount() async {
@@ -266,6 +268,8 @@ class AuthNotifier extends StateNotifier<AuthState> {
     }
   }
 
+  // ---- TEST ACCOUNT ----
+
   Future<bool> signInAsTest() async {
     state = state.copyWith(isLoading: true, clearError: true);
 
@@ -274,17 +278,15 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final success = await _identityService.initializeBackend(identity);
 
       if (success) {
+        // Use basic Rust-side seeding for now
+        _identityService.seedDemoData();
+        
         state = state.copyWith(
           isAuthenticated: true,
           isLoading: false,
           isTestAccount: true,
           identity: identity,
         );
-        
-        // Restart FileTreeProvider to seed demo data
-        print('🔐 Triggering FileTree restart for seeding (test account)...');
-        await _ref.read(fileTreeProvider.notifier).restartIfNeeded();
-        
         return true;
       }
 
@@ -312,17 +314,13 @@ class AuthNotifier extends StateNotifier<AuthState> {
       final success = await _identityService.initializeBackend(identity);
 
       if (success) {
+        _identityService.seedDemoData();
         state = state.copyWith(
           isAuthenticated: true,
           isLoading: false,
           isTestAccount: false,
           identity: identity,
         );
-        
-        // Restart FileTreeProvider to seed demo data
-        print('🔐 Triggering FileTree restart for seeding (restore)...');
-        await _ref.read(fileTreeProvider.notifier).restartIfNeeded();
-        
         return true;
       }
 
