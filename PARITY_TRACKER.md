@@ -32,18 +32,21 @@ that tag — nothing newer (no Frame.io/annotation UI; that's a later, separate 
 - **P2..N — Screen-by-screen parity (golden vs the Day-0 SwiftUI reference shots):** order
   by value below.
 
-## Reference screenshots (YOUR Day-0 task, Rick)
-Golden targets = screenshots of the blessed Mac app. Drop them in `test/golden/reference/`.
-Until they exist, goldens are self-generated (structure) and re-baselined against your shots.
-Needed: Login, All-Boards/living-wall, Explorer, Board faces (Workflow/Notes/Dashboard DAG+run),
-Ops console (Runs/Cost/Efficiency), Marketplace, Lens, Chat.
+## Reference screenshots (OPTIONAL — human eyeball reference only, NOT a gate)
+Flutter goldens are generated from the Flutter widgets themselves and lock the Flutter UI
+against its own regressions — nothing auto-diffs them against Mac screenshots. So the loop
+matches the LOOK from the SwiftUI SOURCE (read-only at `/Users/anirudhvyas/cyan-iOS-ready`)
+plus the already-ported Monokai theme. **Do NOT wait on screenshots; never block a screen on
+them.** They're purely a human side-by-side aid. If Rick drops any in `test/golden/reference/`
+(hero screens are enough: Boards/living-wall, Dashboard DAG+run, Ops console), great; if not,
+proceed and Rick eyeballs the built app at the end.
 
 ## Screen status  (todo · in-progress · ci-green · ci-red · blocked)
 | # | screen | tier-1 (Fake) | golden | notes |
 |---|---|---|---|---|
 | 0 | **harness + CI gate** | in-progress (ci-green-pending) | in-progress | P0 — FakeCyanBackend + CyanBackend seam + flutter-parity.yml + trivial widget test + golden baseline step |
 | 1 | Boards grid + living wall | in-progress (ci-green-pending) | in-progress | ParityBoardsGrid via seam (no direct FFI); masonry Monokai cards + living-wall running pill; widget test + golden |
-| 2 | Explorer / group tree | todo | todo | groups → workspaces → boards |
+| 2 | Explorer / group tree | in-progress (ci-green-pending) | in-progress | ParityExplorerTree via `groupsProvider` seam; Group→Workspace→Board tree, expand/collapse chevrons, type-colored icons, level indent (20px), search filter, selection; widget + golden tests |
 | 3 | Board: Workflow (author) | todo | todo | step cells, compile |
 | 4 | Board: Dashboard (DAG + gated run) | todo | todo | collapsed pipeline steps, AI+human, Approve/Complete |
 | 5 | Board: Notes | todo | todo | markdown |
@@ -61,4 +64,5 @@ build kept green as the cheap CI canary. Plugin-foundation work (Frame.io) lives
 repos on `main` against the frozen tag — these two streams never collide.
 
 ## Digest log (newest first)
+- 2026-06-29 — Row 2 (Explorer / group tree): added `ParityExplorerTree` (lib/widgets/parity/parity_explorer_tree.dart) — SwiftUI `FileTreeView` parity, driven only through the `CyanBackend` seam via `groupsProvider` (no direct FFI). Group→Workspace→Board tree with expand/collapse chevrons, type-colored Monokai icons (group=group color, workspace=green, board=face color), level*20+8 indentation, "Files" header + cyan (+) button, live search filter (matches + ancestors), row selection tint, empty/no-match states. Tree seeds fully-expanded once for deterministic goldens. Added `test/explorer_tree_test.dart`: 4 widget tests (hierarchy renders, collapse hides children, board tap → onOpenBoard, search filters) + golden `golden/explorer_tree.png` (tagged `golden`). NOTE: agent cannot run Flutter — CI is the first real signal; unverified that it compiles. Human must push `feat/flutter-parity`.
 - 2026-06-29 — P0 bootstrap: added the single `CyanBackend` seam (lib/ffi/cyan_backend.dart) with prod `CyanBackendFFI` (wraps existing CyanFFI, no FFI signature changes) + Tier-1 `FakeCyanBackend` (3 groups / 10 boards / 1 sample run); parity view models (parity_models.dart); Riverpod `cyanBackendProvider` + futures. Ported Boards living wall (row 1) as `ParityBoardsGrid` driven only through the seam (Monokai masonry cards + running pill). Added dev deps (golden_toolkit, integration_test); test harness + trivial gate test (replaced the stale counter `widget_test.dart`) + boards widget/golden tests; `dart_test.yaml` golden tag. Created `.github/workflows/flutter-parity.yml` (analyze + `flutter test --exclude-tags golden`, goldens baselined as artifact). NOTE: agent cannot run Flutter — CI is the first real signal; unverified that everything compiles. GIT BLOCKER: workspace FUSE mount forbids unlink, and a stale `.git/index.lock` + interrupted rebase on `main` could not be cleared from this environment, so the branch/commit/push could not be performed here — needs Rick to run the git steps on the host (see report).
