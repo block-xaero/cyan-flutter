@@ -48,4 +48,39 @@ abstract class CyanBackend {
   /// The most recent / sample run for a board, if any. Drives the Dashboard
   /// DAG + gated-run face.
   Future<WorkflowRun?> loadRun(String boardId);
+
+  // ---- board faces ---------------------------------------------------------
+
+  /// The authored workflow (steps + compiled inference chips) for a board's
+  /// Workflow face.
+  Future<Workflow> loadWorkflow(String boardId);
+
+  /// The notes document for a board's Notes face.
+  Future<BoardNotes> loadNotes(String boardId);
+
+  // ---- operations console --------------------------------------------------
+
+  /// All runs across the tenant for the Ops Runs feed.
+  Future<List<OpsRun>> loadOpsRuns();
+
+  /// The tenant-wide asset-minute cost meter (Ops Cost face).
+  Future<CostMeter> loadCostMeter();
+
+  /// The efficiency report (insight cards + per-step table).
+  Future<EfficiencyReport> loadEfficiency();
+
+  // ---- marketplace ---------------------------------------------------------
+
+  /// All marketplace plugin cards (featured flagged on the card).
+  Future<List<PluginCard>> loadMarketplace();
+
+  // ---- lens ----------------------------------------------------------------
+
+  /// The Lens intelligence bundle (nudges / asks / decisions).
+  Future<LensIntelligence> loadLensIntelligence();
+
+  // ---- chat ----------------------------------------------------------------
+
+  /// The chat transcript for a board.
+  Future<List<ChatMessage>> loadChat(String boardId);
 }

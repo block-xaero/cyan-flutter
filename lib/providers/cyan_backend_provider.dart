@@ -38,3 +38,63 @@ final boardRunProvider =
   await backend.initialize();
   return backend.loadRun(boardId);
 });
+
+/// The authored workflow for a board (Workflow face, row 3).
+final boardWorkflowProvider =
+    FutureProvider.family<Workflow, String>((ref, boardId) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadWorkflow(boardId);
+});
+
+/// The notes document for a board (Notes face, row 5).
+final boardNotesProvider =
+    FutureProvider.family<BoardNotes, String>((ref, boardId) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadNotes(boardId);
+});
+
+/// Ops console — all runs (row 6).
+final opsRunsProvider = FutureProvider<List<OpsRun>>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadOpsRuns();
+});
+
+/// Ops console — cost meter (row 7).
+final costMeterProvider = FutureProvider<CostMeter>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadCostMeter();
+});
+
+/// Ops console — efficiency report (row 8).
+final efficiencyProvider = FutureProvider<EfficiencyReport>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadEfficiency();
+});
+
+/// Marketplace plugin cards (row 9).
+final marketplaceProvider = FutureProvider<List<PluginCard>>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadMarketplace();
+});
+
+/// Lens intelligence bundle (row 10).
+final lensIntelligenceProvider =
+    FutureProvider<LensIntelligence>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadLensIntelligence();
+});
+
+/// Board chat transcript (row 11).
+final boardChatProvider =
+    FutureProvider.family<List<ChatMessage>, String>((ref, boardId) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadChat(boardId);
+});

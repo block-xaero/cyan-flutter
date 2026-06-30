@@ -103,6 +103,60 @@ class CyanBackendFFI implements CyanBackend {
     return null;
   }
 
+  // ---- board faces ---------------------------------------------------------
+  //
+  // The screens below are ported + tested against `FakeCyanBackend` (Tier-1).
+  // Real FFI hydration is Tier-2 (deferred). Until the engine surfaces these
+  // shapes through the seam, return honest empty/disconnected defaults rather
+  // than fabricate data — a screen that loads nothing is correct for "not wired
+  // yet", and the parity look is already proven by the Tier-1 goldens.
+
+  @override
+  Future<Workflow> loadWorkflow(String boardId) async =>
+      Workflow(boardId: boardId);
+
+  @override
+  Future<BoardNotes> loadNotes(String boardId) async =>
+      BoardNotes(boardId: boardId, fileName: 'notes.md', content: '');
+
+  @override
+  Future<List<OpsRun>> loadOpsRuns() async => const [];
+
+  @override
+  Future<CostMeter> loadCostMeter() async => const CostMeter(
+        hasMeter: false,
+        billedMinutes: 0,
+        billedDollars: 0,
+        retryMinutes: 0,
+        savedMinutes: 0,
+        runs: 0,
+        computeMinutes: 0,
+        gpuSeconds: 0,
+      );
+
+  @override
+  Future<EfficiencyReport> loadEfficiency() async => const EfficiencyReport(
+        gateBottleneckStep: '',
+        gateWaitP95Ms: 0,
+        failureHotspotStep: '',
+        failureRatePct: 0,
+        slowestStep: '',
+        slowestExecP95Ms: 0,
+        cacheHitRatePct: 0,
+        minutesSaved: 0,
+        retryRatePct: 0,
+      );
+
+  @override
+  Future<List<PluginCard>> loadMarketplace() async => const [];
+
+  @override
+  Future<LensIntelligence> loadLensIntelligence() async =>
+      const LensIntelligence(connected: false);
+
+  @override
+  Future<List<ChatMessage>> loadChat(String boardId) async => const [];
+
   List<String> _labels(String boardId) {
     final metaJson = CyanFFI.getBoardMetadata(boardId);
     if (metaJson == null || metaJson.isEmpty) return const [];
