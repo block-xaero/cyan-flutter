@@ -149,7 +149,13 @@ class _InsightCard extends StatelessWidget {
             children: [
               Icon(icon, size: 13, color: color),
               const SizedBox(width: 6),
-              Text(title, style: MonokaiTheme.labelMedium),
+              Flexible(
+                child: Text(title,
+                    style: MonokaiTheme.labelMedium,
+                    maxLines: 1,
+                    softWrap: false,
+                    overflow: TextOverflow.ellipsis),
+              ),
             ],
           ),
           const SizedBox(height: 8),

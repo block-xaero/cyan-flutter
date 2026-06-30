@@ -133,7 +133,9 @@ class _Lane extends StatelessWidget {
                     BoxDecoration(color: accent, shape: BoxShape.circle),
               ),
               const SizedBox(width: 8),
-              Text(title, style: MonokaiTheme.labelLarge),
+              Text(title,
+                  key: ValueKey('ops-lane-$title'),
+                  style: MonokaiTheme.labelLarge),
               const SizedBox(width: 6),
               Text('(${runs.length})', style: MonokaiTheme.labelMedium),
             ],
@@ -170,6 +172,12 @@ class _RunCard extends StatelessWidget {
   final void Function(OpsRun run)? onApprove;
 
   const _RunCard({required this.run, this.onRetry, this.onApprove});
+
+  String get _stripText => switch (run.status) {
+        RunStatus.done || RunStatus.failed => run.durationLabel,
+        RunStatus.running => run.stageLabel ?? '',
+        _ => '',
+      };
 
   Color get _statusColor => switch (run.status) {
         RunStatus.queued => MonokaiTheme.comment,
@@ -221,26 +229,27 @@ class _RunCard extends StatelessWidget {
                   left: 8,
                   child: _Badge(label: run.status.label, color: _statusColor),
                 ),
-                Positioned(
-                  bottom: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: MonokaiTheme.background.withValues(alpha: 0.7),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      run.status == RunStatus.done ||
-                              run.status == RunStatus.failed
-                          ? run.durationLabel
-                          : (run.stageLabel ?? ''),
-                      style: MonokaiTheme.codeSmall
-                          .copyWith(color: MonokaiTheme.foreground),
+                // Stage/duration strip — only for in-flight (running) or
+                // terminal (done/failed) runs, matching the SwiftUI reference;
+                // a queued run carries no stage yet.
+                if (_stripText.isNotEmpty)
+                  Positioned(
+                    bottom: 8,
+                    right: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: MonokaiTheme.background.withValues(alpha: 0.7),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        _stripText,
+                        style: MonokaiTheme.codeSmall
+                            .copyWith(color: MonokaiTheme.foreground),
+                      ),
                     ),
                   ),
-                ),
                 // In-flight progress under the stage strip.
                 if (run.status == RunStatus.running && run.stepCount > 0)
                   Positioned(
@@ -267,13 +276,13 @@ class _RunCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 6),
-                // Monospaced meta row.
-                Row(
+                // Monospaced meta row — wraps so the card never overflows.
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 4,
                   children: [
                     _meta('steps', '${run.currentStep}/${run.stepCount}'),
-                    const SizedBox(width: 12),
                     _meta('cost', '\$${run.costDollars.toStringAsFixed(2)}'),
-                    const SizedBox(width: 12),
                     _meta('dur', run.durationLabel.isEmpty ? '—' : run.durationLabel),
                   ],
                 ),

@@ -209,9 +209,9 @@ class _StepBox extends StatelessWidget {
         children: [
           Row(
             children: [
-              _AiSignal(step: step),
+              Flexible(child: _AiSignal(step: step)),
               const SizedBox(width: 6),
-              _HumanSignal(step: step),
+              Flexible(child: _HumanSignal(step: step)),
             ],
           ),
           const SizedBox(height: 6),
@@ -252,7 +252,13 @@ class _AiSignal extends StatelessWidget {
       children: [
         Icon(icon, size: 10, color: color),
         const SizedBox(width: 3),
-        Text(label, style: MonokaiTheme.labelSmall.copyWith(color: color)),
+        Flexible(
+          child: Text(label,
+              style: MonokaiTheme.labelSmall.copyWith(color: color),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis),
+        ),
       ],
     );
   }
@@ -284,7 +290,13 @@ class _HumanSignal extends StatelessWidget {
       children: [
         Icon(icon, size: 10, color: color),
         const SizedBox(width: 3),
-        Text(label, style: MonokaiTheme.labelSmall.copyWith(color: color)),
+        Flexible(
+          child: Text(label,
+              style: MonokaiTheme.labelSmall.copyWith(color: color),
+              maxLines: 1,
+              softWrap: false,
+              overflow: TextOverflow.ellipsis),
+        ),
       ],
     );
   }

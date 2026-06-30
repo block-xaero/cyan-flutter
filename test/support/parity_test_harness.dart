@@ -48,6 +48,15 @@ Future<void> pumpParity(
   CyanBackend? backend,
   Size size = const Size(900, 700),
 }) async {
+  // Resize the actual test surface to [size] so the centered SizedBox isn't
+  // clamped to the default 800x600 window. Without this, tall scrollable
+  // content (lazily-built ListViews) is truncated and off-screen widgets never
+  // build, which would hide rows the tests legitimately assert on.
+  tester.view.devicePixelRatio = 1.0;
+  tester.view.physicalSize = size;
+  addTearDown(tester.view.resetDevicePixelRatio);
+  addTearDown(tester.view.resetPhysicalSize);
+
   await tester.pumpWidget(parityHarness(child, backend: backend, size: size));
   // Resolve FutureProviders + animations.
   await tester.pumpAndSettle(const Duration(milliseconds: 500));

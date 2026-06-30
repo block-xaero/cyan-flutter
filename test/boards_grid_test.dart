@@ -19,7 +19,10 @@ import 'support/parity_test_harness.dart';
 
 void main() {
   testWidgets('living wall renders seeded groups + boards', (tester) async {
-    await pumpParity(tester, const ParityBoardsGrid());
+    // Tall surface so every grouped section lays out (the wall scrolls in
+    // production; here we assert all three groups are present).
+    await pumpParity(tester, const ParityBoardsGrid(),
+        size: const Size(1200, 2000));
 
     // Header.
     expect(find.text('All Boards'), findsOneWidget);

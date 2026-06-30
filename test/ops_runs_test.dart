@@ -15,7 +15,10 @@ import 'support/parity_test_harness.dart';
 
 void main() {
   testWidgets('renders the four lanes and seeded run cards', (tester) async {
-    await pumpParity(tester, const ParityOpsRuns());
+    // Tall surface so the lazily-built lanes/cards all lay out (the feed
+    // scrolls in production; here we want every lane present to assert on).
+    await pumpParity(tester, const ParityOpsRuns(),
+        size: const Size(1000, 1700));
 
     // Console header + segmented control.
     expect(find.text('Ops console'), findsOneWidget);
@@ -23,11 +26,13 @@ void main() {
     expect(find.text('Cost'), findsOneWidget);
     expect(find.text('Efficiency'), findsOneWidget);
 
-    // The four lanes.
-    expect(find.text('Queued'), findsOneWidget);
-    expect(find.text('Running'), findsOneWidget);
-    expect(find.text('Action needed'), findsOneWidget);
-    expect(find.text('Done'), findsOneWidget);
+    // The four lanes. Lane headers are matched by key (the parity status badges
+    // legitimately reuse the words "Queued"/"Running"/"Done", exactly as the
+    // SwiftUI console disambiguates lanes by accessibilityIdentifier).
+    expect(find.byKey(const ValueKey('ops-lane-Queued')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ops-lane-Running')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ops-lane-Action needed')), findsOneWidget);
+    expect(find.byKey(const ValueKey('ops-lane-Done')), findsOneWidget);
 
     // A failed run shows a Retry action; an awaiting-approval run an Approve.
     expect(find.text('Retry'), findsWidgets);
@@ -42,6 +47,7 @@ void main() {
     await pumpParity(
       tester,
       ParityOpsRuns(onRetry: (r) => retried = r),
+      size: const Size(1000, 1700),
     );
 
     await tester.tap(find.text('Retry').first);
