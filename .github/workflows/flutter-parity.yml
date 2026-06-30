@@ -1,0 +1,57 @@
+name: flutter-parity
+
+# Tier-1 unattended gate for the Flutter parity port.
+# Runs on every push/PR to feat/flutter-parity. No backend, no native library —
+# everything drives the FakeCyanBackend seam. Tier-2 (real FFI) is deferred.
+
+on:
+  push:
+    branches: [feat/flutter-parity]
+  pull_request:
+    branches: [feat/flutter-parity]
+
+# Avoid piling up runs on rapid pushes.
+concurrency:
+  group: flutter-parity-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  tier1:
+    name: analyze + widget/golden tests (Tier-1)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Flutter (stable)
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: flutter pub get
+        run: flutter pub get
+
+      # Analyze: true errors fail the build. Legacy lint info/warnings are not
+      # fatal yet (the port is mid-cleanup); tighten this as screens migrate.
+      - name: flutter analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      # Blocking gate: behavior tests (exclude pixel goldens — those are
+      # baselined below until Rick's Day-0 reference shots land).
+      - name: flutter test (Tier-1, no goldens)
+        run: flutter test --exclude-tags golden
+
+      # Self-baseline goldens and publish as an artifact for review. Non-blocking
+      # (continue-on-error) so a missing/changed golden never reds the gate while
+      # we are still establishing the visual baseline.
+      - name: Baseline goldens (--update-goldens)
+        continue-on-error: true
+        run: flutter test --tags golden --update-goldens
+
+      - name: Upload baselined goldens
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: parity-goldens
+          path: test/golden/**/*.png
+          if-no-files-found: ignore

@@ -1,0 +1,6 @@
+# Tags for the parity test suite.
+#   golden — pixel goldens; excluded from the blocking gate, baselined in a
+#            dedicated CI step (see .github/workflows/flutter-parity.yml).
+tags:
+  golden:
+    description: Pixel golden tests (baselined separately).
