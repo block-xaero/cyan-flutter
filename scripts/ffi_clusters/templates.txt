@@ -1,0 +1,7 @@
+cyan_template_clone_outcome
+cyan_template_list
+cyan_template_save
+cyan_template_save_from_board
+cyan_template_save_v2
+cyan_workflow_autocomplete
+cyan_workflow_from_template

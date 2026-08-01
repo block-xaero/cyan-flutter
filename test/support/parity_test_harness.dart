@@ -19,10 +19,14 @@ Widget parityHarness(
   Widget child, {
   CyanBackend? backend,
   Size size = const Size(900, 700),
+  List<Override> overrides = const [],
 }) {
   return ProviderScope(
     overrides: [
       cyanBackendProvider.overrideWithValue(backend ?? FakeCyanBackend()),
+      // Faces with a second seam beside the backend (e.g. the marketplace's
+      // lens bundle download) pass it here.
+      ...overrides,
     ],
     child: MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -47,6 +51,7 @@ Future<void> pumpParity(
   Widget child, {
   CyanBackend? backend,
   Size size = const Size(900, 700),
+  List<Override> overrides = const [],
 }) async {
   // Resize the actual test surface to [size] so the centered SizedBox isn't
   // clamped to the default 800x600 window. Without this, tall scrollable
@@ -57,7 +62,8 @@ Future<void> pumpParity(
   addTearDown(tester.view.resetDevicePixelRatio);
   addTearDown(tester.view.resetPhysicalSize);
 
-  await tester.pumpWidget(parityHarness(child, backend: backend, size: size));
+  await tester.pumpWidget(parityHarness(child,
+      backend: backend, size: size, overrides: overrides));
   // Resolve FutureProviders + animations.
   await tester.pumpAndSettle(const Duration(milliseconds: 500));
 }

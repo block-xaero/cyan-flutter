@@ -1,0 +1,9 @@
+cyan_create_anonymous_session
+cyan_delete_identity
+cyan_exit_anonymous_mode
+cyan_friendly_node_id
+cyan_get_anonymous_status
+cyan_issue_grant_qr
+cyan_reveal_anonymous_identity
+cyan_sso_install_grant
+cyan_sso_sign_out

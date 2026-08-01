@@ -154,6 +154,18 @@ typedef CyanPinBoardDart = bool Function(Pointer<Utf8> boardId);
 typedef CyanUnpinBoardNative = Bool Function(Pointer<Utf8> boardId);
 typedef CyanUnpinBoardDart = bool Function(Pointer<Utf8> boardId);
 
+// The pin flag as ONE verb (the engine queues it; nothing comes back), and the
+// summary a lens promotes onto a board of its own.
+typedef CyanPinSetNative = Void Function(Pointer<Utf8> boardId, Bool pinned);
+typedef CyanPinSetDart = void Function(Pointer<Utf8> boardId, bool pinned);
+
+typedef CyanPinSummaryAsBoardNative = Pointer<Utf8> Function(
+  Pointer<Utf8> workspaceId, Pointer<Utf8> boardName,
+  Pointer<Utf8> markdownContent);
+typedef CyanPinSummaryAsBoardDart = Pointer<Utf8> Function(
+  Pointer<Utf8> workspaceId, Pointer<Utf8> boardName,
+  Pointer<Utf8> markdownContent);
+
 typedef CyanRateBoardNative = Bool Function(Pointer<Utf8> boardId, Int32 rating);
 typedef CyanRateBoardDart = bool Function(Pointer<Utf8> boardId, int rating);
 
@@ -212,6 +224,9 @@ typedef CyanGetProfilesBatchDart = Pointer<Utf8> Function(Pointer<Utf8> nodeIdsJ
 typedef CyanSendChatNative = Void Function(Pointer<Utf8> workspaceId, Pointer<Utf8> message, Pointer<Utf8> parentId);
 typedef CyanSendChatDart = void Function(Pointer<Utf8> workspaceId, Pointer<Utf8> message, Pointer<Utf8> parentId);
 
+typedef CyanLoadChatHistoryNative = Void Function(Pointer<Utf8> boardId);
+typedef CyanLoadChatHistoryDart = void Function(Pointer<Utf8> boardId);
+
 typedef CyanDeleteChatNative = Void Function(Pointer<Utf8> id);
 typedef CyanDeleteChatDart = void Function(Pointer<Utf8> id);
 
@@ -242,6 +257,26 @@ typedef CyanGetFilesDart = Pointer<Utf8> Function(Pointer<Utf8> scopeJson);
 
 typedef CyanGetFileLocalPathNative = Pointer<Utf8> Function(Pointer<Utf8> fileId);
 typedef CyanGetFileLocalPathDart = Pointer<Utf8> Function(Pointer<Utf8> fileId);
+
+typedef CyanDeleteFileNative = Void Function(Pointer<Utf8> fileId);
+typedef CyanDeleteFileDart = void Function(Pointer<Utf8> fileId);
+
+typedef CyanResolveFileHandleNative = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> workspaceId,
+  Pointer<Utf8> boardId, Pointer<Utf8> fileName);
+typedef CyanResolveFileHandleDart = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> workspaceId,
+  Pointer<Utf8> boardId, Pointer<Utf8> fileName);
+
+typedef CyanExtractFileTextNative = Pointer<Utf8> Function(Pointer<Utf8> path);
+typedef CyanExtractFileTextDart = Pointer<Utf8> Function(Pointer<Utf8> path);
+
+// Unread / notifications
+typedef CyanUnreadCountsNative = Pointer<Utf8> Function();
+typedef CyanUnreadCountsDart = Pointer<Utf8> Function();
+
+typedef CyanMarkReadNative = Void Function(Pointer<Utf8> scopeId);
+typedef CyanMarkReadDart = void Function(Pointer<Utf8> scopeId);
 
 // Whiteboard
 typedef CyanLoadWhiteboardElementsNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
@@ -300,6 +335,269 @@ typedef CyanPollAiResponseDart = Pointer<Utf8> Function();
 
 typedef CyanPollAiInsightsNative = Pointer<Utf8> Function();
 typedef CyanPollAiInsightsDart = Pointer<Utf8> Function();
+
+// Pipeline (compile / run / gate)
+typedef CyanPipelineCompileNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanPipelineCompileDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanRunPipelineNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanRunPipelineDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanPipelineStatusNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanPipelineStatusDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanPipelineApproveNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+typedef CyanPipelineApproveDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+
+typedef CyanPipelineApproveAsNative = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
+typedef CyanPipelineApproveAsDart = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
+
+typedef CyanPipelineRejectNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+typedef CyanPipelineRejectDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+
+typedef CyanPipelineRejectAsNative = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
+typedef CyanPipelineRejectAsDart = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
+
+typedef CyanPipelineRetryNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+typedef CyanPipelineRetryDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+
+typedef CyanPipelineResetNative = Bool Function(Pointer<Utf8> boardId);
+typedef CyanPipelineResetDart = bool Function(Pointer<Utf8> boardId);
+
+typedef CyanPipelineResetStepNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+typedef CyanPipelineResetStepDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+
+typedef CyanPipelineRunStepLocalNative = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+typedef CyanPipelineRunStepLocalDart = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> stepId);
+
+typedef CyanStepEditTravelNative = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> cellId, Int32 direction);
+typedef CyanStepEditTravelDart = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> cellId, int direction);
+
+typedef CyanBoardWorkflowStateNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanBoardWorkflowStateDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+// Identity + device prefs
+typedef CyanBuildCommitNative = Pointer<Utf8> Function();
+typedef CyanBuildCommitDart = Pointer<Utf8> Function();
+
+typedef CyanDeleteIdentityNative = Bool Function();
+typedef CyanDeleteIdentityDart = bool Function();
+
+typedef CyanGetProductionRoleNative = Pointer<Utf8> Function();
+typedef CyanGetProductionRoleDart = Pointer<Utf8> Function();
+
+typedef CyanSetProductionRoleNative = Bool Function(Pointer<Utf8> role);
+typedef CyanSetProductionRoleDart = bool Function(Pointer<Utf8> role);
+
+typedef CyanSelectorResolveNative = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> role, Pointer<Utf8> formatType);
+typedef CyanSelectorResolveDart = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> role, Pointer<Utf8> formatType);
+
+typedef CyanFriendlyNodeIdNative = Pointer<Utf8> Function(Pointer<Utf8> nodeId);
+typedef CyanFriendlyNodeIdDart = Pointer<Utf8> Function(Pointer<Utf8> nodeId);
+
+// SSO session grants: the install carries the broker token plus the trust
+// material it must verify against; the sign-out takes nothing and answers
+// nothing (the engine clears its own process-global session).
+typedef CyanSsoInstallGrantNative = Pointer<Utf8> Function(
+  Pointer<Utf8> grantToken, Pointer<Utf8> trustJson);
+typedef CyanSsoInstallGrantDart = Pointer<Utf8> Function(
+  Pointer<Utf8> grantToken, Pointer<Utf8> trustJson);
+
+typedef CyanSsoSignOutNative = Void Function();
+typedef CyanSsoSignOutDart = void Function();
+
+// Anonymous sessions
+typedef CyanCreateAnonymousSessionNative = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
+typedef CyanCreateAnonymousSessionDart = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
+
+typedef CyanRevealAnonymousIdentityNative = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
+typedef CyanRevealAnonymousIdentityDart = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
+
+typedef CyanGetAnonymousStatusNative = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
+typedef CyanGetAnonymousStatusDart = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
+
+typedef CyanExitAnonymousModeNative = Bool Function(Pointer<Utf8> scopeId);
+typedef CyanExitAnonymousModeDart = bool Function(Pointer<Utf8> scopeId);
+
+// Groups: roster, grants, portable bundles
+typedef CyanGetGroupMembersNative = Pointer<Utf8> Function(Pointer<Utf8> groupId);
+typedef CyanGetGroupMembersDart = Pointer<Utf8> Function(Pointer<Utf8> groupId);
+
+typedef CyanIssueGrantQrNative = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> role, Uint64 ttlSeconds);
+typedef CyanIssueGrantQrDart = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> role, int ttlSeconds);
+
+typedef CyanScanGrantQrNative = Pointer<Utf8> Function(Pointer<Utf8> qrPayload);
+typedef CyanScanGrantQrDart = Pointer<Utf8> Function(Pointer<Utf8> qrPayload);
+
+typedef CyanBundlePubkeyNative = Pointer<Utf8> Function();
+typedef CyanBundlePubkeyDart = Pointer<Utf8> Function();
+
+typedef CyanExportGroupNative = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> inviteePubkey);
+typedef CyanExportGroupDart = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> inviteePubkey);
+
+typedef CyanImportGroupNative = Pointer<Utf8> Function(Pointer<Utf8> bundle);
+typedef CyanImportGroupDart = Pointer<Utf8> Function(Pointer<Utf8> bundle);
+
+// Board notes (the unscoped CRUD the review rail writes through)
+typedef CyanNoteListNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanNoteListDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanNotePutNative = Void Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> noteId, Pointer<Utf8> tenantId,
+  Pointer<Utf8> text);
+typedef CyanNotePutDart = void Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> noteId, Pointer<Utf8> tenantId,
+  Pointer<Utf8> text);
+
+typedef CyanNoteDeleteNative = Void Function(Pointer<Utf8> id);
+typedef CyanNoteDeleteDart = void Function(Pointer<Utf8> id);
+
+// Timecoded notes (review rail): the whole note travels as JSON both ways
+typedef CyanSaveTimecodeNoteNative = Bool Function(Pointer<Utf8> noteJson);
+typedef CyanSaveTimecodeNoteDart = bool Function(Pointer<Utf8> noteJson);
+
+typedef CyanLoadTimecodeNotesNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanLoadTimecodeNotesDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanActOnTimecodeNoteNative = Pointer<Utf8> Function(Pointer<Utf8> noteJson);
+typedef CyanActOnTimecodeNoteDart = Pointer<Utf8> Function(Pointer<Utf8> noteJson);
+
+// The same rail exported as a markdown timeline — raw markdown, not JSON
+typedef CyanExportNotesMarkdownNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanExportNotesMarkdownDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+// Scoped notes + the constitution chain they feed
+typedef CyanNoteListScopedNative = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> scope, Pointer<Utf8> kind);
+typedef CyanNoteListScopedDart = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> scope, Pointer<Utf8> kind);
+
+typedef CyanNotePutScopedNative = Void Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> noteId, Pointer<Utf8> tenantId,
+  Pointer<Utf8> text, Pointer<Utf8> scope, Pointer<Utf8> kind);
+typedef CyanNotePutScopedDart = void Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> noteId, Pointer<Utf8> tenantId,
+  Pointer<Utf8> text, Pointer<Utf8> scope, Pointer<Utf8> kind);
+
+typedef CyanConstitutionResolvedNative = Pointer<Utf8> Function(Pointer<Utf8> requestJson);
+typedef CyanConstitutionResolvedDart = Pointer<Utf8> Function(Pointer<Utf8> requestJson);
+
+typedef CyanConstitutionEffectiveNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanConstitutionEffectiveDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+// Templates + the workflows cloned from them
+typedef CyanTemplateListNative = Pointer<Utf8> Function(Pointer<Utf8> tenantId);
+typedef CyanTemplateListDart = Pointer<Utf8> Function(Pointer<Utf8> tenantId);
+
+typedef CyanWorkflowFromTemplateNative = Void Function(
+  Pointer<Utf8> templateId, Pointer<Utf8> boardId, Pointer<Utf8> tenantId);
+typedef CyanWorkflowFromTemplateDart = void Function(
+  Pointer<Utf8> templateId, Pointer<Utf8> boardId, Pointer<Utf8> tenantId);
+
+typedef CyanTemplateCloneOutcomeNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanTemplateCloneOutcomeDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanTemplateSaveNative = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> name,
+  Pointer<Utf8> description, Pointer<Utf8> stepsJson);
+typedef CyanTemplateSaveDart = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> name,
+  Pointer<Utf8> description, Pointer<Utf8> stepsJson);
+
+typedef CyanTemplateSaveFromBoardNative = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> name, Pointer<Utf8> description,
+  Pointer<Utf8> stepsJson, Pointer<Utf8> boardId);
+typedef CyanTemplateSaveFromBoardDart = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> name, Pointer<Utf8> description,
+  Pointer<Utf8> stepsJson, Pointer<Utf8> boardId);
+
+typedef CyanTemplateSaveV2Native = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> templateJson);
+typedef CyanTemplateSaveV2Dart = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> templateJson);
+
+typedef CyanWorkflowAutocompleteNative = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> partial);
+typedef CyanWorkflowAutocompleteDart = Pointer<Utf8> Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> partial);
+
+// Producer review: the assignee a gate waits on, the board's playable media,
+// and the comment rail. The two command verbs take a whole JSON envelope.
+typedef CyanBoardReviewAssigneeNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanBoardReviewAssigneeDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanBoardSetReviewAssigneeNative = Bool Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> user);
+typedef CyanBoardSetReviewAssigneeDart = bool Function(
+  Pointer<Utf8> boardId, Pointer<Utf8> user);
+
+typedef CyanBoardVideoMediaNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanBoardVideoMediaDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
+typedef CyanReviewAddCommentNative = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+typedef CyanReviewAddCommentDart = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+
+typedef CyanReviewCommandNative = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+typedef CyanReviewCommandDart = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+
+// Ingest: the watched-source sensors and the per-asset runs they materialize.
+// One JSON envelope, like the review verb.
+typedef CyanIngestCommandNative = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+typedef CyanIngestCommandDart = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+
+// Plugins: what this device has installed, and how a bundle lands. The install
+// takes its three arguments positionally (the engine gates layout + signature
+// before anything is written); the config pair takes a JSON envelope.
+typedef CyanPluginCatalogNative = Pointer<Utf8> Function();
+typedef CyanPluginCatalogDart = Pointer<Utf8> Function();
+
+typedef CyanInstallPluginBundleNative = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> pluginId, Pointer<Utf8> bundleBytesB64);
+typedef CyanInstallPluginBundleDart = Pointer<Utf8> Function(
+  Pointer<Utf8> groupId, Pointer<Utf8> pluginId, Pointer<Utf8> bundleBytesB64);
+
+typedef CyanPluginConfigGetNative = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+typedef CyanPluginConfigGetDart = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+
+typedef CyanPluginConfigSetNative = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+typedef CyanPluginConfigSetDart = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+
+// ChangeList store: the content-addressed review-&-conform ledger. One JSON
+// envelope, like the review and ingest verbs.
+typedef CyanChangelistCommandNative = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+typedef CyanChangelistCommandDart = Pointer<Utf8> Function(Pointer<Utf8> cmdJson);
+
+// Lens command bar: the path completer that fires per keystroke, and the parser
+// that answers a whole `/verb` line already partly executed.
+typedef CyanAutocompletePathNative = Pointer<Utf8> Function(Pointer<Utf8> partial);
+typedef CyanAutocompletePathDart = Pointer<Utf8> Function(Pointer<Utf8> partial);
+
+typedef CyanParseLensCommandNative = Pointer<Utf8> Function(Pointer<Utf8> input);
+typedef CyanParseLensCommandDart = Pointer<Utf8> Function(Pointer<Utf8> input);
+
+// Demo seeding: the coherent demo set is queued on the command channel and
+// acknowledged with nothing; the GATED persona cast answers a routing manifest.
+typedef CyanSeedDemoNative = Void Function();
+typedef CyanSeedDemoDart = void Function();
+
+typedef CyanSeedPersonasNative = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> ownerNodeId);
+typedef CyanSeedPersonasDart = Pointer<Utf8> Function(
+  Pointer<Utf8> tenantId, Pointer<Utf8> ownerNodeId);
 
 
 // ============================================================================
@@ -369,6 +667,8 @@ class CyanBindings {
   late final CyanIsBoardPinnedDart isBoardPinned;
   late final CyanPinBoardDart pinBoard;
   late final CyanUnpinBoardDart unpinBoard;
+  late final CyanPinSetDart pinSet;
+  late final CyanPinSummaryAsBoardDart pinSummaryAsBoard;
   late final CyanRateBoardDart rateBoard;
   late final CyanRecordBoardViewDart recordBoardView;
   
@@ -395,10 +695,11 @@ class CyanBindings {
   
   // Chat
   late final CyanSendChatDart sendChat;
+  late final CyanLoadChatHistoryDart loadChatHistory;
   late final CyanDeleteChatDart deleteChat;
   late final CyanStartDirectChatDart startDirectChat;
   late final CyanSendDirectChatDart sendDirectChat;
-  
+
   // Files
   late final CyanUploadFileDart uploadFile;
   late final CyanUploadFileToGroupDart uploadFileToGroup;
@@ -407,7 +708,14 @@ class CyanBindings {
   late final CyanGetFileStatusDart getFileStatus;
   late final CyanGetFilesDart getFiles;
   late final CyanGetFileLocalPathDart getFileLocalPath;
-  
+  late final CyanDeleteFileDart deleteFile;
+  late final CyanResolveFileHandleDart resolveFileHandle;
+  late final CyanExtractFileTextDart extractFileText;
+
+  // Unread / notifications
+  late final CyanUnreadCountsDart unreadCounts;
+  late final CyanMarkReadDart markRead;
+
   // Whiteboard
   late final CyanLoadWhiteboardElementsDart loadWhiteboardElements;
   late final CyanSaveWhiteboardElementDart saveWhiteboardElement;
@@ -433,7 +741,97 @@ class CyanBindings {
   late final CyanAiCommandDart aiCommand;
   late final CyanPollAiResponseDart pollAiResponse;
   late final CyanPollAiInsightsDart pollAiInsights;
-  
+
+  // Pipeline
+  late final CyanPipelineCompileDart pipelineCompile;
+  late final CyanRunPipelineDart runPipeline;
+  late final CyanPipelineStatusDart pipelineStatus;
+  late final CyanPipelineApproveDart pipelineApprove;
+  late final CyanPipelineApproveAsDart pipelineApproveAs;
+  late final CyanPipelineRejectDart pipelineReject;
+  late final CyanPipelineRejectAsDart pipelineRejectAs;
+  late final CyanPipelineRetryDart pipelineRetry;
+  late final CyanPipelineResetDart pipelineReset;
+  late final CyanPipelineResetStepDart pipelineResetStep;
+  late final CyanPipelineRunStepLocalDart pipelineRunStepLocal;
+  late final CyanStepEditTravelDart stepEditTravel;
+  late final CyanBoardWorkflowStateDart boardWorkflowState;
+
+  // Identity + device prefs
+  late final CyanBuildCommitDart buildCommit;
+  late final CyanDeleteIdentityDart deleteIdentity;
+  late final CyanGetProductionRoleDart getProductionRole;
+  late final CyanSetProductionRoleDart setProductionRole;
+  late final CyanSelectorResolveDart selectorResolve;
+  late final CyanFriendlyNodeIdDart friendlyNodeId;
+  late final CyanSsoInstallGrantDart ssoInstallGrant;
+  late final CyanSsoSignOutDart ssoSignOut;
+
+  // Anonymous sessions
+  late final CyanCreateAnonymousSessionDart createAnonymousSession;
+  late final CyanRevealAnonymousIdentityDart revealAnonymousIdentity;
+  late final CyanGetAnonymousStatusDart getAnonymousStatus;
+  late final CyanExitAnonymousModeDart exitAnonymousMode;
+
+  // Groups
+  late final CyanGetGroupMembersDart getGroupMembers;
+  late final CyanIssueGrantQrDart issueGrantQr;
+  late final CyanScanGrantQrDart scanGrantQr;
+  late final CyanBundlePubkeyDart bundlePubkey;
+  late final CyanExportGroupDart exportGroup;
+  late final CyanImportGroupDart importGroup;
+
+  // Board notes + timecoded review notes
+  late final CyanNoteListDart noteList;
+  late final CyanNotePutDart notePut;
+  late final CyanNoteDeleteDart noteDelete;
+  late final CyanSaveTimecodeNoteDart saveTimecodeNote;
+  late final CyanLoadTimecodeNotesDart loadTimecodeNotes;
+  late final CyanActOnTimecodeNoteDart actOnTimecodeNote;
+  late final CyanExportNotesMarkdownDart exportNotesMarkdown;
+
+  // Scoped notes + constitution
+  late final CyanNoteListScopedDart noteListScoped;
+  late final CyanNotePutScopedDart notePutScoped;
+  late final CyanConstitutionResolvedDart constitutionResolved;
+  late final CyanConstitutionEffectiveDart constitutionEffective;
+
+  // Templates
+  late final CyanTemplateListDart templateList;
+  late final CyanWorkflowFromTemplateDart workflowFromTemplate;
+  late final CyanTemplateCloneOutcomeDart templateCloneOutcome;
+  late final CyanTemplateSaveDart templateSave;
+  late final CyanTemplateSaveFromBoardDart templateSaveFromBoard;
+  late final CyanTemplateSaveV2Dart templateSaveV2;
+  late final CyanWorkflowAutocompleteDart workflowAutocomplete;
+
+  // Producer review
+  late final CyanBoardReviewAssigneeDart boardReviewAssignee;
+  late final CyanBoardSetReviewAssigneeDart boardSetReviewAssignee;
+  late final CyanBoardVideoMediaDart boardVideoMedia;
+  late final CyanReviewAddCommentDart reviewAddComment;
+  late final CyanReviewCommandDart reviewCommand;
+
+  // Ingest
+  late final CyanIngestCommandDart ingestCommand;
+
+  // Plugins
+  late final CyanPluginCatalogDart pluginCatalog;
+  late final CyanInstallPluginBundleDart installPluginBundle;
+  late final CyanPluginConfigGetDart pluginConfigGet;
+  late final CyanPluginConfigSetDart pluginConfigSet;
+
+  // ChangeList store
+  late final CyanChangelistCommandDart changelistCommand;
+
+  // Lens command bar
+  late final CyanAutocompletePathDart autocompletePath;
+  late final CyanParseLensCommandDart parseLensCommand;
+
+  // Demo seeding
+  late final CyanSeedDemoDart seedDemo;
+  late final CyanSeedPersonasDart seedPersonas;
+
   CyanBindings._();
   
   static CyanBindings get instance {
@@ -578,7 +976,9 @@ class CyanBindings {
     isBoardPinned = _lib.lookupFunction<CyanIsBoardPinnedNative, CyanIsBoardPinnedDart>('cyan_is_board_pinned');
     pinBoard = _lib.lookupFunction<CyanPinBoardNative, CyanPinBoardDart>('cyan_pin_board');
     unpinBoard = _lib.lookupFunction<CyanUnpinBoardNative, CyanUnpinBoardDart>('cyan_unpin_board');
-    rateBoard = _lib.lookupFunction<CyanRateBoardNative, CyanRateBoardDart>('cyan_rate_board');
+    pinSet = _lib.lookupFunction<CyanPinSetNative, CyanPinSetDart>('cyan_pin_set');
+    pinSummaryAsBoard = _lib.lookupFunction<CyanPinSummaryAsBoardNative, CyanPinSummaryAsBoardDart>('cyan_pin_summary_as_board');
+    rateBoard =_lib.lookupFunction<CyanRateBoardNative, CyanRateBoardDart>('cyan_rate_board');
     recordBoardView = _lib.lookupFunction<CyanRecordBoardViewNative, CyanRecordBoardViewDart>('cyan_record_board_view');
     
     // Board Metadata
@@ -604,6 +1004,7 @@ class CyanBindings {
     
     // Chat
     sendChat = _lib.lookupFunction<CyanSendChatNative, CyanSendChatDart>('cyan_send_chat');
+    loadChatHistory = _lib.lookupFunction<CyanLoadChatHistoryNative, CyanLoadChatHistoryDart>('cyan_load_chat_history');
     deleteChat = _lib.lookupFunction<CyanDeleteChatNative, CyanDeleteChatDart>('cyan_delete_chat');
     startDirectChat = _lib.lookupFunction<CyanStartDirectChatNative, CyanStartDirectChatDart>('cyan_start_direct_chat');
     sendDirectChat = _lib.lookupFunction<CyanSendDirectChatNative, CyanSendDirectChatDart>('cyan_send_direct_chat');
@@ -616,7 +1017,14 @@ class CyanBindings {
     getFileStatus = _lib.lookupFunction<CyanGetFileStatusNative, CyanGetFileStatusDart>('cyan_get_file_status');
     getFiles = _lib.lookupFunction<CyanGetFilesNative, CyanGetFilesDart>('cyan_get_files');
     getFileLocalPath = _lib.lookupFunction<CyanGetFileLocalPathNative, CyanGetFileLocalPathDart>('cyan_get_file_local_path');
-    
+    deleteFile = _lib.lookupFunction<CyanDeleteFileNative, CyanDeleteFileDart>('cyan_delete_file');
+    resolveFileHandle = _lib.lookupFunction<CyanResolveFileHandleNative, CyanResolveFileHandleDart>('cyan_resolve_file_handle');
+    extractFileText = _lib.lookupFunction<CyanExtractFileTextNative, CyanExtractFileTextDart>('cyan_extract_file_text');
+
+    // Unread / notifications
+    unreadCounts = _lib.lookupFunction<CyanUnreadCountsNative, CyanUnreadCountsDart>('cyan_unread_counts');
+    markRead = _lib.lookupFunction<CyanMarkReadNative, CyanMarkReadDart>('cyan_mark_read');
+
     // Whiteboard
     loadWhiteboardElements = _lib.lookupFunction<CyanLoadWhiteboardElementsNative, CyanLoadWhiteboardElementsDart>('cyan_load_whiteboard_elements');
     saveWhiteboardElement = _lib.lookupFunction<CyanSaveWhiteboardElementNative, CyanSaveWhiteboardElementDart>('cyan_save_whiteboard_element');
@@ -642,6 +1050,96 @@ class CyanBindings {
     aiCommand = _lib.lookupFunction<CyanAiCommandNative, CyanAiCommandDart>('cyan_ai_command');
     pollAiResponse = _lib.lookupFunction<CyanPollAiResponseNative, CyanPollAiResponseDart>('cyan_poll_ai_response');
     pollAiInsights = _lib.lookupFunction<CyanPollAiInsightsNative, CyanPollAiInsightsDart>('cyan_poll_ai_insights');
+
+    // Pipeline
+    pipelineCompile = _lib.lookupFunction<CyanPipelineCompileNative, CyanPipelineCompileDart>('cyan_pipeline_compile');
+    runPipeline = _lib.lookupFunction<CyanRunPipelineNative, CyanRunPipelineDart>('cyan_run_pipeline');
+    pipelineStatus = _lib.lookupFunction<CyanPipelineStatusNative, CyanPipelineStatusDart>('cyan_pipeline_status');
+    pipelineApprove = _lib.lookupFunction<CyanPipelineApproveNative, CyanPipelineApproveDart>('cyan_pipeline_approve');
+    pipelineApproveAs = _lib.lookupFunction<CyanPipelineApproveAsNative, CyanPipelineApproveAsDart>('cyan_pipeline_approve_as');
+    pipelineReject = _lib.lookupFunction<CyanPipelineRejectNative, CyanPipelineRejectDart>('cyan_pipeline_reject');
+    pipelineRejectAs = _lib.lookupFunction<CyanPipelineRejectAsNative, CyanPipelineRejectAsDart>('cyan_pipeline_reject_as');
+    pipelineRetry = _lib.lookupFunction<CyanPipelineRetryNative, CyanPipelineRetryDart>('cyan_pipeline_retry');
+    pipelineReset = _lib.lookupFunction<CyanPipelineResetNative, CyanPipelineResetDart>('cyan_pipeline_reset');
+    pipelineResetStep = _lib.lookupFunction<CyanPipelineResetStepNative, CyanPipelineResetStepDart>('cyan_pipeline_reset_step');
+    pipelineRunStepLocal = _lib.lookupFunction<CyanPipelineRunStepLocalNative, CyanPipelineRunStepLocalDart>('cyan_pipeline_run_step_local');
+    stepEditTravel = _lib.lookupFunction<CyanStepEditTravelNative, CyanStepEditTravelDart>('cyan_step_edit_travel');
+    boardWorkflowState = _lib.lookupFunction<CyanBoardWorkflowStateNative, CyanBoardWorkflowStateDart>('cyan_board_workflow_state');
+
+    // Identity + device prefs
+    buildCommit = _lib.lookupFunction<CyanBuildCommitNative, CyanBuildCommitDart>('cyan_build_commit');
+    deleteIdentity = _lib.lookupFunction<CyanDeleteIdentityNative, CyanDeleteIdentityDart>('cyan_delete_identity');
+    getProductionRole = _lib.lookupFunction<CyanGetProductionRoleNative, CyanGetProductionRoleDart>('cyan_get_production_role');
+    setProductionRole = _lib.lookupFunction<CyanSetProductionRoleNative, CyanSetProductionRoleDart>('cyan_set_production_role');
+    selectorResolve = _lib.lookupFunction<CyanSelectorResolveNative, CyanSelectorResolveDart>('cyan_selector_resolve');
+    friendlyNodeId = _lib.lookupFunction<CyanFriendlyNodeIdNative, CyanFriendlyNodeIdDart>('cyan_friendly_node_id');
+    ssoInstallGrant = _lib.lookupFunction<CyanSsoInstallGrantNative, CyanSsoInstallGrantDart>('cyan_sso_install_grant');
+    ssoSignOut = _lib.lookupFunction<CyanSsoSignOutNative, CyanSsoSignOutDart>('cyan_sso_sign_out');
+
+    // Anonymous sessions
+    createAnonymousSession = _lib.lookupFunction<CyanCreateAnonymousSessionNative, CyanCreateAnonymousSessionDart>('cyan_create_anonymous_session');
+    revealAnonymousIdentity = _lib.lookupFunction<CyanRevealAnonymousIdentityNative, CyanRevealAnonymousIdentityDart>('cyan_reveal_anonymous_identity');
+    getAnonymousStatus = _lib.lookupFunction<CyanGetAnonymousStatusNative, CyanGetAnonymousStatusDart>('cyan_get_anonymous_status');
+    exitAnonymousMode = _lib.lookupFunction<CyanExitAnonymousModeNative, CyanExitAnonymousModeDart>('cyan_exit_anonymous_mode');
+
+    // Groups
+    getGroupMembers = _lib.lookupFunction<CyanGetGroupMembersNative, CyanGetGroupMembersDart>('cyan_get_group_members');
+    issueGrantQr = _lib.lookupFunction<CyanIssueGrantQrNative, CyanIssueGrantQrDart>('cyan_issue_grant_qr');
+    scanGrantQr = _lib.lookupFunction<CyanScanGrantQrNative, CyanScanGrantQrDart>('cyan_scan_grant_qr');
+    bundlePubkey = _lib.lookupFunction<CyanBundlePubkeyNative, CyanBundlePubkeyDart>('cyan_bundle_pubkey');
+    exportGroup = _lib.lookupFunction<CyanExportGroupNative, CyanExportGroupDart>('cyan_export_group');
+    importGroup = _lib.lookupFunction<CyanImportGroupNative, CyanImportGroupDart>('cyan_import_group');
+
+    // Board notes + timecoded review notes
+    noteList = _lib.lookupFunction<CyanNoteListNative, CyanNoteListDart>('cyan_note_list');
+    notePut = _lib.lookupFunction<CyanNotePutNative, CyanNotePutDart>('cyan_note_put');
+    noteDelete = _lib.lookupFunction<CyanNoteDeleteNative, CyanNoteDeleteDart>('cyan_note_delete');
+    saveTimecodeNote = _lib.lookupFunction<CyanSaveTimecodeNoteNative, CyanSaveTimecodeNoteDart>('cyan_save_timecode_note');
+    loadTimecodeNotes = _lib.lookupFunction<CyanLoadTimecodeNotesNative, CyanLoadTimecodeNotesDart>('cyan_load_timecode_notes');
+    actOnTimecodeNote = _lib.lookupFunction<CyanActOnTimecodeNoteNative, CyanActOnTimecodeNoteDart>('cyan_act_on_timecode_note');
+    exportNotesMarkdown = _lib.lookupFunction<CyanExportNotesMarkdownNative, CyanExportNotesMarkdownDart>('cyan_export_notes_markdown');
+
+    // Scoped notes + constitution
+    noteListScoped = _lib.lookupFunction<CyanNoteListScopedNative, CyanNoteListScopedDart>('cyan_note_list_scoped');
+    notePutScoped = _lib.lookupFunction<CyanNotePutScopedNative, CyanNotePutScopedDart>('cyan_note_put_scoped');
+    constitutionResolved = _lib.lookupFunction<CyanConstitutionResolvedNative, CyanConstitutionResolvedDart>('cyan_constitution_resolved');
+    constitutionEffective = _lib.lookupFunction<CyanConstitutionEffectiveNative, CyanConstitutionEffectiveDart>('cyan_constitution_effective');
+
+    // Templates
+    templateList = _lib.lookupFunction<CyanTemplateListNative, CyanTemplateListDart>('cyan_template_list');
+    workflowFromTemplate = _lib.lookupFunction<CyanWorkflowFromTemplateNative, CyanWorkflowFromTemplateDart>('cyan_workflow_from_template');
+    templateCloneOutcome = _lib.lookupFunction<CyanTemplateCloneOutcomeNative, CyanTemplateCloneOutcomeDart>('cyan_template_clone_outcome');
+    templateSave = _lib.lookupFunction<CyanTemplateSaveNative, CyanTemplateSaveDart>('cyan_template_save');
+    templateSaveFromBoard = _lib.lookupFunction<CyanTemplateSaveFromBoardNative, CyanTemplateSaveFromBoardDart>('cyan_template_save_from_board');
+    templateSaveV2 = _lib.lookupFunction<CyanTemplateSaveV2Native, CyanTemplateSaveV2Dart>('cyan_template_save_v2');
+    workflowAutocomplete = _lib.lookupFunction<CyanWorkflowAutocompleteNative, CyanWorkflowAutocompleteDart>('cyan_workflow_autocomplete');
+
+    // Producer review
+    boardReviewAssignee = _lib.lookupFunction<CyanBoardReviewAssigneeNative, CyanBoardReviewAssigneeDart>('cyan_board_review_assignee');
+    boardSetReviewAssignee = _lib.lookupFunction<CyanBoardSetReviewAssigneeNative, CyanBoardSetReviewAssigneeDart>('cyan_board_set_review_assignee');
+    boardVideoMedia = _lib.lookupFunction<CyanBoardVideoMediaNative, CyanBoardVideoMediaDart>('cyan_board_video_media');
+    reviewAddComment = _lib.lookupFunction<CyanReviewAddCommentNative, CyanReviewAddCommentDart>('cyan_review_add_comment');
+    reviewCommand = _lib.lookupFunction<CyanReviewCommandNative, CyanReviewCommandDart>('cyan_review_command');
+
+    // Ingest
+    ingestCommand = _lib.lookupFunction<CyanIngestCommandNative, CyanIngestCommandDart>('cyan_ingest_command');
+
+    // Plugins
+    pluginCatalog = _lib.lookupFunction<CyanPluginCatalogNative, CyanPluginCatalogDart>('cyan_plugin_catalog');
+    installPluginBundle = _lib.lookupFunction<CyanInstallPluginBundleNative, CyanInstallPluginBundleDart>('cyan_install_plugin_bundle');
+    pluginConfigGet = _lib.lookupFunction<CyanPluginConfigGetNative, CyanPluginConfigGetDart>('cyan_plugin_config_get');
+    pluginConfigSet = _lib.lookupFunction<CyanPluginConfigSetNative, CyanPluginConfigSetDart>('cyan_plugin_config_set');
+
+    // ChangeList store
+    changelistCommand = _lib.lookupFunction<CyanChangelistCommandNative, CyanChangelistCommandDart>('cyan_changelist_command');
+
+    // Lens command bar
+    autocompletePath = _lib.lookupFunction<CyanAutocompletePathNative, CyanAutocompletePathDart>('cyan_autocomplete_path');
+    parseLensCommand = _lib.lookupFunction<CyanParseLensCommandNative, CyanParseLensCommandDart>('cyan_parse_lens_command');
+
+    // Demo seeding
+    seedDemo = _lib.lookupFunction<CyanSeedDemoNative, CyanSeedDemoDart>('cyan_seed_demo');
+    seedPersonas = _lib.lookupFunction<CyanSeedPersonasNative, CyanSeedPersonasDart>('cyan_seed_personas');
   }
   
   /// All no-ops with exact type signatures matching the typedefs
@@ -703,6 +1201,8 @@ class CyanBindings {
     isBoardPinned = (Pointer<Utf8> p) => false;
     pinBoard = (Pointer<Utf8> p) => false;
     unpinBoard = (Pointer<Utf8> p) => false;
+    pinSet = (Pointer<Utf8> a, bool b) {};
+    pinSummaryAsBoard = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
     rateBoard = (Pointer<Utf8> a, int b) => false;
     recordBoardView = (Pointer<Utf8> p) => false;
     
@@ -729,10 +1229,11 @@ class CyanBindings {
     
     // Chat
     sendChat = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) {};
+    loadChatHistory = (Pointer<Utf8> p) {};
     deleteChat = (Pointer<Utf8> p) {};
     startDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
     sendDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
-    
+
     // Files
     uploadFile = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
     uploadFileToGroup = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
@@ -741,7 +1242,15 @@ class CyanBindings {
     getFileStatus = (Pointer<Utf8> p) => _nullptr;
     getFiles = (Pointer<Utf8> p) => _nullptr;
     getFileLocalPath = (Pointer<Utf8> p) => _nullptr;
-    
+    deleteFile = (Pointer<Utf8> p) {};
+    resolveFileHandle = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c,
+        Pointer<Utf8> d) => _nullptr;
+    extractFileText = (Pointer<Utf8> p) => _nullptr;
+
+    // Unread / notifications
+    unreadCounts = () => _nullptr;
+    markRead = (Pointer<Utf8> p) {};
+
     // Whiteboard
     loadWhiteboardElements = (Pointer<Utf8> p) => _nullptr;
     saveWhiteboardElement = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
@@ -767,5 +1276,99 @@ class CyanBindings {
     aiCommand = (Pointer<Utf8> p) => false;
     pollAiResponse = () => _nullptr;
     pollAiInsights = () => _nullptr;
+
+    // Pipeline
+    pipelineCompile = (Pointer<Utf8> p) => _nullptr;
+    runPipeline = (Pointer<Utf8> p) => _nullptr;
+    pipelineStatus = (Pointer<Utf8> p) => _nullptr;
+    pipelineApprove = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    pipelineApproveAs = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
+    pipelineReject = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    pipelineRejectAs = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
+    pipelineRetry = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    pipelineReset = (Pointer<Utf8> p) => false;
+    pipelineResetStep = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    pipelineRunStepLocal = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    stepEditTravel = (Pointer<Utf8> a, Pointer<Utf8> b, int c) => _nullptr;
+    boardWorkflowState = (Pointer<Utf8> p) => _nullptr;
+
+    // Identity + device prefs
+    buildCommit = () => _nullptr;
+    deleteIdentity = () => false;
+    getProductionRole = () => _nullptr;
+    setProductionRole = (Pointer<Utf8> p) => false;
+    selectorResolve = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
+    friendlyNodeId = (Pointer<Utf8> p) => _nullptr;
+    ssoInstallGrant = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    ssoSignOut = () {};
+
+    // Anonymous sessions
+    createAnonymousSession = (Pointer<Utf8> p) => _nullptr;
+    revealAnonymousIdentity = (Pointer<Utf8> p) => _nullptr;
+    getAnonymousStatus = (Pointer<Utf8> p) => _nullptr;
+    exitAnonymousMode = (Pointer<Utf8> p) => false;
+
+    // Groups
+    getGroupMembers = (Pointer<Utf8> p) => _nullptr;
+    issueGrantQr = (Pointer<Utf8> a, Pointer<Utf8> b, int c) => _nullptr;
+    scanGrantQr = (Pointer<Utf8> p) => _nullptr;
+    bundlePubkey = () => _nullptr;
+    exportGroup = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    importGroup = (Pointer<Utf8> p) => _nullptr;
+
+    // Board notes + timecoded review notes
+    noteList = (Pointer<Utf8> p) => _nullptr;
+    notePut = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c,
+        Pointer<Utf8> d) {};
+    noteDelete = (Pointer<Utf8> p) {};
+    saveTimecodeNote = (Pointer<Utf8> p) => false;
+    loadTimecodeNotes = (Pointer<Utf8> p) => _nullptr;
+    actOnTimecodeNote = (Pointer<Utf8> p) => _nullptr;
+    exportNotesMarkdown = (Pointer<Utf8> p) => _nullptr;
+
+    // Scoped notes + constitution
+    noteListScoped = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
+    notePutScoped = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c,
+        Pointer<Utf8> d, Pointer<Utf8> e, Pointer<Utf8> f) {};
+    constitutionResolved = (Pointer<Utf8> p) => _nullptr;
+    constitutionEffective = (Pointer<Utf8> p) => _nullptr;
+
+    // Templates
+    templateList = (Pointer<Utf8> p) => _nullptr;
+    workflowFromTemplate = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) {};
+    templateCloneOutcome = (Pointer<Utf8> p) => _nullptr;
+    templateSave = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c,
+        Pointer<Utf8> d) => _nullptr;
+    templateSaveFromBoard = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c,
+        Pointer<Utf8> d, Pointer<Utf8> e) => _nullptr;
+    templateSaveV2 = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    workflowAutocomplete = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+
+    // Producer review
+    boardReviewAssignee = (Pointer<Utf8> p) => _nullptr;
+    boardSetReviewAssignee = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    boardVideoMedia = (Pointer<Utf8> p) => _nullptr;
+    reviewAddComment = (Pointer<Utf8> p) => _nullptr;
+    reviewCommand = (Pointer<Utf8> p) => _nullptr;
+
+    // Ingest
+    ingestCommand = (Pointer<Utf8> p) => _nullptr;
+
+    // Plugins
+    pluginCatalog = () => _nullptr;
+    installPluginBundle = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
+    pluginConfigGet = (Pointer<Utf8> p) => _nullptr;
+    pluginConfigSet = (Pointer<Utf8> p) => _nullptr;
+
+    // ChangeList store
+    changelistCommand = (Pointer<Utf8> p) => _nullptr;
+
+    // Lens command bar
+    autocompletePath = (Pointer<Utf8> p) => _nullptr;
+    parseLensCommand = (Pointer<Utf8> p) => _nullptr;
+
+    // Demo seeding
+    seedDemo = () {};
+    seedPersonas = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
   }
 }

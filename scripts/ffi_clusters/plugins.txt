@@ -1,0 +1,6 @@
+cyan_bundle_pubkey
+cyan_changelist_command
+cyan_install_plugin_bundle
+cyan_plugin_catalog
+cyan_plugin_config_get
+cyan_plugin_config_set

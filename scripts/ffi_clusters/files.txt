@@ -1,0 +1,6 @@
+cyan_delete_file
+cyan_extract_file_text
+cyan_load_chat_history
+cyan_mark_read
+cyan_resolve_file_handle
+cyan_unread_counts
