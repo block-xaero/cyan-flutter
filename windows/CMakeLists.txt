@@ -124,12 +124,16 @@ if(EXISTS "${CYAN_ENGINE_LIBRARY}")
     DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
     COMPONENT Runtime)
 else()
-  # Not fatal: the bindings fall back to no-ops and the app runs local-only,
-  # exactly as it does on a Mac with no dylib staged.
-  message(WARNING
+  # FATAL, deliberately. This was a WARNING, on the reasoning that "the bindings
+  # fall back to no-ops and the app runs local-only, exactly as it does on a Mac
+  # with no dylib staged" — and that is precisely the failure that shipped a
+  # six-month-old engine on macOS undetected: every screen renders, nothing
+  # happens, and 296 green tests say otherwise because they drive the fake.
+  # A build with no engine is not a build worth shipping to a customer.
+  message(FATAL_ERROR
     "Cyan engine not found at ${CYAN_ENGINE_LIBRARY} — the app will run with "
     "local-only fallbacks. Build it from the cyan-backend crate with "
-    "`cargo build --release --target x86_64-pc-windows-msvc` and copy "
-    "target/x86_64-pc-windows-msvc/release/${CYAN_ENGINE_LIBRARY_NAME} into "
+    "`cargo build --release --target x86_64-pc-windows-gnu` and copy "
+    "target/x86_64-pc-windows-gnu/release/${CYAN_ENGINE_LIBRARY_NAME} into "
     "${CYAN_ENGINE_LIBRARY_DIR}.")
 endif()

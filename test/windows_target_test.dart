@@ -159,10 +159,20 @@ void main() {
       expect(plan.candidatePaths, contains(expectedName),
           reason: 'a system-wide install must still resolve');
 
-      // A missing engine is a warning, not a hard build failure — same as the
-      // Mac, which runs local-only when no dylib is staged.
-      expect(cmake, contains('message(WARNING'));
-      expect(cmake, isNot(contains('message(FATAL_ERROR')));
+      // A missing engine FAILS THE BUILD. This assertion used to require the
+      // opposite — a warning, "same as the Mac, which runs local-only when no
+      // dylib is staged" — and that is exactly the reasoning that let macOS ship
+      // a six-month-old engine undetected: the binder degrades to no-ops, every
+      // screen renders, nothing happens, and the widget suite stays green
+      // because it drives FakeCyanBackend.
+      //
+      // The behaviour this stage owes is "a missing windows dll produces a NAMED
+      // ERROR, not a silent no-op". A warning scrolls past in a build log; a
+      // customer-facing build with no engine is not shippable.
+      expect(cmake, contains('message(FATAL_ERROR'),
+          reason: 'a missing engine must fail the Windows build, not warn');
+      expect(cmake, contains('cargo build --release --target x86_64-pc-windows-gnu'),
+          reason: 'the error must name the command that produces the DLL');
     });
 
     // ---- behaviour 3 --------------------------------------------------------

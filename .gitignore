@@ -57,3 +57,6 @@ Thumbs.db
 # macOS
 macos/Podfile.lock
 lib/config/secrets.dart
+
+# Staged engine — built from cyan-backend, never committed (65 MB)
+windows/Libraries/*.dll

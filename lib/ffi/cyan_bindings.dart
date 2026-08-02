@@ -843,19 +843,56 @@ class CyanBindings {
   
   bool _loaded = false;
   bool get isLoaded => _loaded;
-  
+
+  /// Why the engine is not loaded, or null when it loaded cleanly.
+  ///
+  /// The no-op fallback below is legitimate — iOS links the engine statically,
+  /// so its symbols come from the process rather than a dylib. What is NOT
+  /// legitimate is that fallback being SILENT: a degraded app renders every
+  /// screen, accepts every tap and does nothing, and the only trace is a print
+  /// in a console nobody is reading. That is precisely how a six-month-old
+  /// engine shipped on macOS unnoticed.
+  ///
+  /// So degradation is now a value the app can read and surface, not a log line.
+  static String? _degradedReason;
+  static String? get degradedReason => _degradedReason;
+
+  /// True when the engine is absent and every verb is a no-op.
+  static bool get isDegraded => _degradedReason != null;
+
   void _load() {
     try {
       _lib = _loadLibrary();
       _bindFunctions();
-      _loaded = true;
-      print('✅ Cyan FFI bindings loaded');
+      _loaded = _degradedReason == null;
+      if (_loaded) print('✅ Cyan FFI bindings loaded');
     } catch (e) {
-      print('⚠️ Cyan FFI library not available: $e');
-      print('   App will run with local-only fallbacks');
+      _degrade('the engine library could not be opened: $e');
       _setNoOps();
       _loaded = false;
     }
+  }
+
+  /// Record — loudly — that the app is running without an engine.
+  void _degrade(String reason) {
+    _degradedReason = reason;
+    print('');
+    print('=========================================================');
+    print(' CYAN ENGINE NOT LOADED — THE APP IS A SHELL');
+    print(' $reason');
+    print('');
+    print(' Every engine verb is a no-op. Screens will render and');
+    print(' nothing will happen. This build must not ship.');
+    print(' Build the engine and stage it:');
+    print('   macOS   cargo build --release --lib');
+    print('           -> macos/Libraries/libcyan_core.dylib');
+    print('   Windows cargo build --release --target x86_64-pc-windows-gnu --lib');
+    print('           -> windows/Libraries/cyan_backend.dll');
+    print('=========================================================');
+    print('');
+    // Fires in debug/profile, compiled out of release — a developer cannot
+    // walk past this, while a customer build still degrades rather than crashes.
+    assert(false, 'Cyan engine not loaded: $reason');
   }
   
   // Walks the per-target plan from `CyanEngineLibrary` — Windows, Linux and
@@ -903,7 +940,7 @@ class CyanBindings {
     try {
       _bindAllUnsafe();
     } catch (e) {
-      print('⚠️ Some FFI symbols missing, using no-ops: $e');
+      _degrade('the library opened but a required symbol is missing: $e');
       _setNoOps();
     }
   }
