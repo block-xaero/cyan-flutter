@@ -1,0 +1,5 @@
+a workspace lists its boards with metadata and pipeline status
+workspace shortcuts navigate to a board
+a board card shows its preview and last run state
+the Plugins workspace is treated as a system workspace and never a board target
+a board card shows asset class status pending in flight or done

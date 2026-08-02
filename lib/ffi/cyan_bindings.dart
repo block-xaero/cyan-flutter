@@ -6,6 +6,8 @@ import 'dart:ffi';
 import 'dart:io';
 import 'package:ffi/ffi.dart';
 
+import 'cyan_engine_library.dart';
+
 // ============================================================================
 // TYPE DEFINITIONS
 // ============================================================================
@@ -856,46 +858,36 @@ class CyanBindings {
     }
   }
   
+  // Walks the per-target plan from `CyanEngineLibrary` — Windows, Linux and
+  // macOS all take this one path. There is no `else { throw }` arm: an OS with
+  // no engine binary resolves to an empty candidate list and lands on the
+  // process symbols, so the app entrypoint never aborts on a platform check.
   DynamicLibrary _loadLibrary() {
-    if (Platform.isMacOS) {
-      // Try loading dylib from known locations
-      final home = Platform.environment['HOME'] ?? '';
-      final exe = Platform.resolvedExecutable;
-      // exe is like .../cyan_flutter.app/Contents/MacOS/cyan_flutter
-      final appDir = exe.substring(0, exe.lastIndexOf('/MacOS/'));
-      
-      final dylibPaths = [
-        // App bundle Frameworks (where Xcode copies it)
-        '$appDir/Frameworks/libcyan_core.dylib',
-        // Source location
-        '$home/cyan_flutter/macos/Libraries/libcyan_core.dylib',
-      ];
-      
-      for (final path in dylibPaths) {
-        if (File(path).existsSync()) {
-          try {
-            print('🔗 Loading dylib: $path');
-            return DynamicLibrary.open(path);
-          } catch (e) {
-            print('⚠️ Failed to open $path: $e');
-          }
-        }
+    final plan = CyanEngineLibrary.resolve(
+      Platform.operatingSystem,
+      home: Platform.environment['HOME'] ??
+          Platform.environment['USERPROFILE'] ??
+          '',
+      resolvedExecutable: Platform.resolvedExecutable,
+    );
+
+    for (final path in plan.candidatePaths) {
+      // A bare file name is resolved by the OS loader, not the filesystem, so
+      // only existence-check the paths that actually name a location.
+      final isPath = path.contains('/') || path.contains('\\');
+      if (isPath && !File(path).existsSync()) continue;
+      try {
+        print('🔗 Loading engine: $path');
+        return DynamicLibrary.open(path);
+      } catch (e) {
+        print('⚠️ Failed to open $path: $e');
       }
-      
-      // Fall back to process symbols (static lib linked via xcframework)
-      print('🔗 Falling back to DynamicLibrary.process()');
-      return DynamicLibrary.process();
-    } else if (Platform.isAndroid) {
-      return DynamicLibrary.open('libcyan_backend.so');
-    } else if (Platform.isIOS) {
-      return DynamicLibrary.process();
-    } else if (Platform.isWindows) {
-      return DynamicLibrary.open('cyan_backend.dll');
-    } else if (Platform.isLinux) {
-      return DynamicLibrary.open('libcyan_backend.so');
-    } else {
-      throw UnsupportedError('Unsupported platform: ${Platform.operatingSystem}');
     }
+
+    // Static lib linked into the binary (iOS/macOS xcframework), or nothing at
+    // all — `_bindFunctions` falls back to no-ops when the symbols are absent.
+    print('🔗 Falling back to DynamicLibrary.process()');
+    return DynamicLibrary.process();
   }
   
   // Safe lookup helper - returns null on failure

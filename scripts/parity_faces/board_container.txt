@@ -1,0 +1,3 @@
+the board container exposes exactly three faces Workflow Notes and Dashboard
+switching face preserves the board selection
+there is no canvas or whiteboard face

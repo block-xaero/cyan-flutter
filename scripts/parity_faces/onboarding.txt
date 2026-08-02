@@ -1,0 +1,3 @@
+the login surface offers sign in and anonymous entry
+a successful sign in captures tenant and profile
+signing out returns to the login surface

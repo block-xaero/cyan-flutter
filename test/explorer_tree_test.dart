@@ -33,6 +33,28 @@ Future<String?> _workspaceHolding(
   return null;
 }
 
+/// The workspace a board actually landed in, read back from the SEAM — it
+/// carries `groupId`, which is what proves the board landed in the right GROUP
+/// and not merely in some workspace that happened to accept it.
+Future<CyanWorkspace?> _homeOf(FakeCyanBackend backend, String boardName) async {
+  for (final g in await backend.loadGroups()) {
+    for (final w in g.workspaces) {
+      if (w.boards.any((b) => b.name == boardName)) return w;
+    }
+  }
+  return null;
+}
+
+/// Drive the header New Board affordance to completion with [name].
+Future<void> _newBoard(WidgetTester tester, String name) async {
+  await tester.tap(find.byKey(const ValueKey('explorer.newBoard')));
+  await tester.pumpAndSettle();
+  await tester.enterText(
+      find.byKey(const ValueKey('explorer.newBoard.name')), name);
+  await tester.tap(find.text('Create'));
+  await tester.pumpAndSettle();
+}
+
 /// Open the context menu on the row labelled [name].
 Future<void> _openRowMenu(WidgetTester tester, String name) async {
   await tester.longPress(find.text(name));
@@ -240,6 +262,73 @@ void main() {
     expect(await _workspaceHolding(backend, 'Schema v2'), isNull);
     // Its siblings are untouched.
     expect(find.text('Render + Review Pipeline'), findsOneWidget);
+  });
+
+  // ---- scripts/parity_faces/explorer.txt, line 5 ---------------------------
+
+  testWidgets('a new board lands in the group that is selected not the last '
+      'used one', (tester) async {
+    // Line 3 covers a selected WORKSPACE. This is the coarser scope: the
+    // operator stands on a GROUP row, which names no workspace at all, and
+    // `defaultWorkspaceIdForNewBoard()` has to resolve one INSIDE that group.
+    // The failure this pins down is silent and expensive — the board lands in
+    // a stranger's group and syncs to that group's peers.
+    final backend = FakeCyanBackend();
+    await pumpParity(tester, const ParityExplorerTree(),
+        backend: backend, size: const Size(320, 760));
+
+    // Prime a "last used" target in Engineering, so a resolver that remembers
+    // the previous write (or just takes the first workspace in the tree) has
+    // something wrong to reach for.
+    await tester.tap(find.text('Infrastructure'));
+    await tester.pumpAndSettle();
+    await _newBoard(tester, 'Runbook');
+    expect((await _homeOf(backend, 'Runbook'))!.id, 'w-eng-infra');
+
+    // Stand on the DESIGN group row. The group decides, not the workspace last
+    // written to and not whichever workspace sorts first.
+    await tester.tap(find.text('Design'));
+    await tester.pumpAndSettle();
+    await _newBoard(tester, 'Brand Audit');
+
+    final brand = await _homeOf(backend, 'Brand Audit');
+    expect(brand, isNotNull);
+    expect(brand!.groupId, 'g-design');
+    expect(brand.id, 'w-design-ui');
+    expect(brand.id, isNot('w-eng-infra')); // not the last used one
+    expect(brand.id, isNot('w-eng-backend')); // not the first in the tree
+
+    // Move to a THIRD group. Again the current selection wins, so the boards
+    // do not pile up in the group that was last written to.
+    await tester.tap(find.text('Product'));
+    await tester.pumpAndSettle();
+    await _newBoard(tester, 'Pricing Study');
+
+    final pricing = await _homeOf(backend, 'Pricing Study');
+    expect(pricing!.groupId, 'g-product');
+    expect(pricing.id, isNot(brand.id));
+
+    // A group created here is seeded General + Plugins by the engine. Selecting
+    // it must land the board in its own General — never the system Plugins
+    // workspace, and never back in a group used earlier.
+    await tester.tap(find.byKey(const ValueKey('explorer.newGroup')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const ValueKey('explorer.newGroup.name')), 'Platform');
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Platform'));
+    await tester.pumpAndSettle();
+    await _newBoard(tester, 'Bootstrap');
+
+    final platform = (await backend.loadGroups())
+        .firstWhere((g) => g.name == 'Platform');
+    final bootstrap = await _homeOf(backend, 'Bootstrap');
+    expect(bootstrap, isNotNull);
+    expect(bootstrap!.groupId, platform.id);
+    expect(bootstrap.name, 'General');
+    expect(bootstrap.name, isNot('Plugins'));
   });
 
   // ---- pre-existing coverage ------------------------------------------------

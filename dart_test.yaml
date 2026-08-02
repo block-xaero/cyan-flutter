@@ -1,3 +1,15 @@
+# Test-runner config for the parity suite.
+#
+# concurrency: 1 — NOT a performance knob, a correctness one for the face gates.
+# The expanded reporter labels every progress line with the suite that is
+# `active.first`, so with several suites in flight most tests never get a line
+# of their own (a full parallel run printed a fraction of the names it ran).
+# `scripts/gate_face.sh` reads those lines to decide which behaviours have a
+# PASSING test, so parallelism made the oracle blind to tests that ran and
+# passed. Serial, every test prints its own line. It also stops parallel suites
+# contending on the shared golden files.
+concurrency: 1
+
 # Tags for the parity test suite.
 #   golden — pixel goldens; excluded from the blocking gate, baselined in a
 #            dedicated CI step (see .github/workflows/flutter-parity.yml).

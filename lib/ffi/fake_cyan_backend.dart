@@ -41,6 +41,55 @@ class FakeCyanBackend implements CyanBackend {
 
   // ---- tree mutation (Explorer) ---------------------------------------------
 
+  /// The workspaces the ENGINE seeds into every new group: the conventional
+  /// `General` the operator works in, and the system `Plugins` one that lens
+  /// installs land in. The Swift app sees them as two `WorkspaceCreated` events
+  /// arriving right behind `GroupCreated` (CyanTests/FirstGroupOnboardingTests)
+  /// — it never creates them itself, so neither does the UI here.
+  static const List<String> _seededWorkspaceNames = ['General', 'Plugins'];
+
+  @override
+  Future<void> createGroup(String name) async {
+    final id = _newGroupId(name);
+    // Idempotent like the engine's: a re-delivered create converges on one
+    // group rather than doubling it.
+    if (_groupOrNull(id) != null) return;
+    _groups = [
+      ..._groups,
+      CyanGroup(
+        id: id,
+        name: name,
+        colorHex: _newGroupColorHex,
+        workspaces: [
+          for (final ws in _seededWorkspaceNames)
+            CyanWorkspace(id: _newWorkspaceId(id, ws), groupId: id, name: ws),
+        ],
+      ),
+    ];
+  }
+
+  @override
+  Future<void> createWorkspace(String groupId, String name) async {
+    final group = _groupOrNull(groupId);
+    if (group == null) return;
+    final id = _newWorkspaceId(groupId, name);
+    if (group.workspaces.any((w) => w.id == id)) return;
+    final workspace = CyanWorkspace(id: id, groupId: groupId, name: name);
+    _groups = [
+      for (final g in _groups)
+        if (g.id == groupId)
+          CyanGroup(
+            id: g.id,
+            name: g.name,
+            colorHex: g.colorHex,
+            peerCount: g.peerCount,
+            workspaces: [...g.workspaces, workspace],
+          )
+        else
+          g,
+    ];
+  }
+
   @override
   Future<void> createBoard(String workspaceId, String name) async {
     final board = CyanBoard(
@@ -147,9 +196,21 @@ class FakeCyanBackend implements CyanBackend {
     ];
   }
 
+  // Ids stay a pure function of (parent, name) — the engine's own rule — so a
+  // tree built by the same clicks is the same tree, and goldens stay stable.
   static String _newBoardId(String workspaceId, String name) =>
-      'b-$workspaceId-'
-      '${name.toLowerCase().replaceAll(RegExp('[^a-z0-9]+'), '-')}';
+      'b-$workspaceId-${_slug(name)}';
+
+  static String _newGroupId(String name) => 'g-${_slug(name)}';
+
+  static String _newWorkspaceId(String groupId, String name) =>
+      'w-$groupId-${_slug(name)}';
+
+  /// The colour `commitRename` sends with every `.createGroup`.
+  static const String _newGroupColorHex = '#00AEEF';
+
+  static String _slug(String name) =>
+      name.toLowerCase().replaceAll(RegExp('[^a-z0-9]+'), '-');
 
   static CyanWorkspace _withBoards(CyanWorkspace w, List<CyanBoard> boards) =>
       CyanWorkspace(id: w.id, groupId: w.groupId, name: w.name, boards: boards);
@@ -244,18 +305,226 @@ class FakeCyanBackend implements CyanBackend {
 
   @override
   Future<Workflow> loadWorkflow(String boardId) async {
-    final authored = _authoredWorkflow(boardId);
-    final cloned = _clonedSteps[boardId];
-    if (cloned == null || cloned.isEmpty) return authored;
-    // A clone APPENDS real authorable cells, and new cells are not compiled —
-    // the board goes back to needing a compile, exactly as the engine leaves it.
+    final seed = _authoredWorkflow(boardId);
+    final steps = _allSteps(boardId);
     return Workflow(
-      boardId: authored.boardId,
-      isDeployed: authored.isDeployed,
-      isCompiled: false,
-      steps: [...authored.steps, ...cloned],
+      boardId: boardId,
+      isDeployed: seed.isDeployed,
+      // A clone (or a step the composer just filed) APPENDS a real authorable
+      // cell, and a new cell is not compiled — the board goes back to needing a
+      // compile, exactly as the engine leaves it.
+      isCompiled: steps.isNotEmpty && steps.every(_isCompiled),
+      steps: steps,
     );
   }
+
+  /// The board's authored steps, MUTABLE: the seeded shape on first read, then
+  /// whatever authoring and compiling have done to it since. This is the list
+  /// `loadWorkflow` serves, so a step the composer files reads back exactly
+  /// like one that was always there.
+  final Map<String, List<WorkflowStep>> _steps = {};
+
+  List<WorkflowStep> _stepsOf(String boardId) =>
+      _steps.putIfAbsent(boardId, () => [..._authoredWorkflow(boardId).steps]);
+
+  /// Authored steps followed by anything a template clone materialized — the
+  /// board's full step ledger, in the order the engine hands it back.
+  List<WorkflowStep> _allSteps(String boardId) => [
+        ..._stepsOf(boardId),
+        ...?_clonedSteps[boardId],
+      ];
+
+  /// A step a compile has already resolved: it carries a plan, not just English.
+  static bool _isCompiled(WorkflowStep s) =>
+      s.tool != null || s.destination != null || s.gate != null;
+
+  int _authoredSeq = 0;
+
+  @override
+  Future<WorkflowStep?> addWorkflowStep(String boardId, String text) async {
+    final trimmed = text.trim();
+    // A blank step is refused rather than filed — the engine keeps no empty
+    // cells and the composer must not be able to make one.
+    if (trimmed.isEmpty) return null;
+    // A fresh step is authored English and nothing else: no tool, no gate, and
+    // no ambiguity verdict either — nothing has tried to resolve it yet.
+    final step = WorkflowStep(id: 'step-${++_authoredSeq}', text: trimmed);
+    _stepsOf(boardId).add(step);
+    return step;
+  }
+
+  @override
+  Future<bool> updateWorkflowStep(
+      String boardId, String stepId, String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    final steps = _stepsOf(boardId);
+    final index = steps.indexWhere((s) => s.id == stepId);
+    if (index < 0) return false;
+    final prior = steps[index];
+    steps[index] = WorkflowStep(
+      id: prior.id,
+      text: trimmed,
+      tool: prior.tool,
+      destination: prior.destination,
+      boundInputs: prior.boundInputs,
+      gate: prior.gate,
+      // Naming a plugin with `@` is exactly what resolves an ambiguous step —
+      // the engine's own rule. Nothing else moves the verdict until the next
+      // compile runs over the board.
+      isAmbiguous: prior.isAmbiguous && !trimmed.contains('@'),
+    );
+    return true;
+  }
+
+  // ---- the notebook document -------------------------------------------------
+  //
+  // ONE ledger, read two ways: `loadWorkflow` takes the step cells out of it,
+  // `notebookCells` hands back the whole document. So a step the composer files
+  // appears as a cell here without anything being written twice, and the
+  // diagram a compile draws is the compile's own DAG rather than a picture kept
+  // beside it.
+
+  @override
+  Future<List<NotebookCell>> notebookCells(String boardId) async {
+    final steps = _allSteps(boardId);
+    final opening = _openingCells[boardId] ?? const <NotebookCell>[];
+    final closing = _closingCells[boardId] ?? const <NotebookCell>[];
+    if (steps.isEmpty && opening.isEmpty && closing.isEmpty) return const [];
+
+    final cells = <NotebookCell>[];
+    void add(NotebookCell Function(int order) build) =>
+        cells.add(build(cells.length));
+
+    // The document opens with whatever prose the board carries before its
+    // steps — the brief a person wrote.
+    for (final cell in opening) {
+      add((order) => _atOrder(cell, order));
+    }
+    for (final step in steps) {
+      add((order) => NotebookCell(
+            id: step.id,
+            boardId: boardId,
+            kind: NotebookCellKind.step,
+            order: order,
+            content: step.text,
+            // A step nothing has compiled has NO bound tool, and the document
+            // says so rather than showing the plugin its English happens to
+            // name — naming one is a request, binding one is the compile's
+            // answer.
+            tool: step.tool,
+          ));
+    }
+    for (final cell in closing) {
+      add((order) => _atOrder(cell, order));
+    }
+
+    // The compiled DAG is OUTPUT: it exists only once a compile has run, and
+    // it is drawn from the plan the engine kept, never from the authored
+    // English beside it.
+    final plan = _pipelines[boardId];
+    if (plan != null && plan.isNotEmpty) {
+      add((order) => NotebookCell(
+            id: 'cell-dag-$boardId',
+            boardId: boardId,
+            kind: NotebookCellKind.mermaid,
+            order: order,
+            content: _mermaidForPlan(plan),
+            generatedFrom: 'pipeline',
+          ));
+    }
+    return cells;
+  }
+
+  /// The compiled plan as mermaid source — every step a node, every dependency
+  /// an edge. This is the shape Swift's `NotebookViewModel` writes into the
+  /// auto-generated diagram cell.
+  static String _mermaidForPlan(List<_FakePipelineStep> plan) {
+    final out = StringBuffer('graph TD\n');
+    for (final step in plan) {
+      out.writeln('    ${step.stepId}["${step.title.replaceAll('"', "'")}"]');
+    }
+    for (final step in plan) {
+      for (final dep in step.dependsOn) {
+        out.writeln('    $dep --> ${step.stepId}');
+      }
+    }
+    return out.toString();
+  }
+
+  /// The prose a demo board's document opens with, before its steps.
+  /// Deliberately only the flagship board has any: a board nobody has written
+  /// in has an empty document, and that is the honest reading of it.
+  static const Map<String, List<NotebookCell>> _openingCells = {
+    'b-eng-1': [
+      NotebookCell(
+        id: 'cell-brief',
+        boardId: 'b-eng-1',
+        kind: NotebookCellKind.markdown,
+        order: 0,
+        content: '# Reel cut — v4\n'
+            '\n'
+            'The master lands from the shot list, proxies go out for review, '
+            'and the producer signs the cut off before it publishes.\n'
+            '\n'
+            '- [x] Shot list locked\n'
+            '- [ ] Producer sign-off\n',
+      ),
+    ],
+  };
+
+  /// The cells that sit AFTER the board's steps: what the work produced.
+  static const Map<String, List<NotebookCell>> _closingCells = {
+    'b-eng-1': [
+      NotebookCell(
+        id: 'cell-probe',
+        boardId: 'b-eng-1',
+        kind: NotebookCellKind.code,
+        order: 0,
+        language: 'python',
+        content: 'probe = ffmpeg.probe("reel_master_v4.mov")\n'
+            'print(probe["streams"][0]["width"])',
+        output: '3840',
+      ),
+      NotebookCell(
+        id: 'cell-frame',
+        boardId: 'b-eng-1',
+        kind: NotebookCellKind.image,
+        order: 0,
+        content: 'data:image/png;base64,$_framePng',
+        caption: 'Frame 0412 — grade reference',
+      ),
+    ],
+  };
+
+  /// The same cell, filed at its position in the document. `cell_order` is the
+  /// document's, not the seed's — inserting a step must renumber what follows.
+  static NotebookCell _atOrder(NotebookCell cell, int order) => NotebookCell(
+        id: cell.id,
+        boardId: cell.boardId,
+        kind: cell.kind,
+        order: order,
+        content: cell.content,
+        output: cell.output,
+        language: cell.language,
+        tool: cell.tool,
+        generatedFrom: cell.generatedFrom,
+        caption: cell.caption,
+        collapsed: cell.collapsed,
+      );
+
+  /// A real 96×60 PNG, inline. The fake serves BYTES rather than a path so an
+  /// image cell renders the same pixels in a widget test, a golden and the app
+  /// — a document whose images only appear on a machine with the right file on
+  /// disk is not a document that can be tested.
+  static const String _framePng =
+      'iVBORw0KGgoAAAANSUhEUgAAAGAAAAA8CAIAAAAWtijjAAABKklEQVR42u3bsRECMQxE0auF'
+      'BCLKojR6IqUBWoACAN/JsrTa1Ywih2/+ht5uj1ffn9uaoIGcgO7P6/DOl5PIGYF0jOxAIkyz'
+      'QPRMX4A+r200ALIZUTL9BDIzaQF1SmMgcaa9QLKLOwYkmNJhILWUjEA6KdmBRJhmgegX5wNE'
+      'nJIbEGtKzkB8KfkDkTGtAqJZ3FoggpSWA1VPKQiobkpxQEWZooHKLS4HqFBKaUBVUkoGwk8p'
+      'HwicCQUIdnFYQIApwQGhpQQKhJMSLhAIEzpQ+uJqACWmVAYoK6ViQPEp1QMKZqoKFLa42kAB'
+      'KZUHWp0SCdC6lHiAFjGxAbkvjhPIMSVaIK+UyIHmU+IHmmRSATIzaQEZjOSAjjKJAu030gXa'
+      'ydTfwvvffAPF3BvPIpwZBB9YwwAAAABJRU5ErkJggg==';
 
   Workflow _authoredWorkflow(String boardId) {
     // The flagship deployed board has a compiled, locked workflow; the others
@@ -339,6 +608,25 @@ class FakeCyanBackend implements CyanBackend {
     );
   }
 
+  // ---- the board container's face -------------------------------------------
+  //
+  // The engine's board-mode pair. A board that has never been switched answers
+  // with the face its fixture was authored on; switching WRITES, so reopening
+  // the board comes back to the face it was left on — per board, the way
+  // `cyan_set_board_mode` keys it.
+
+  final Map<String, String> _boardFaces = {};
+
+  @override
+  Future<String?> boardActiveFace(String boardId) async =>
+      _boardFaces[boardId] ?? _board(boardId)?.activeFace.name;
+
+  @override
+  Future<bool> setBoardActiveFace(String boardId, String face) async {
+    _boardFaces[boardId] = face;
+    return true;
+  }
+
   // ---- operations console ---------------------------------------------------
 
   @override
@@ -347,6 +635,7 @@ class FakeCyanBackend implements CyanBackend {
           runId: 'run-7f3a',
           asset: 'reel_master_v4.mov',
           workflow: 'Render + Review Pipeline',
+          boardId: 'b-eng-1',
           status: RunStatus.awaitingApproval,
           currentStep: 3,
           stepCount: 4,
@@ -359,6 +648,7 @@ class FakeCyanBackend implements CyanBackend {
           runId: 'run-9c21',
           asset: 'promo_cut_02.mov',
           workflow: 'Render + Review Pipeline',
+          boardId: 'b-eng-1',
           status: RunStatus.running,
           currentStep: 2,
           stepCount: 4,
@@ -371,6 +661,7 @@ class FakeCyanBackend implements CyanBackend {
           runId: 'run-4b88',
           asset: 'ad_30s_final.mov',
           workflow: 'Design System',
+          boardId: 'b-des-1',
           status: RunStatus.failed,
           currentStep: 2,
           stepCount: 5,
@@ -384,6 +675,7 @@ class FakeCyanBackend implements CyanBackend {
           runId: 'run-1de0',
           asset: 'teaser_15s.mov',
           workflow: 'Q3 2026 Goals',
+          boardId: 'b-prod-1',
           status: RunStatus.queued,
           currentStep: 0,
           stepCount: 4,
@@ -393,6 +685,7 @@ class FakeCyanBackend implements CyanBackend {
           runId: 'run-2a55',
           asset: 'sizzle_v1.mov',
           workflow: 'Render + Review Pipeline',
+          boardId: 'b-eng-1',
           status: RunStatus.done,
           currentStep: 4,
           stepCount: 4,
@@ -405,6 +698,7 @@ class FakeCyanBackend implements CyanBackend {
           runId: 'run-6e9b',
           asset: 'bumper_clean.mov',
           workflow: 'Design System',
+          boardId: 'b-des-1',
           status: RunStatus.done,
           currentStep: 6,
           stepCount: 6,
@@ -1046,37 +1340,111 @@ class FakeCyanBackend implements CyanBackend {
 
   // ---- chat -----------------------------------------------------------------
 
+  /// The seeded transcripts, keyed by BOARD. Chat is board-scoped on the wire —
+  /// there is no group or workspace transcript — so a board with no seed has an
+  /// empty one, and a board id that names nothing has nothing to read.
+  late final Map<String, List<ChatMessage>> _chat = {
+    'b-eng-1': [
+      const ChatMessage(
+        id: 'm1',
+        author: 'Priya',
+        isOwn: false,
+        body: 'Kicking off the **Render + Review** run on reel_master_v4.',
+        timeLabel: '10:14 AM',
+      ),
+      const ChatMessage(
+        id: 'm2',
+        author: 'You',
+        isOwn: true,
+        body: 'Proxies look good — `transcode` step is green.',
+        timeLabel: '10:31 AM',
+      ),
+      const ChatMessage(
+        id: 'm3',
+        author: 'Mara',
+        isOwn: false,
+        body: 'Holding on producer approval before we publish to /review.',
+        timeLabel: '10:42 AM',
+      ),
+      const ChatMessage(
+        id: 'm4',
+        author: 'You',
+        isOwn: true,
+        body: 'Approved. Sending to review now.',
+        timeLabel: '11:05 AM',
+      ),
+    ],
+    'b-prod-1': [
+      const ChatMessage(
+        id: 'm-prod-1',
+        author: 'Dev',
+        isOwn: false,
+        body: 'Q3 brief is up — see `q3_brief.pdf`.',
+        timeLabel: '09:02 AM',
+      ),
+    ],
+  };
+
+  /// Minted ids for messages sent through [sendChat], so a local send is
+  /// distinguishable from a seeded row.
+  int _sentChatSeq = 0;
+
   @override
-  Future<List<ChatMessage>> loadChat(String boardId) async => const [
-        ChatMessage(
-          id: 'm1',
-          author: 'Priya',
-          isOwn: false,
-          body: 'Kicking off the **Render + Review** run on reel_master_v4.',
-          timeLabel: '10:14 AM',
-        ),
-        ChatMessage(
-          id: 'm2',
-          author: 'You',
-          isOwn: true,
-          body: 'Proxies look good — `transcode` step is green.',
-          timeLabel: '10:31 AM',
-        ),
-        ChatMessage(
-          id: 'm3',
-          author: 'Mara',
-          isOwn: false,
-          body: 'Holding on producer approval before we publish to /review.',
-          timeLabel: '10:42 AM',
-        ),
-        ChatMessage(
-          id: 'm4',
-          author: 'You',
-          isOwn: true,
-          body: 'Approved. Sending to review now.',
-          timeLabel: '11:05 AM',
-        ),
-      ];
+  Future<List<ChatMessage>> loadChat(String boardId) async =>
+      List<ChatMessage>.of(_chat[boardId] ?? const []);
+
+  @override
+  Future<ChatMessage?> sendChat(String boardId, String message,
+      {String? parentId}) async {
+    // Whitespace-only is refused before anything is filed — the same refusal
+    // the macOS composer makes, kept here so every caller inherits it.
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return null;
+
+    _sentChatSeq++;
+    final sent = ChatMessage(
+      id: 'm-sent-$_sentChatSeq',
+      author: 'You',
+      isOwn: true,
+      body: trimmed,
+      // A minute past the fixed epoch per send: ordered, and identical on every
+      // run, so a transcript golden does not move with the wall clock.
+      timeLabel:
+          _clockLabel(_epoch.add(Duration(minutes: 12 * 60 + _sentChatSeq))),
+    );
+    // The board is the WHOLE address: a send to a board with no transcript
+    // starts one rather than landing on some other board's lane.
+    (_chat[boardId] ??= <ChatMessage>[]).add(sent);
+
+    _eventQueue.add(jsonEncode({
+      'type': 'ChatSent',
+      'id': sent.id,
+      'board_id': boardId,
+      'workspace_id': _board(boardId)?.workspaceId ?? '',
+      'message': sent.body,
+      'author': sent.author,
+      'parent_id': parentId,
+      'timestamp': _epoch.millisecondsSinceEpoch ~/ 1000 + _sentChatSeq * 60,
+    }));
+    return sent;
+  }
+
+  @override
+  Future<void> deleteChat(String messageId) async {
+    // The engine deletes by message id alone — it does not take a board — so
+    // the fake sweeps every lane rather than pretending to know which one holds
+    // it.
+    for (final lane in _chat.values) {
+      lane.removeWhere((m) => m.id == messageId);
+    }
+  }
+
+  /// A stamp as the transcript renders it (`10:14 AM`).
+  static String _clockLabel(DateTime t) {
+    final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+    final m = t.minute.toString().padLeft(2, '0');
+    return '$h:$m ${t.hour < 12 ? 'AM' : 'PM'}';
+  }
 
   @override
   Future<void> loadChatHistory(String boardId) async {
@@ -1172,9 +1540,121 @@ class FakeCyanBackend implements CyanBackend {
         // Metadata only: the row has synced, the bytes have not.
         createdAt: _epoch.subtract(const Duration(hours: 9)),
       ),
+      CyanFile(
+        id: 'f-grade-ref',
+        groupId: 'g-eng',
+        workspaceId: 'w-eng-backend',
+        boardId: 'b-eng-1',
+        name: 'grade_reference.mov',
+        hash: _digest('grade_reference.mov'),
+        size: 1284730880,
+        sourcePeer: 'g-eng-peer-2',
+        // Metadata only — a peer's file this device has not pulled yet. This is
+        // what gives the board's files face something to DOWNLOAD.
+        createdAt: _epoch.subtract(const Duration(hours: 4)),
+      ),
     ])
       _handle(f.groupId, f.workspaceId, f.boardId, f.name): f,
   };
+
+  /// Transfers in flight, keyed by file id → fraction complete. A file absent
+  /// here has no transfer: it is either already local or simply remote.
+  final Map<String, double> _transfers = {};
+
+  /// Files whose transfer has COMPLETED in this session — their bytes are now
+  /// on the device even though the seeded row said metadata-only.
+  final Map<String, String> _fetchedPaths = {};
+
+  /// How far one poll of [fileStatus] advances a transfer. The engine reports a
+  /// fraction that climbs as chunks land; the fake climbs deterministically so
+  /// a progress readout is testable without a real mesh.
+  static const double _transferStep = 0.25;
+
+  @override
+  Future<List<CyanFile>> filesForBoard(String boardId) async {
+    final out = <CyanFile>[];
+    for (final f in _files.values) {
+      if (f.boardId != boardId) continue;
+      // Tombstoned rows are ABSENT, exactly as the engine filters them — a
+      // deleted file is not a file with a flag.
+      if (_deletedFiles.contains(f.id)) continue;
+      final fetched = _fetchedPaths[f.id];
+      out.add(fetched == null ? f : _withLocalPath(f, fetched));
+    }
+    return out;
+  }
+
+  @override
+  Future<bool> requestFileDownload(String fileId) async {
+    final file = _fileById(fileId);
+    // The engine refuses an id it cannot place, and a tombstoned file has no
+    // bytes left to ask a peer for.
+    if (file == null || _deletedFiles.contains(fileId)) return false;
+    // Already here: nothing to transfer, and the request is not an error.
+    if (file.isDownloaded || _fetchedPaths.containsKey(fileId)) return true;
+    _transfers[fileId] = 0;
+    return true;
+  }
+
+  @override
+  Future<FileTransfer?> fileStatus(String fileId) async {
+    final file = _fileById(fileId);
+    if (file == null) return null;
+
+    final fetched = _fetchedPaths[fileId];
+    if (file.isDownloaded || fetched != null) {
+      return FileTransfer(
+        state: FileTransferState.local,
+        progress: 1,
+        localPath: fetched ?? file.localPath,
+      );
+    }
+
+    final inFlight = _transfers[fileId];
+    if (inFlight == null) {
+      return const FileTransfer(state: FileTransferState.remote);
+    }
+
+    // Each READ advances the transfer — the fake's stand-in for chunks landing
+    // between polls, so a caller that polls sees the fraction climb and then
+    // finish rather than sitting at one value forever.
+    final next = inFlight + _transferStep;
+    if (next >= 1) {
+      _transfers.remove(fileId);
+      final path = '/fake/downloads/${file.name}';
+      _fetchedPaths[fileId] = path;
+      return FileTransfer(
+        state: FileTransferState.local,
+        progress: 1,
+        localPath: path,
+      );
+    }
+    _transfers[fileId] = next;
+    return FileTransfer(
+      state: FileTransferState.downloading,
+      progress: next,
+    );
+  }
+
+  CyanFile? _fileById(String fileId) {
+    for (final f in _files.values) {
+      if (f.id == fileId) return f;
+    }
+    return null;
+  }
+
+  static CyanFile _withLocalPath(CyanFile f, String path) => CyanFile(
+        id: f.id,
+        groupId: f.groupId,
+        workspaceId: f.workspaceId,
+        boardId: f.boardId,
+        name: f.name,
+        hash: f.hash,
+        size: f.size,
+        sourcePeer: f.sourcePeer,
+        localPath: path,
+        createdAt: f.createdAt,
+      );
 
   /// Tombstoned file ids. The engine soft-deletes and gossips the tombstone —
   /// it never hard-deletes — so a delete here KEEPS the row and only stops it
@@ -1383,7 +1863,7 @@ class FakeCyanBackend implements CyanBackend {
 
   @override
   Future<PipelineLaunch> pipelineCompile(String boardId) async {
-    final steps = _template(boardId);
+    final steps = _compiled(boardId);
     if (steps.isEmpty) {
       return PipelineLaunch(
         boardId: boardId,
@@ -1399,12 +1879,111 @@ class FakeCyanBackend implements CyanBackend {
       if (step.reviewHold) step.waitingOn = assignee;
     }
     _pipelines[boardId] = steps;
+    _stampInference(boardId, steps);
     return PipelineLaunch(
       boardId: boardId,
       status: 'compiling',
       message: 'Pipeline compiling in background',
     );
   }
+
+  /// The board's AUTHORED steps as a DAG. A step the seed already carries a
+  /// compiled shape for keeps it (stage, executor, timings — engine truth for
+  /// the demo boards); anything authored since is compiled from its English and
+  /// chained after the step before it. That is what puts a step the composer
+  /// just filed into the preview DAG instead of leaving the plan frozen at
+  /// whatever the board shipped with.
+  List<_FakePipelineStep> _compiled(String boardId) {
+    final seeded = {for (final s in _template(boardId)) s.stepId: s};
+    final out = <_FakePipelineStep>[];
+    String? previous;
+    for (final step in _allSteps(boardId)) {
+      out.add(seeded[step.id] ?? _compileStep(step, previous));
+      previous = step.id;
+    }
+    return out;
+  }
+
+  /// One authored step compiled the way the engine reads plain English: an
+  /// `@mention` dispatches to that plugin on-device, a sentence asking for
+  /// sign-off parks on a human gate, and anything else routes to the lens.
+  static _FakePipelineStep _compileStep(WorkflowStep step, String? previous) {
+    final gate = _asksForApproval(step.text) || _isManualStep(step.text);
+    final tool = _mentionedTool(step.text);
+    return _FakePipelineStep(
+      stepId: step.id,
+      title: step.text,
+      stage: gate ? 'review' : (tool == null ? 'enrich' : 'process'),
+      executor: gate ? 'manual' : (tool == null ? 'lens' : 'local'),
+      durationSecs: 0,
+      dependsOn: previous == null ? const [] : [previous],
+      reviewHold: gate,
+    );
+  }
+
+  /// The plugin (or `plugin.tool`) an authored step names with `@`, if any.
+  static String? _mentionedTool(String text) =>
+      RegExp(r'@([A-Za-z0-9_.\-]+)').firstMatch(text)?.group(1);
+
+  /// The files an authored step binds with `#`.
+  static List<String> _mentionedInputs(String text) => [
+        for (final m in RegExp(r'#([A-Za-z0-9_.\-]+)').allMatches(text))
+          m.group(1)!,
+      ];
+
+  /// A step the author marked `(manual)` — picture lock, the produce-master
+  /// hand-off. The engine has no actuator for it, so it compiles to a HUMAN
+  /// step and parks on the person who does the work rather than being walked
+  /// straight past.
+  static bool _isManualStep(String text) =>
+      text.toLowerCase().contains('(manual)');
+
+  static bool _asksForApproval(String text) {
+    final t = text.toLowerCase();
+    return t.contains('approval') ||
+        t.contains('approve') ||
+        t.contains('sign-off') ||
+        t.contains('sign off');
+  }
+
+  /// Stamp the compile's verdict back onto the authored steps — the chips a
+  /// step row shows come from HERE, which is why an uncompiled step has none.
+  /// Steps the board seeded with a compiled shape keep theirs.
+  void _stampInference(String boardId, List<_FakePipelineStep> compiled) {
+    final plan = {for (final s in compiled) s.stepId: s};
+    final steps = _stepsOf(boardId);
+    for (var i = 0; i < steps.length; i++) {
+      final step = steps[i];
+      if (_isCompiled(step)) continue;
+      final c = plan[step.id];
+      if (c == null) continue;
+      final tool = _mentionedTool(step.text);
+      steps[i] = WorkflowStep(
+        id: step.id,
+        text: step.text,
+        tool: tool,
+        // Where an UNBOUND step routes. A step that named its plugin shows the
+        // plugin instead — saying both would say the same thing twice.
+        destination: tool == null && !c.reviewHold
+            ? _executorLabel(c.executor)
+            : null,
+        boundInputs: _mentionedInputs(step.text),
+        gate: c.reviewHold ? StepGate.needsApproval : StepGate.noApproval,
+        // The compile resolved no tool for it and it is not a human gate: the
+        // face asks the author rather than inventing a tool for the step.
+        isAmbiguous: tool == null && !c.reviewHold,
+      );
+    }
+  }
+
+  /// The executor as the step row spells it (Swift `PipelineExecutor.label`).
+  static String? _executorLabel(String executor) => switch (executor) {
+        'local' => 'Local',
+        'cloud' => 'Cloud',
+        'manual' => 'Manual',
+        'lens' => 'AI (Lens)',
+        _ => null,
+      };
 
   @override
   Future<PipelineLaunch> runPipeline(String boardId) async {
@@ -1418,6 +1997,12 @@ class FakeCyanBackend implements CyanBackend {
     for (final step in steps) {
       switch (step.status) {
         case PipelineStepState.humanApproved:
+          continue;
+        case PipelineStepState.needsLens:
+          // A PARK is not a stop. The step has no model to run it, so the walk
+          // steps OVER it and keeps going — a parked step passes its
+          // dependencies through to whatever depended on it instead of wedging
+          // the whole chain behind a model nobody bound.
           continue;
         case PipelineStepState.aiComplete:
         case PipelineStepState.failed:
@@ -1462,6 +2047,12 @@ class FakeCyanBackend implements CyanBackend {
           aiComplete++;
         case PipelineStepState.running:
           running++;
+        case PipelineStepState.needsLens:
+          // Parked on the model: not settled, not failed, and owed a human
+          // override — so it holds the run's "awaiting" slot exactly like a
+          // gate does, and it is never counted as work that finished.
+          pending++;
+          awaitingStep ??= step.stepId;
         case PipelineStepState.failed:
           failed++;
         case PipelineStepState.pending:
@@ -1523,7 +2114,12 @@ class FakeCyanBackend implements CyanBackend {
   @override
   Future<bool> pipelineApprove(String boardId, String stepId) async {
     final step = _step(boardId, stepId);
-    if (step == null || step.status != PipelineStepState.aiComplete) {
+    // A gate clears from `ai_complete`; a PARKED step clears from the human
+    // override — the operator did the work off-model and marks it done. Any
+    // other state has nothing to approve.
+    if (step == null ||
+        (step.status != PipelineStepState.aiComplete &&
+            step.status != PipelineStepState.needsLens)) {
       return false;
     }
     // An unscoped approve cannot clear a producer-review hold — that gate has
@@ -1602,6 +2198,19 @@ class FakeCyanBackend implements CyanBackend {
       return const StepRunResult(
         success: false,
         error: 'step not found (compile first)',
+      );
+    }
+    // A step the compile routed to the LENS has no device-local binding to
+    // dispatch against. The engine parks it (`needs_lens`) rather than failing
+    // it: amber and resumable, with the human override as the way out.
+    if (step.executor == 'lens') {
+      step.status = PipelineStepState.needsLens;
+      step.error = null;
+      return const StepRunResult(
+        success: false,
+        isParked: true,
+        awaiting: 'a lens model',
+        error: 'needs_lens: no model is bound to run this step',
       );
     }
     if (step.executor != 'local') {
@@ -2908,6 +3517,162 @@ class FakeCyanBackend implements CyanBackend {
         ),
       ],
     ),
+    // The authored DEMO SPINE, step for step from the engine's own seed
+    // (cyan-backend/src/templates.rs, `DEMO_SPINE_ID`). This is the whole
+    // post-production walk: ingest → Frame.io review round → Premiere markers
+    // and timeline sense → picture lock → Pro Tools turnover → conform and
+    // relink → AI-LUT base pass → Resolve finish → graded master.
+    //
+    // AUTHORED ORDER IS LAW. Two of the orderings here are scar tissue and are
+    // reproduced deliberately: the producer WINDOW ("await the producer review
+    // notes") opens before the pull that closes it, and `stage_turnover` /
+    // `inject_notes` are TWO steps because one `@mention` binds per step.
+    CyanTemplate(
+      id: 'tpl-multicut-spine',
+      name: 'Multicut review spine',
+      description: 'The authored demo spine, in the stated walk order: ingest '
+          '→ Frame.io review round → Premiere markers + timeline sense → '
+          'picture lock → Pro Tools turnover → conform + relink → AI-LUT base '
+          'pass → Resolve finish → graded master.',
+      source: 'builtin:postprod',
+      createdAt: _stamp(114),
+      steps: const [
+        TemplateStep(text: 'ingest and probe the sources', stage: 'ingest'),
+        TemplateStep(
+          text: 'push the proxy to @frameio.upload_file for producer review '
+              '/needs-approval',
+          plugin: 'frameio',
+          stage: 'review',
+        ),
+        TemplateStep(
+          text: 'await the producer review notes from Frame.io',
+          stage: 'review',
+        ),
+        TemplateStep(
+          text: 'pull the review comments from @frameio.list_comments',
+          plugin: 'frameio',
+          stage: 'review',
+        ),
+        TemplateStep(
+          text: 'post the confirmed review notes as markers via '
+              '@premiere-uxp.add_markers /needs-approval',
+          plugin: 'premiere-uxp',
+          stage: 'edit',
+        ),
+        TemplateStep(
+          text: "export the editor's sequence via @premiere-uxp.export_sequence",
+          plugin: 'premiere-uxp',
+          stage: 'edit',
+        ),
+        TemplateStep(
+          text: "sense the editor's timeline updates via "
+              '@premiere-watcher.scan_exports',
+          plugin: 'premiere-watcher',
+          stage: 'edit',
+        ),
+        TemplateStep(
+          text: 'picture lock — confirm the locked cut (manual)',
+          stage: 'edit',
+        ),
+        TemplateStep(
+          text: 'stage the audio turnover via @protools.stage_turnover '
+              '/needs-approval',
+          plugin: 'protools',
+          stage: 'sound',
+        ),
+        TemplateStep(
+          text: 'land the review notes in the session via '
+              '@protools.inject_notes /needs-approval',
+          plugin: 'protools',
+          stage: 'sound',
+        ),
+        TemplateStep(
+          text: "sense the sound room's returned session via "
+              '@protools.parse_aaf',
+          plugin: 'protools',
+          stage: 'sound',
+        ),
+        TemplateStep(
+          text: 'conform and relink the locked cut via @cyan-media.conform',
+          plugin: 'cyan-media',
+          stage: 'conform',
+        ),
+        TemplateStep(
+          text: 'apply the AI LUT golden hour base look via '
+              '@davinci-resolve.apply_look /needs-approval',
+          plugin: 'davinci-resolve',
+          stage: 'color',
+        ),
+        TemplateStep(
+          text: 'finish in Resolve, then capture the final grade back via '
+              '@davinci-resolve.capture_grade',
+          plugin: 'davinci-resolve',
+          stage: 'color',
+        ),
+        TemplateStep(
+          text: 'produce the graded master and mark done — review player ▸ '
+              'Produce master (manual)',
+          stage: 'master',
+        ),
+      ],
+      stages: const [
+        'ingest',
+        'review',
+        'edit',
+        'sound',
+        'conform',
+        'color',
+        'master',
+      ],
+      plugins: const [
+        TemplatePlugin(
+            id: 'frameio', status: 'live', execution: 'cloud', autoInstall: true),
+        TemplatePlugin(
+            id: 'premiere-watcher',
+            status: 'live',
+            execution: 'device',
+            autoInstall: true),
+        TemplatePlugin(
+            id: 'premiere-uxp',
+            status: 'live',
+            execution: 'device',
+            autoInstall: true),
+        TemplatePlugin(
+            id: 'davinci-resolve',
+            status: 'live',
+            execution: 'device',
+            autoInstall: true),
+        TemplatePlugin(
+            id: 'protools',
+            status: 'live',
+            execution: 'device',
+            autoInstall: true),
+        // Declared but NOT auto-installed: the conform tool ships with the
+        // engine rather than being fetched from the plugin source.
+        TemplatePlugin(
+            id: 'cyan-media', status: 'live', execution: 'device'),
+      ],
+      notes: const [
+        TemplateNote(
+          kind: 'constitution',
+          authorRole: 'studio_exec',
+          authorName: 'House workflow',
+          text: "AUTHORED ORDER IS LAW: this template's steps run exactly as "
+              'written, top to bottom — never reorder the spine. Collect the '
+              'review comments and confirm the proposed edits to reach picture '
+              'lock BEFORE any sound or downstream actuation; markers land in '
+              'Premiere pre-lock (the editor cuts against them to produce the '
+              'lock).',
+        ),
+        TemplateNote(
+          kind: 'preference',
+          authorRole: 'producer',
+          authorName: 'House delivery',
+          text: 'Deliver masters as MP4 (H.264, CRF 18); keep the reviewer\'s '
+              'timecodes in the turnover locators verbatim.',
+        ),
+      ],
+    ),
   ];
 
   /// Step cells a clone materialized, by board. `loadWorkflow` serves them
@@ -3304,7 +4069,10 @@ class FakeCyanBackend implements CyanBackend {
   /// The board's ingested master. Only the flagship board has media, the same
   /// way only it has a compiled pipeline — a board with nothing ingested is the
   /// fixture's normal case, not an error.
-  static const Map<String, String> _boardMasters = {
+  /// MUTABLE, because the registry is written by INGEST: a source is
+  /// addressable only because it was ingested, so a board that has never
+  /// scanned anything has no master and a board that has scanned one does.
+  final Map<String, String> _boardMasters = {
     'b-eng-1': '$_mediaRoot/masters/reel-01.mxf',
   };
 
@@ -3328,6 +4096,14 @@ class FakeCyanBackend implements CyanBackend {
       previewPath: preview,
       mediaRoot: _mediaRoot,
     );
+  }
+
+  /// Containers that carry PICTURE. Room tone and a stray sidecar are ingested
+  /// like anything else, but neither is a master.
+  static bool _isPicture(String path) {
+    final lower = path.toLowerCase();
+    return const ['.mxf', '.mov', '.mp4', '.braw', '.r3d', '.ari', '.arri']
+        .any(lower.endsWith);
   }
 
   /// Containers the macOS player cannot decode — the camera originals.
@@ -3476,6 +4252,90 @@ class FakeCyanBackend implements CyanBackend {
     }
     if (op == 'nudges_for') {
       return ReviewCommandResult(op: op, rows: _reviewNudges(tenant, asset));
+    }
+    if (op == 'review_media_info') {
+      // The asset registry's truth for the player: the registered master, the
+      // newest conform-derived proxy, and the ledger head the lane is checked
+      // out at. A board with nothing ingested has no media info to give, which
+      // is an answer — the caller falls back to the staged read.
+      final media = await boardVideoMedia(boardId);
+      if (media.masterUri == null && media.proxyPath == null) {
+        return ReviewCommandResult(
+            op: op, error: 'no review media registered for this board');
+      }
+      final head = _changeHeadNumber(tenant, asset, branch);
+      return ReviewCommandResult(op: op, fields: {
+        'version': head,
+        'master_path': media.masterUri,
+        // The conformed proxy belongs to the round its version froze: before a
+        // second cut exists the review proxy IS the v1 cut.
+        'derived_proxy_path': head >= 2 ? media.proxyPath : null,
+      });
+    }
+    if (op == 'confirm') {
+      // The confirm gate. The board-keyed dialect IS the app surface, and the
+      // app surface is the human — the engine fires it as Actor::Human.
+      final entryId = command['entry_id'] as String? ?? '';
+      if (entryId.isEmpty) {
+        return ReviewCommandResult(op: op, error: "missing 'entry_id'");
+      }
+      final decision = command['decision'] as String? ?? '';
+      if (!const ['approve', 'edit', 'reject'].contains(decision)) {
+        return ReviewCommandResult(
+            op: op, error: "decision '$decision' not in [approve, edit, reject]");
+      }
+      final lane = _changeLane(tenant, asset, branch);
+      final row = _changeRow(lane, entryId);
+      if (row == null) {
+        return ReviewCommandResult(
+            op: op, error: "no change_entry '$entryId'");
+      }
+      switch (decision) {
+        case 'approve':
+          row['state'] = 'approved';
+          row['active'] = true;
+          row['approved_by'] = command['actor'] as String? ?? 'rick';
+          row['approved_at'] = _stamp(0);
+        case 'reject':
+          // The row STAYS — rejecting is a decision on the record, not an
+          // erasure of what was proposed.
+          row['state'] = 'rejected';
+          row['active'] = false;
+        case 'edit':
+          // The redo chain: the nudged copy supersedes the original and lands
+          // approved. Entry CONTENT is immutable, so an edit is a new row.
+          final edited = _capturedEntry({
+            ...row,
+            'id': null,
+            'tc_in': (command['tc_in'] as num?)?.toInt() ?? row['tc_in'],
+            'tc_out': (command['tc_out'] as num?)?.toInt() ?? row['tc_out'],
+            'params': command['params'] is Map<String, dynamic>
+                ? command['params']
+                : row['params'],
+            'state': 'approved',
+          }, lane.length + 1);
+          edited['approved_by'] = command['actor'] as String? ?? 'rick';
+          edited['approved_at'] = _stamp(0);
+          if (edited['entry_hash'] == row['entry_hash']) {
+            // An edit that changed nothing is not a new fact: the ledger is
+            // content-addressed, so the "edited" row IS this row. Approve it
+            // rather than superseding it with its own twin.
+            row['state'] = 'approved';
+            row['active'] = true;
+            row['approved_by'] = edited['approved_by'];
+            row['approved_at'] = edited['approved_at'];
+            break;
+          }
+          edited['supersedes'] = entryId;
+          lane.add(edited);
+          row['superseded_by'] = edited['id'];
+          row['state'] = 'superseded';
+          row['active'] = false;
+      }
+      row['updated_at'] = _stamp(0);
+      // The decision and the ledger it produced travel together.
+      return ReviewCommandResult(
+          op: op, fields: _laneEnvelope(tenant, asset, branch));
     }
 
     final transition = _reviewTransitions[op];
@@ -3784,6 +4644,33 @@ class FakeCyanBackend implements CyanBackend {
             run.toJson(),
         ]);
 
+      case 'produce_master':
+        // The delivery lane. BOARD-keyed: the engine resolves the frozen
+        // version from this board's own review lane, so the app never names a
+        // file to render.
+        final gap = missing('board_id');
+        if (gap != null) return IngestCommandResult(op: op, error: gap);
+        final board = command['board_id'] as String;
+        final boardTenant = _groupIdFor(board);
+        final boardAsset = _reviewAsset(board);
+        final head = _changeHeadNumber(boardTenant, boardAsset, 'main');
+        if (head <= 0) {
+          return IngestCommandResult(
+              op: op,
+              error: "board '$board' has no delivered version to produce from");
+        }
+        final media = await boardVideoMedia(board);
+        if (!media.hasMedia) {
+          return IngestCommandResult(
+              op: op, error: "board '$board' has no ingested master");
+        }
+        final version = (command['version'] as num?)?.toInt() ?? head;
+        return IngestCommandResult(op: op, fields: {
+          'version': version,
+          'output_path':
+              '$_mediaRoot/deliveries/${boardAsset}_v${version}_master.mov',
+        });
+
       case 'produce_master_plan':
         for (final key in ['tenant_id', 'version_id']) {
           final gap = missing(key);
@@ -3840,6 +4727,13 @@ class FakeCyanBackend implements CyanBackend {
         continue;
       }
       ingested++;
+      // The asset registry's own rule: the FIRST picture a board ingests
+      // becomes the master everything downstream hangs off — the conform, the
+      // review proxy and the delivery all resolve against it. A board that
+      // already has one keeps it; a sound-only asset never becomes one.
+      if (!_boardMasters.containsKey(source.boardId) && _isPicture(path)) {
+        _boardMasters[source.boardId] = path;
+      }
       runs.add(MaterializedRun(
         runId: 'run-${_digest('${source.boardId}|$path').substring(0, 8)}',
         boardId: source.boardId,
@@ -3922,7 +4816,74 @@ class FakeCyanBackend implements CyanBackend {
   };
 
   /// The frozen versions a `snapshot` mints, keyed by version id.
-  final Map<String, Map<String, dynamic>> _changeVersions = {};
+  ///
+  /// Seeded with the flagship board's two cuts, because that board has already
+  /// been through a round: v1 is the source cut the review opened on, v2 is the
+  /// conformed proxy round 1 published. A lane nobody has snapshotted has no
+  /// versions at all, which is the normal starting state and stays that way.
+  late final Map<String, Map<String, dynamic>> _changeVersions = {
+    'cv-eng-v1': {
+      'version_id': 'cv-eng-v1',
+      'tenant_id': 'g-eng',
+      'asset_hash': _reviewAsset('b-eng-1'),
+      'branch': 'main',
+      'entry_hashes': const <String>[],
+      'created_at': _stamp(4),
+      'outcome': 'pending',
+      'label': 'source cut',
+    },
+    'cv-eng-v2': {
+      'version_id': 'cv-eng-v2',
+      'tenant_id': 'g-eng',
+      'asset_hash': _reviewAsset('b-eng-1'),
+      'branch': 'main',
+      'entry_hashes': const <String>[],
+      'created_at': _stamp(3),
+      'outcome': 'pending',
+      'label': 'round 1 conformed',
+    },
+  };
+
+  /// The ORDER versions were frozen in, per lane — the checkout line the
+  /// Keystone undo/redo walks. The engine keys it exactly this way.
+  late final Map<String, List<String>> _laneVersions = {
+    _reviewKey('g-eng', _reviewAsset('b-eng-1'), 'main'): [
+      'cv-eng-v1',
+      'cv-eng-v2',
+    ],
+  };
+
+  /// Where each lane's branch head points, 1-based. 0 (or absent) means nothing
+  /// has been frozen yet — an un-versioned change list.
+  late final Map<String, int> _laneHead = {
+    _reviewKey('g-eng', _reviewAsset('b-eng-1'), 'main'): 2,
+  };
+
+  /// The entries this board's agent pass has already decided on. The agent acts
+  /// on each note ONCE — a second tick must not re-propose what a human is
+  /// already adjudicating.
+  final Map<String, Set<String>> _agentActed = {};
+
+  /// The engine's look table. The corpus is the ENGINE's: it refuses a look
+  /// outside it rather than approximating one, so the app only ever reads it.
+  static const List<Map<String, dynamic>> _lookCorpus = [
+    {
+      'look': 'warm punchy',
+      'aliases': ['warm and punchy', 'punchy warm'],
+    },
+    {
+      'look': 'teal orange',
+      'aliases': ['teal and orange', 'teal-orange'],
+    },
+    {
+      'look': 'bleach bypass',
+      'aliases': ['bleach-bypass'],
+    },
+    {
+      'look': 'cool clean',
+      'aliases': ['clean cool'],
+    },
+  ];
 
   /// One wire-shaped `ChangeEntry`. The entry hash is a digest of the CONTENT
   /// fields only, exactly as the engine computes it — two identical proposals
@@ -3994,14 +4955,42 @@ class FakeCyanBackend implements CyanBackend {
     return null;
   }
 
-  /// The newest version frozen on a lane, or null when nothing has snapshotted
-  /// it yet — an un-versioned change list is the normal starting state.
-  Map<String, dynamic>? _changeHead(String asset, String branch) {
-    Map<String, dynamic>? head;
-    for (final v in _changeVersions.values) {
-      if (v['asset_hash'] == asset && v['branch'] == branch) head = v;
-    }
-    return head;
+  /// Where the lane's branch head sits, as a VERSION NUMBER. 0 when nothing has
+  /// snapshotted it yet — an un-versioned change list is the normal starting
+  /// state, not a fault.
+  int _changeHeadNumber(String tenant, String asset, String branch) {
+    final key = _reviewKey(tenant, asset, branch);
+    final head = _laneHead[key] ?? 0;
+    final count = (_laneVersions[key] ?? const []).length;
+    return head > count ? count : head;
+  }
+
+  /// The version row the head points at, or null when the lane has none.
+  Map<String, dynamic>? _changeHead(String tenant, String asset, String branch) {
+    final key = _reviewKey(tenant, asset, branch);
+    final ids = _laneVersions[key] ?? const <String>[];
+    final head = _changeHeadNumber(tenant, asset, branch);
+    if (head <= 0 || head > ids.length) return null;
+    return _changeVersions[ids[head - 1]];
+  }
+
+  /// The review player's full envelope: the lane, the version its head is
+  /// checked out at, and the review round it is sitting in. The engine answers
+  /// this shape to BOTH `list` and a confirm decision, so the decision and the
+  /// ledger it produced always arrive together.
+  Map<String, dynamic> _laneEnvelope(
+      String tenant, String asset, String branch) {
+    final state = _reviewStates[_reviewKey(tenant, asset, branch)];
+    return {
+      'asset_hash': asset,
+      'branch': branch,
+      'tenant_id': tenant,
+      'version': _changeHeadNumber(tenant, asset, branch),
+      'review_state': state == null
+          ? null
+          : {'state': state.state, 'round': state.round},
+      'entries': _changeLane(tenant, asset, branch),
+    };
   }
 
   @override
@@ -4030,19 +5019,8 @@ class FakeCyanBackend implements CyanBackend {
       case 'list':
         final gap = missing('board_id');
         if (gap != null) return ChangelistCommandResult(op: op, error: gap);
-        // The player's full envelope: the lane, its head version, and the
-        // review round it is sitting in.
-        final state = _reviewStates[_reviewKey(tenant, asset, branch)];
-        return ChangelistCommandResult(op: op, fields: {
-          'asset_hash': asset,
-          'branch': branch,
-          'tenant_id': tenant,
-          'version': _changeHead(asset, branch),
-          'review_state': state == null
-              ? null
-              : {'state': state.state, 'round': state.round},
-          'entries': _changeLane(tenant, asset, branch),
-        });
+        return ChangelistCommandResult(
+            op: op, fields: _laneEnvelope(tenant, asset, branch));
 
       case 'get':
         for (final key in ['tenant_id', 'asset_hash']) {
@@ -4053,7 +5031,7 @@ class FakeCyanBackend implements CyanBackend {
           'asset_hash': asset,
           'branch': branch,
           'entries': _changeLane(tenant, asset, branch),
-          'head_version': _changeHead(asset, branch),
+          'head_version': _changeHead(tenant, asset, branch),
         });
 
       case 'append':
@@ -4171,6 +5149,12 @@ class FakeCyanBackend implements CyanBackend {
           'label': command['label'] as String? ?? '',
         };
         _changeVersions[versionId] = version;
+        // Freezing a version CHECKS IT OUT: the head advances to the cut that
+        // was just minted, which is what undo/redo then walk back and forth.
+        final laneKey = _reviewKey(tenant, asset, branch);
+        final line = _laneVersions.putIfAbsent(laneKey, () => []);
+        if (!line.contains(versionId)) line.add(versionId);
+        _laneHead[laneKey] = line.indexOf(versionId) + 1;
         for (final e in active) {
           e['version_ref'] ??= versionId;
         }
@@ -4294,8 +5278,272 @@ class FakeCyanBackend implements CyanBackend {
               },
         ]..sort((x, y) => (x['seq'] as int).compareTo(y['seq'] as int));
         return ChangelistCommandResult(op: op, rows: ops);
+
+      // ---- the review player's capture + checkout verbs ---------------------
+
+      case 'append_entry':
+        // The composer's write. The whole ENTRY travels — including the spatial
+        // groups (`ref` / `region` / `intent_struct`) and the unhashed capture
+        // context — because the format is the engine's and the app never
+        // re-shapes a row on the way in.
+        final entry = command['entry'];
+        if (entry is! Map<String, dynamic>) {
+          return ChangelistCommandResult(
+              op: op, error: "append_entry requires an 'entry' object");
+        }
+        final entryTenant = entry['tenant_id'] as String? ?? '';
+        if (entryTenant.isEmpty) {
+          return ChangelistCommandResult(op: op, error: 'tenant_id required');
+        }
+        final entryAsset = entry['asset_hash'] as String? ?? '';
+        if (entryAsset.isEmpty) {
+          return ChangelistCommandResult(op: op, error: 'asset_hash required');
+        }
+        final entryKind = entry['kind'] as String? ?? '';
+        if (!_changeKindVocab.contains(entryKind)) {
+          return ChangelistCommandResult(
+              op: op,
+              error:
+                  "change kind '$entryKind' not in closed vocab $_changeKindVocab");
+        }
+        // An `op` entry MUST name its operation; a note must not pretend to be
+        // one. The typed payload is what conform reads.
+        if (entryKind == 'op' &&
+            (entry['op'] as String?)?.isEmpty != false) {
+          return ChangelistCommandResult(
+              op: op, error: "kind 'op' requires 'op'");
+        }
+        final entryBranch = entry['branch'] as String? ?? 'main';
+        final captureLane =
+            _changeLane(entryTenant, entryAsset, entryBranch);
+        final row = _capturedEntry(entry, captureLane.length + 1);
+        // Content-addressed: an identical capture is the SAME entry, so a
+        // double-send converges instead of duplicating the note.
+        final twin = captureLane
+            .indexWhere((e) => e['entry_hash'] == row['entry_hash']);
+        if (twin >= 0) {
+          return ChangelistCommandResult(op: op, fields: captureLane[twin]);
+        }
+        captureLane.add(row);
+        return ChangelistCommandResult(op: op, fields: row);
+
+      case 'agent_act':
+        final gap = missing('board_id');
+        if (gap != null) return ChangelistCommandResult(op: op, error: gap);
+        return ChangelistCommandResult(
+            op: op, fields: {'acted': _agentPass(tenant, asset, branch)});
+
+      case 'look_corpus':
+        return const ChangelistCommandResult(
+            op: 'look_corpus', fields: {'looks': _lookCorpus});
+
+      case 'conform_map':
+        // The fake's published proxy carries no structural op, so proxy tc IS
+        // master tc. The identity map is stated rather than omitted: a caller
+        // that gets nothing cannot tell "identity" from "the read failed".
+        return const ChangelistCommandResult(op: 'conform_map', fields: {
+          'segments': [
+            {
+              'proxy_start': 0,
+              'proxy_end': null,
+              'master_start': 0,
+              'ratio': 1.0,
+            }
+          ],
+        });
+
+      case 'undo':
+      case 'redo':
+        for (final key in ['tenant_id', 'asset_hash']) {
+          final gap = missing(key);
+          if (gap != null) return ChangelistCommandResult(op: op, error: gap);
+        }
+        final key = _reviewKey(tenant, asset, branch);
+        final line = _laneVersions[key] ?? const <String>[];
+        var head = _changeHeadNumber(tenant, asset, branch);
+        if (op == 'undo') {
+          // v1 is the floor: there is no cut before the first one.
+          if (head <= 1) {
+            return ChangelistCommandResult(op: op, error: 'nothing to undo');
+          }
+          head -= 1;
+        } else {
+          if (head >= line.length) {
+            return ChangelistCommandResult(op: op, error: 'nothing to redo');
+          }
+          head += 1;
+        }
+        _laneHead[key] = head;
+        return ChangelistCommandResult(op: op, fields: {
+          'version': head,
+          'version_id': line[head - 1],
+          'by': command['by'] as String? ?? '',
+        });
     }
     return ChangelistCommandResult(op: op, error: "unknown op '$op'");
+  }
+
+  /// One captured entry, wire-shaped. The hash covers the CONTENT fields only —
+  /// the capture context is provenance and is deliberately outside it, so two
+  /// peers capturing the same note dedup to one row.
+  Map<String, dynamic> _capturedEntry(Map<String, dynamic> entry, int seq) {
+    final content = {
+      for (final k in const [
+        'tenant_id',
+        'asset_hash',
+        'branch',
+        'kind',
+        'op',
+        'tc_in',
+        'tc_out',
+        'params',
+        'intent',
+        'ref',
+        'region',
+        'intent_struct',
+      ])
+        if (entry[k] != null) k: entry[k],
+    };
+    final hash = _digest(jsonEncode(content));
+    return {
+      'id': entry['id'] as String? ?? 'ce-${hash.substring(0, 12)}',
+      'entry_hash': hash,
+      'asset_hash': entry['asset_hash'],
+      'tenant_id': entry['tenant_id'],
+      'track': entry['track'],
+      'tc_in': (entry['tc_in'] as num?)?.toInt() ?? 0,
+      'tc_out': (entry['tc_out'] as num?)?.toInt(),
+      'kind': entry['kind'],
+      'op': entry['op'],
+      'params': entry['params'] ?? const <String, dynamic>{},
+      'intent': entry['intent'] as String? ?? '',
+      'source': entry['source'] as String? ?? 'cyan-player',
+      'source_ref': entry['source_ref'],
+      'author': entry['author'] as String? ?? 'rick',
+      'role': entry['role'],
+      'proposed_by': entry['proposed_by'] as String? ?? 'human',
+      'created_at': _stamp(0),
+      'state': entry['state'] as String? ?? 'proposed',
+      'active': entry['active'] as bool? ?? true,
+      'approved_by': null,
+      'approved_at': null,
+      'supersedes': null,
+      'superseded_by': null,
+      'seq': seq,
+      'depends_on': null,
+      'version_ref': null,
+      'branch': entry['branch'] as String? ?? 'main',
+      'outcome': null,
+      // The spatial groups ride verbatim — absent stays ABSENT.
+      if (entry['ref'] != null) 'ref': entry['ref'],
+      if (entry['region'] != null) 'region': entry['region'],
+      if (entry['intent_struct'] != null)
+        'intent_struct': entry['intent_struct'],
+      if (entry['capture_ctx'] != null) 'capture_ctx': entry['capture_ctx'],
+    };
+  }
+
+  /// ONE agent pass over a lane — the deterministic proposer the engine runs
+  /// behind `agent_act`.
+  ///
+  /// The app never says WHICH note to act on or what to do with it: the pass
+  /// reads the persisted ledger and decides. A note that names a mechanical
+  /// instruction becomes a PROPOSED op waiting on a human; a colour op is
+  /// rendered; prose is DECLINED and stays a note. Nothing is invented, and a
+  /// note is only ever decided once.
+  List<Map<String, dynamic>> _agentPass(
+      String tenant, String asset, String branch) {
+    final laneKey = _reviewKey(tenant, asset, branch);
+    final lane = _changeLane(tenant, asset, branch);
+    final seen = _agentActed.putIfAbsent(laneKey, () => <String>{});
+    final acted = <Map<String, dynamic>>[];
+
+    for (final row in List<Map<String, dynamic>>.of(lane)) {
+      final id = row['id'] as String;
+      if (!seen.add(id)) continue;
+      if (row['state'] != 'proposed') continue;
+
+      // A colour instruction has a picture to run on: the pass renders it and
+      // answers with the graded proxy it produced.
+      if (row['kind'] == 'op' && row['op'] == 'color') {
+        acted.add({
+          'entry_id': id,
+          'output_path':
+              '$_mediaRoot/derived/${asset}_${id.substring(0, 8)}_graded.mp4',
+        });
+        continue;
+      }
+      if (row['kind'] != 'note') continue;
+
+      final proposal = _proposeFromNote(row);
+      if (proposal == null) {
+        // The agent DECIDED not to act, and says why. Creative feedback is
+        // never mechanised into an op behind the human's back.
+        acted.add({
+          'entry_id': id,
+          'declined': 'creative — your call, this is not a mechanical change',
+        });
+        continue;
+      }
+      final entry = _capturedEntry({
+        ...proposal,
+        'tenant_id': tenant,
+        'asset_hash': asset,
+        'branch': branch,
+        'intent': row['intent'],
+        'source': 'agent',
+        'role': 'agent',
+        'author': 'agent-conform',
+        'proposed_by': 'agent',
+        'state': 'proposed',
+        // Realization arrives as a NEW ledger fact referencing the note it came
+        // from — never as a mutation of what the human authored.
+        'ref': {'class': 'entry', 'about_entry_hash': row['entry_hash']},
+        if (row['region'] != null) 'region': row['region'],
+      }, lane.length + 1);
+      lane.add(entry);
+      seen.add(entry['id'] as String);
+      acted.add({
+        'entry_id': id,
+        'proposed_entry_id': entry['id'],
+        'op': entry['op'],
+      });
+    }
+    return acted;
+  }
+
+  /// The mechanical instructions the pass can read out of a note. EXACT
+  /// patterns only: a note it cannot parse stays a note rather than becoming a
+  /// guess about what the reviewer meant.
+  Map<String, dynamic>? _proposeFromNote(Map<String, dynamic> note) {
+    final text = (note['intent'] as String? ?? '').toLowerCase();
+    final tcIn = (note['tc_in'] as num?)?.toInt() ?? 0;
+
+    final trim = RegExp(r'trim\s+(\d+)\s+frames?\s+off\s+the\s+(head|tail)')
+        .firstMatch(text);
+    if (trim != null) {
+      final frames = int.parse(trim.group(1)!);
+      return {
+        'kind': 'op',
+        'op': trim.group(2) == 'head' ? 'trim_head' : 'trim_tail',
+        'params': {'frames': frames},
+        'tc_in': tcIn,
+        'tc_out': tcIn + frames,
+      };
+    }
+    final duck =
+        RegExp(r'\b(duck|lower)\b.*\b(music|score|bed)\b').firstMatch(text);
+    if (duck != null) {
+      final db = RegExp(r'(\d+)\s*db').firstMatch(text);
+      return {
+        'kind': 'op',
+        'op': 'audio_duck',
+        'params': {'db': -(db == null ? 6 : int.parse(db.group(1)!))},
+        'tc_in': tcIn,
+        'tc_out': (note['tc_out'] as num?)?.toInt() ?? tcIn + 48,
+      };
+    }
+    return null;
   }
 
   /// The engine's closed vocabularies. Held here so the fake refuses exactly

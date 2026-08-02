@@ -194,6 +194,136 @@ class Workflow {
 }
 
 // ---------------------------------------------------------------------------
+// Notebook cells — the board DOCUMENT the Workflow face authors into
+// ---------------------------------------------------------------------------
+
+/// A cell kind as the engine spells it (`cell_type` on
+/// `cyan_load_notebook_cells`). Swift: `NotebookCellType`, plus the `step`
+/// kind the Workflow face files — the two share one ledger, which is why a
+/// board's document is read through a single verb.
+///
+/// A kind this build has never heard of reads back as [unknown] rather than
+/// being dropped: the cell EXISTS, and a document that silently loses rows is
+/// worse than one that says it cannot render them.
+enum NotebookCellKind { step, markdown, code, image, mermaid, canvas, model, unknown }
+
+/// How the engine spells each kind, and how the document labels it.
+extension NotebookCellKindX on NotebookCellKind {
+  /// The wire spelling (`cell_type`).
+  String get rawValue => switch (this) {
+        NotebookCellKind.step => 'step',
+        NotebookCellKind.markdown => 'markdown',
+        NotebookCellKind.code => 'code',
+        NotebookCellKind.image => 'image',
+        NotebookCellKind.mermaid => 'mermaid',
+        NotebookCellKind.canvas => 'canvas',
+        NotebookCellKind.model => 'model',
+        NotebookCellKind.unknown => 'unknown',
+      };
+
+  /// Swift `NotebookCellType.displayName` — the cell header's label.
+  String get label => switch (this) {
+        NotebookCellKind.step => 'Step',
+        NotebookCellKind.markdown => 'Markdown',
+        NotebookCellKind.code => 'Code',
+        NotebookCellKind.image => 'Image',
+        NotebookCellKind.mermaid => 'Mermaid',
+        NotebookCellKind.canvas => 'Canvas',
+        NotebookCellKind.model => 'Model',
+        NotebookCellKind.unknown => 'Cell',
+      };
+}
+
+/// Read a `cell_type` off the wire. Unknown spellings are [NotebookCellKind
+/// .unknown] — never silently coerced onto a kind the renderer would then draw
+/// wrongly.
+NotebookCellKind notebookCellKindFrom(String? raw) =>
+    switch (raw?.trim().toLowerCase()) {
+      'step' => NotebookCellKind.step,
+      'markdown' || 'md' => NotebookCellKind.markdown,
+      'code' => NotebookCellKind.code,
+      'image' => NotebookCellKind.image,
+      'mermaid' => NotebookCellKind.mermaid,
+      'canvas' => NotebookCellKind.canvas,
+      'model' => NotebookCellKind.model,
+      _ => NotebookCellKind.unknown,
+    };
+
+/// One cell of a board's notebook document, in `cell_order`.
+///
+/// [content] is the cell BODY exactly as the engine stores it — authored
+/// English for a step, markdown source, code source, mermaid source, or an
+/// image reference. Rendering it is the document's job, not the seam's; the
+/// only decoding here is [inlineImageBytes], because "is this content bytes or
+/// a path" is a fact about the string rather than a rendering choice.
+@immutable
+class NotebookCell {
+  final String id;
+  final String boardId;
+  final NotebookCellKind kind;
+
+  /// Position in the document (`cell_order`), oldest-first.
+  final int order;
+  final String content;
+
+  /// What the last execution of a code cell printed. Null when it never ran —
+  /// distinct from an empty output, which is a run that printed nothing.
+  final String? output;
+
+  /// A code cell's language, when the cell declares one.
+  final String? language;
+
+  /// A STEP cell's bound tool — what the compile resolved this step to
+  /// (metadata `mcp_tool`). Null on a step nothing has compiled yet, and the
+  /// document says so rather than inventing one.
+  final String? tool;
+
+  /// The cell this one was GENERATED from (metadata `generated_from`) — how an
+  /// auto-drawn diagram says it is output, not something a person authored.
+  final String? generatedFrom;
+
+  /// An image cell's caption / alt text (metadata `caption`).
+  final String? caption;
+
+  final bool collapsed;
+
+  const NotebookCell({
+    required this.id,
+    required this.boardId,
+    required this.kind,
+    required this.order,
+    this.content = '',
+    this.output,
+    this.language,
+    this.tool,
+    this.generatedFrom,
+    this.caption,
+    this.collapsed = false,
+  });
+
+  /// The bytes of an image cell whose content is an inline `data:` URI, or
+  /// null when the content is not one. Malformed base64 is null too — a cell
+  /// that cannot be decoded falls back to the reference treatment rather than
+  /// throwing inside a build.
+  Uint8List? get inlineImageBytes {
+    final marker = content.indexOf(';base64,');
+    if (!content.startsWith('data:') || marker < 0) return null;
+    try {
+      return base64Decode(content.substring(marker + ';base64,'.length).trim());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Where an image cell's bytes live when they are NOT inline: a path or a
+  /// file handle the document shows by name. Null for an inline image.
+  String? get imageReference =>
+      kind == NotebookCellKind.image && inlineImageBytes == null
+          ? (content.trim().isEmpty ? null : content.trim())
+          : null;
+}
+
+// ---------------------------------------------------------------------------
 // Notes face — SwiftUI NotesEditorView parity
 // ---------------------------------------------------------------------------
 
@@ -249,6 +379,11 @@ class OpsRun {
   final String runId;
   final String asset; // asset filename / run label
   final String workflow; // owning workflow/board name
+  /// The board this run belongs to. The lens keys its run feed by board id, and
+  /// the workspace surface buckets ONE tenant-wide feed by it to seed every
+  /// card's run state. Empty when the feed predates the field — callers fall
+  /// back to matching [workflow] against the board name.
+  final String boardId;
   final RunStatus status;
   final int currentStep;
   final int stepCount;
@@ -263,6 +398,7 @@ class OpsRun {
     required this.runId,
     required this.asset,
     required this.workflow,
+    this.boardId = '',
     required this.status,
     this.currentStep = 0,
     this.stepCount = 0,
@@ -1235,6 +1371,11 @@ enum PipelineStepState {
   /// A human cleared the gate — the step is settled.
   humanApproved,
 
+  /// PARKED on the model: the step routes to the lens and no model is bound to
+  /// run it. Amber and resumable, never a red failure — the engine steps OVER a
+  /// park rather than wedging the chain behind it, and a human can override it.
+  needsLens,
+
   /// The step errored.
   failed,
 }
@@ -1245,16 +1386,21 @@ extension PipelineStepStateX on PipelineStepState {
         PipelineStepState.running => 'Running',
         PipelineStepState.aiComplete => 'Awaiting approval',
         PipelineStepState.humanApproved => 'Approved',
+        PipelineStepState.needsLens => 'Needs Lens',
         PipelineStepState.failed => 'Failed',
       };
 
-  /// A human must act before this step can move.
-  bool get needsApproval => this == PipelineStepState.aiComplete;
+  /// A human must act before this step can move. A lens park qualifies: the
+  /// override IS the human action that settles it.
+  bool get needsApproval =>
+      this == PipelineStepState.aiComplete ||
+      this == PipelineStepState.needsLens;
 
   static PipelineStepState fromWire(String? s) => switch (s) {
         'ai_complete' => PipelineStepState.aiComplete,
         'human_approved' => PipelineStepState.humanApproved,
         'running' || 'scheduled' => PipelineStepState.running,
+        'needs_lens' => PipelineStepState.needsLens,
         'failed' => PipelineStepState.failed,
         _ => PipelineStepState.pending,
       };
@@ -3663,6 +3809,84 @@ class CyanFile {
         'local_path': localPath,
         'created_at':
             createdAt == null ? null : createdAt!.millisecondsSinceEpoch ~/ 1000,
+      };
+}
+
+/// Where a file's BYTES are, as distinct from the row describing them
+/// (`cyan_get_file_status` → Swift `FileStatusKind`).
+enum FileTransferState {
+  /// The bytes are on this device.
+  local,
+
+  /// The row has synced; the bytes have not. Downloadable.
+  remote,
+
+  /// A transfer is in flight — [FileTransfer.progress] is meaningful.
+  downloading,
+
+  /// The transfer stopped short. Retryable: the row is still remote.
+  failed,
+
+  /// The engine knows the id but will not say — treated as remote by callers
+  /// rather than as an error, because the file is still there to ask for.
+  unknown,
+}
+
+/// The transfer state of ONE file — the engine's `FileStatus`.
+///
+/// [progress] is only meaningful while [state] is [FileTransferState.downloading];
+/// the engine reports 0 for a file it has not started and 1 for one it holds,
+/// so callers read the STATE first and the fraction second.
+@immutable
+class FileTransfer {
+  final FileTransferState state;
+
+  /// 0.0–1.0. Clamped on decode: the engine has reported >1 on a resumed
+  /// transfer, and a progress bar must not overshoot because of it.
+  final double progress;
+
+  /// Where the bytes landed. Empty until the transfer completes.
+  final String localPath;
+
+  const FileTransfer({
+    this.state = FileTransferState.unknown,
+    this.progress = 0,
+    this.localPath = '',
+  });
+
+  /// The transfer as a whole percent — what a row renders while it climbs.
+  int get percent => (progress * 100).round();
+
+  /// True while bytes are moving, which is the only time [progress] animates.
+  bool get isInFlight => state == FileTransferState.downloading;
+
+  /// True when the bytes are here. [FileTransferState.local] is the engine's
+  /// word for it; a completed transfer that has not been re-read yet reads the
+  /// same way through [localPath].
+  bool get isLocal =>
+      state == FileTransferState.local || localPath.isNotEmpty;
+
+  factory FileTransfer.fromJson(Map<String, dynamic> j) {
+    final raw = (j['status'] as String? ?? '').toLowerCase();
+    final state = switch (raw) {
+      'local' => FileTransferState.local,
+      'remote' => FileTransferState.remote,
+      'downloading' => FileTransferState.downloading,
+      'failed' => FileTransferState.failed,
+      _ => FileTransferState.unknown,
+    };
+    final p = (j['progress'] as num?)?.toDouble() ?? 0;
+    return FileTransfer(
+      state: state,
+      progress: p.isFinite ? p.clamp(0.0, 1.0) : 0.0,
+      localPath: j['local_path'] as String? ?? '',
+    );
+  }
+
+  Map<String, dynamic> toJson() => {
+        'status': state.name,
+        'progress': progress,
+        'local_path': localPath,
       };
 }
 

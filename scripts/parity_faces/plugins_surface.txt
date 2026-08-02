@@ -1,0 +1,4 @@
+the Plugins workspace lists installed plugin bundles for a group
+opening a plugin shows its configuration fields
+saving plugin configuration persists it and survives reload
+a credential field is never rendered in plain text

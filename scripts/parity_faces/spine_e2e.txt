@@ -1,0 +1,9 @@
+a board clones the multicut review spine template and lands its steps
+the spine compiles into a runnable DAG
+running the spine reaches the producer review gate and parks
+releasing the review gate with notes transpiles them into proposed ops
+releasing the review gate without notes continues the run untouched
+a proposed mechanical op can be approved and a creative note stays a note
+picture lock releases the sound lane
+conform and grade steps report their state on the dashboard
+the run finishes and reports a delivered master

@@ -76,6 +76,30 @@ final efficiencyProvider = FutureProvider<EfficiencyReport>((ref) async {
   return backend.loadEfficiency();
 });
 
+/// Ops console — the per-step audit for ONE run (metering face). Null when the
+/// run is unknown or the lens has not traced it.
+final runTraceProvider =
+    FutureProvider.family<RunTrace?, String>((ref, runId) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.loadRunTrace(runId);
+});
+
+/// The cached signed entitlement behind the trial banner + the paid-surface
+/// locks (metering face). OFFLINE-SAFE: an uncached device falls back to the
+/// offline trial default rather than hard-locking itself.
+final entitlementProvider = FutureProvider<Entitlement>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  final json = await backend.cachedEntitlementJson();
+  if (json != null) {
+    final decoded = Entitlement.decode(json);
+    if (decoded != null) return decoded;
+  }
+  return Entitlement.offlineDefault(
+      'local', DateTime.now().millisecondsSinceEpoch ~/ 1000);
+});
+
 /// Marketplace plugin cards (row 9).
 final marketplaceProvider = FutureProvider<List<PluginCard>>((ref) async {
   final backend = ref.watch(cyanBackendProvider);
@@ -97,4 +121,25 @@ final boardChatProvider =
   final backend = ref.watch(cyanBackendProvider);
   await backend.initialize();
   return backend.loadChat(boardId);
+});
+
+/// The plugin bundles installed on this device (Plugins workspace).
+final pluginCatalogProvider = FutureProvider<List<InstalledPlugin>>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.pluginCatalog();
+});
+
+/// The non-secret config rows the engine holds for one group + plugin.
+///
+/// The engine is the single source of truth: the config sheet WRITES through
+/// `pluginConfigSet` and then INVALIDATES this provider, so what lands on
+/// screen is what the engine actually stored — never a shadow copy in widget
+/// state that could disagree with a refused write.
+final pluginConfigProvider =
+    FutureProvider.family<PluginConfig, ({String groupId, String pluginId})>(
+        (ref, key) async {
+  final backend = ref.watch(cyanBackendProvider);
+  await backend.initialize();
+  return backend.pluginConfigGet(key.groupId, key.pluginId);
 });

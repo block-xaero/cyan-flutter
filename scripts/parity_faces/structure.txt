@@ -1,0 +1,5 @@
+creating a group auto seeds a General workspace and lands there
+the tree renders group then workspace then board hierarchy
+creating a board inside the selected workspace files it there not elsewhere
+collapsing a group hides its workspaces
+search filters to matching boards and their ancestors

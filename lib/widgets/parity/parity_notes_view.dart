@@ -2,8 +2,10 @@
 //
 // PARITY port of the SwiftUI `NotesEditorView` — the Board "Notes" face
 // (PARITY_TRACKER row 5): a VSCode-style editor with a toolbar (file type +
-// save state), a line-number gutter, a monospaced editor body, and a status
-// bar (Ln/Col · lines · words · UTF-8). Monokai-styled.
+// save state), a line-number gutter, a monospaced editor body, the board
+// LEDGER as its right column (`ParityNotesLedger` — Swift mounts
+// `BoardNotesLedgerView` in exactly that HStack), and a status bar
+// (Ln/Col · lines · words · UTF-8). Monokai-styled.
 //
 // Driven ENTIRELY through the `CyanBackend` seam (via `boardNotesProvider`).
 // This widget never touches `CyanFFI` directly — that is the parity rule.
@@ -16,6 +18,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../ffi/parity_models.dart';
 import '../../providers/cyan_backend_provider.dart';
 import '../../theme/monokai_theme.dart';
+import 'parity_notes_ledger.dart';
+
+/// The ledger column's width — Swift pins its panel to a fixed 260pt beside the
+/// editor; the extra room here carries the byline + edit-time row without
+/// truncating it.
+const double _ledgerWidth = 300;
 
 class ParityNotesView extends ConsumerWidget {
   final String boardId;
@@ -37,7 +45,7 @@ class ParityNotesView extends ConsumerWidget {
               style:
                   MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
         ),
-        data: (notes) => _Editor(notes: notes),
+        data: (notes) => _Editor(notes: notes, boardId: boardId),
       ),
     );
   }
@@ -45,7 +53,8 @@ class ParityNotesView extends ConsumerWidget {
 
 class _Editor extends StatelessWidget {
   final BoardNotes notes;
-  const _Editor({required this.notes});
+  final String boardId;
+  const _Editor({required this.notes, required this.boardId});
 
   @override
   Widget build(BuildContext context) {
@@ -70,6 +79,14 @@ class _Editor extends StatelessWidget {
               _Gutter(lineCount: lineCount),
               const VerticalDivider(width: 1, color: MonokaiTheme.divider),
               Expanded(child: _Body(lines: lines)),
+              // The board ledger, as a clearly-labeled right column so the
+              // editor keeps its full height — Swift's
+              // `HStack { editorContent; BoardNotesLedgerView(...) }`.
+              const VerticalDivider(width: 1, color: MonokaiTheme.divider),
+              SizedBox(
+                width: _ledgerWidth,
+                child: ParityNotesLedger(boardId: boardId),
+              ),
             ],
           ),
         ),

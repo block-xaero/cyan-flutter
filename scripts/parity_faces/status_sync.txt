@@ -1,0 +1,4 @@
+the status bar reports peer count and mesh reachability
+a sync in progress is visible and resolves to a settled state
+losing connectivity shows a degraded indicator not a blank bar
+reconnecting refetches authoritative state rather than staying stale

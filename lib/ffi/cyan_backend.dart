@@ -46,11 +46,26 @@ abstract class CyanBackend {
 
   // ---- tree mutation (Explorer) --------------------------------------------
   //
-  // The three commands `FileTreeViewModel` sends to its component actor when
-  // the operator creates / renames / deletes from the Explorer
-  // (`.createBoard` / `.renameBoard` / `.deleteBoard`). Fire-and-forget on the
-  // Swift side too: the engine answers with a tree event, so callers re-read
-  // [loadGroups] rather than trusting a return value.
+  // The commands `FileTreeViewModel` sends to its component actor when the
+  // operator creates / renames / deletes from the Explorer (`.createGroup` /
+  // `.createWorkspace` / `.createBoard` / `.renameBoard` / `.deleteBoard`).
+  // Fire-and-forget on the Swift side too: the engine answers with a tree
+  // event, so callers re-read [loadGroups] rather than trusting a return value.
+
+  /// Create a group named [name].
+  ///
+  /// The ENGINE seeds the new group's `General` and `Plugins` workspaces
+  /// itself — Swift sees them arrive as two `WorkspaceCreated` events right
+  /// behind `GroupCreated`, which is why `FileTreeViewModel` never creates
+  /// them by hand. A caller here re-reads [loadGroups] and takes the group
+  /// that appeared; there is no id to return, exactly as on the Swift seam.
+  ///
+  /// Icon and colour are not parameters for the same reason they aren't on the
+  /// Swift side: `commitRename` always sends `folder.fill` / `#00AEEF`.
+  Future<void> createGroup(String name);
+
+  /// Create a workspace named [name] inside [groupId].
+  Future<void> createWorkspace(String groupId, String name);
 
   /// Create a board named [name] inside [workspaceId].
   Future<void> createBoard(String workspaceId, String name);
@@ -87,8 +102,49 @@ abstract class CyanBackend {
   /// Workflow face.
   Future<Workflow> loadWorkflow(String boardId);
 
+  /// Append one plain-English step to [boardId]'s workflow. It is filed as a
+  /// `step` cell — the SAME cell [pipelineCompile] later stamps its plan onto,
+  /// which is why an authored step carries no inference chips until a compile
+  /// has run over it.
+  ///
+  /// Returns the step as it was filed, carrying the id the write minted, or
+  /// null when nothing was filed: whitespace-only text is refused here rather
+  /// than persisted as a blank step, and a refused write answers null too.
+  Future<WorkflowStep?> addWorkflowStep(String boardId, String text);
+
+  /// Rewrite an authored step's English in place, keeping its id and its
+  /// position in the board. The step's compile verdict is re-derived from the
+  /// new text — binding a plugin with an `@mention` is how an ambiguous step
+  /// stops being ambiguous. False when the write was refused.
+  Future<bool> updateWorkflowStep(String boardId, String stepId, String text);
+
+  /// Every cell of the board's notebook DOCUMENT, oldest-first by `cell_order`
+  /// (`cyan_load_notebook_cells` — the same ledger [loadWorkflow] reads its
+  /// steps out of, unfiltered).
+  ///
+  /// [loadWorkflow] answers "what does this board RUN"; this answers "what does
+  /// this board SAY" — the step cells plus the markdown, code, image and
+  /// diagram cells around them. A cell whose kind this build does not know is
+  /// still returned, marked [NotebookCellKind.unknown]: a document that drops
+  /// rows it cannot draw silently loses the operator's work.
+  Future<List<NotebookCell>> notebookCells(String boardId);
+
   /// The notes document for a board's Notes face.
   Future<BoardNotes> loadNotes(String boardId);
+
+  /// The board's SAVED face, spelled as the engine stores it
+  /// (`cyan_get_board_mode` — Swift `BoardFaceBridge.getActiveFace`). Null when
+  /// nothing was ever saved for this board, or when nobody answered: the
+  /// container then opens its default face rather than inventing one. Faces the
+  /// app no longer has (`canvas`) come back verbatim — migrating them is the
+  /// reader's job, not the seam's.
+  Future<String?> boardActiveFace(String boardId);
+
+  /// Persist the board's face (`cyan_set_board_mode` — Swift
+  /// `BoardFaceBridge.setActiveFace`). False when the engine refused the write;
+  /// the container then does NOT move, exactly as `switchToFace` publishes the
+  /// new face only after the engine accepts it.
+  Future<bool> setBoardActiveFace(String boardId, String face);
 
   // ---- operations console --------------------------------------------------
 
@@ -177,6 +233,25 @@ abstract class CyanBackend {
   /// transcript here; [loadChat] is the snapshot read.
   Future<void> loadChatHistory(String boardId);
 
+  /// Send [message] to the board [boardId]'s chat. [parentId] threads it under
+  /// an existing message; null is the board's general slot.
+  ///
+  /// Chat is BOARD-SCOPED on the wire — there is no group or workspace chat —
+  /// so the board id is the whole address and a caller without one has nothing
+  /// to send to.
+  ///
+  /// Returns the message as it was filed, carrying the id the write minted, or
+  /// null when nothing was sent: whitespace-only text is refused HERE rather
+  /// than reaching the mesh, exactly as the macOS composer refuses it.
+  Future<ChatMessage?> sendChat(String boardId, String message,
+      {String? parentId});
+
+  /// Delete a chat message by id. Soft-delete + tombstone gossiped to peers,
+  /// like every other delete in the engine — the message converges to deleted
+  /// everywhere rather than only vanishing here. Fire-and-forget: callers
+  /// re-read the transcript rather than wait for a receipt.
+  Future<void> deleteChat(String messageId);
+
   // ---- unread --------------------------------------------------------------
   //
   // BOARD-level only. One message counts once, on its board — there is no
@@ -194,6 +269,24 @@ abstract class CyanBackend {
   Future<void> markRead(String scopeId);
 
   // ---- files ---------------------------------------------------------------
+
+  /// The ACTIVE files attached to one board, in the order the engine lists
+  /// them (`cyan_get_files` under a board scope). Tombstoned files are absent,
+  /// never present-and-flagged.
+  ///
+  /// A file here may be METADATA ONLY — the row has synced but the bytes have
+  /// not. [CyanFile.isDownloaded] is what separates the two, and it is why the
+  /// files face has a download affordance at all.
+  Future<List<CyanFile>> filesForBoard(String boardId);
+
+  /// Ask the mesh for a remote file's bytes. Returns whether the engine
+  /// ACCEPTED the request, not whether the file arrived — the transfer runs
+  /// after this answers, and [fileStatus] is how its progress is read.
+  Future<bool> requestFileDownload(String fileId);
+
+  /// Where one file's bytes are, and how far along a transfer in flight is.
+  /// Null when the engine does not know the id at all.
+  Future<FileTransfer?> fileStatus(String fileId);
 
   /// Delete a file. Soft-delete + tombstone gossiped to peers — the engine
   /// never hard-deletes — so the row converges to deleted everywhere rather

@@ -1,0 +1,4 @@
+a note records its author and timestamp
+editing a note is last write wins
+notes survive a backend reload
+deleting a note removes it from the ledger

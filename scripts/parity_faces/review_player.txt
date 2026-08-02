@@ -1,0 +1,12 @@
+the review player renders a bound video asset and reports playback state
+a right drag on the frame draws a region and the region persists
+typing an ask against a drawn region proposes a region scoped op
+a mechanical note surfaces approve edit and reject actions
+approving a proposed op records it on the changelist
+a creative note stays a note and is never promoted to an op
+flipping between versions checks out playable media for each
+produce master is offered once a run has a delivered asset
+the composer asks the agent on every entry not only on colour
+the version selector plays a preview when the master is undecodable
+the version head can be undone and redone
+a fast first click loads the ledger then steps rather than no opping

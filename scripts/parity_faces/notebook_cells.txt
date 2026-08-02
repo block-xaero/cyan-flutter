@@ -1,0 +1,4 @@
+a step cell renders its authored text and its bound tool
+the mention picker offers plugins on at and artifacts on hash
+a compiled DAG renders as a diagram
+a code or image cell renders its content

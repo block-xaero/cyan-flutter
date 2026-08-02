@@ -106,3 +106,30 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+
+# === Cyan engine ============================================================
+# The engine is the `cyan-backend` Rust crate built as a cdylib; MSVC names the
+# result after the crate target, so on Windows it is cyan_backend.dll. It is
+# NOT linked against the runner — lib/ffi/cyan_bindings.dart opens it at
+# runtime through dart:ffi — so the only thing the build has to do is put the
+# DLL next to the executable, where CyanEngineLibrary.resolve('windows') looks
+# for it. This name and the one in lib/ffi/cyan_engine_library.dart must stay
+# identical; windows_target_test.dart fails the build if they drift.
+set(CYAN_ENGINE_LIBRARY_NAME "cyan_backend.dll")
+set(CYAN_ENGINE_LIBRARY_DIR "${CMAKE_CURRENT_SOURCE_DIR}/Libraries")
+set(CYAN_ENGINE_LIBRARY "${CYAN_ENGINE_LIBRARY_DIR}/${CYAN_ENGINE_LIBRARY_NAME}")
+
+if(EXISTS "${CYAN_ENGINE_LIBRARY}")
+  install(FILES "${CYAN_ENGINE_LIBRARY}"
+    DESTINATION "${INSTALL_BUNDLE_LIB_DIR}"
+    COMPONENT Runtime)
+else()
+  # Not fatal: the bindings fall back to no-ops and the app runs local-only,
+  # exactly as it does on a Mac with no dylib staged.
+  message(WARNING
+    "Cyan engine not found at ${CYAN_ENGINE_LIBRARY} — the app will run with "
+    "local-only fallbacks. Build it from the cyan-backend crate with "
+    "`cargo build --release --target x86_64-pc-windows-msvc` and copy "
+    "target/x86_64-pc-windows-msvc/release/${CYAN_ENGINE_LIBRARY_NAME} into "
+    "${CYAN_ENGINE_LIBRARY_DIR}.")
+endif()

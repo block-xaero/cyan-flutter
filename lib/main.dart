@@ -9,25 +9,41 @@ import 'screens/login_screen.dart';
 import 'screens/workspace_screen.dart';
 import 'screens/profile_screen.dart';
 import 'providers/auth_provider.dart';
+import 'providers/cyan_backend_provider.dart';
+import 'ffi/cyan_backend.dart';
+import 'ffi/cyan_backend_ffi.dart';
 import 'ffi/ffi_helpers.dart';
 import 'services/python_executor.dart';
 import 'services/model_registry.dart';
 
+/// The backend the app runs against.
+///
+/// Every target — macOS, Windows, Linux — gets the same FFI adapter. Which
+/// engine binary that adapter opens is decided by `CyanEngineLibrary`, keyed on
+/// the running OS, and a target with no binary degrades to the bindings'
+/// local-only fallbacks. So there is deliberately no `Platform.isMacOS` gate
+/// and no assertion here: adding one would make the Windows runner abort at
+/// startup instead of launching against whatever engine it can find.
+CyanBackend selectCyanBackend() => CyanBackendFFI();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // Initialize notebook cache for persistence
   await CyanFFI.initializeCache();
-  
+
   // Initialize Python environment detection (async, non-blocking)
   PythonEnvironment.instance.initialize();
-  
+
   // Initialize model registry
   ModelRegistry.instance.initialize();
-  
+
   runApp(
-    const ProviderScope(
-      child: CyanApp(),
+    ProviderScope(
+      overrides: [
+        cyanBackendProvider.overrideWithValue(selectCyanBackend()),
+      ],
+      child: const CyanApp(),
     ),
   );
 }

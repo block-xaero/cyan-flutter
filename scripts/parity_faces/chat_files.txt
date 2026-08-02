@@ -1,0 +1,4 @@
+chat is board scoped and sends a message
+a sent message appears in the lane
+deleting a message removes it
+board files list renders and reports download progress

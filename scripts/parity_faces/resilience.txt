@@ -1,0 +1,4 @@
+a null return from the backend does not crash the surface
+an unknown event variant is ignored and never fatal
+a lagged event pump refetches authoritative state
+losing the backend surfaces a degraded state not a blank screen

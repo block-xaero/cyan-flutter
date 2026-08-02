@@ -1,0 +1,4 @@
+the operations console lists runs with their terminal state
+a run audit view shows per step provenance
+the usage and cost panel reports tokens and spend for a run
+a trial banner reports remaining days and an expired state locks paid surfaces

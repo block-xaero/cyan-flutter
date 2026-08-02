@@ -57,10 +57,17 @@ Future<void> pumpMarketplace(
   PluginBundleFetcher? fetcher,
   String? groupId = kGroup,
   void Function(PluginCard)? onUse,
+  String? sessionRole,
+  VoidCallback? onBuildCustomTool,
 }) async {
   await pumpParity(
     tester,
-    ParityMarketplace(groupId: groupId, onUse: onUse),
+    ParityMarketplace(
+      groupId: groupId,
+      onUse: onUse,
+      sessionRole: sessionRole,
+      onBuildCustomTool: onBuildCustomTool,
+    ),
     size: const Size(900, 800),
     overrides: [
       if (fetcher != null)
@@ -68,6 +75,9 @@ Future<void> pumpMarketplace(
     ],
   );
 }
+
+/// The forge entry, wherever the storefront is in its lifecycle.
+final Finder forgeEntry = find.byKey(const ValueKey('marketplace.buildCustomTool'));
 
 /// Open a listing's Get page by tapping its tile.
 Future<void> openDetail(WidgetTester tester, String cardId) async {
@@ -404,6 +414,72 @@ void main() {
     await tester.pump();
 
     expect(used, isNotNull);
+  });
+
+  testWidgets(
+      'the build a custom tool entry is always present and locked rather than hidden',
+      (tester) async {
+    // ADMIN — the entry is live: chevron, no lock, and the tap opens the forge.
+    var opened = 0;
+    await pumpMarketplace(tester,
+        sessionRole: 'admin', onBuildCustomTool: () => opened++);
+
+    expect(forgeEntry, findsOneWidget);
+    expect(find.text('Build a custom tool'), findsOneWidget);
+    expect(find.descendant(of: forgeEntry, matching: find.byIcon(Icons.lock)),
+        findsNothing);
+    expect(
+        find.descendant(
+            of: forgeEntry, matching: find.byIcon(Icons.chevron_right)),
+        findsOneWidget);
+    await tester.tap(forgeEntry);
+    await tester.pump();
+    expect(opened, 1);
+
+    // MEMBER — still there, now locked: the lock glyph, the reason in plain
+    // language, and a tap that opens nothing.
+    opened = 0;
+    await pumpMarketplace(tester,
+        sessionRole: 'member', onBuildCustomTool: () => opened++);
+
+    expect(forgeEntry, findsOneWidget);
+    expect(find.text('Build a custom tool'), findsOneWidget);
+    expect(find.descendant(of: forgeEntry, matching: find.byIcon(Icons.lock)),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: forgeEntry, matching: find.byIcon(Icons.chevron_right)),
+        findsNothing);
+    expect(find.textContaining('Only an admin can build a custom tool'),
+        findsOneWidget);
+    await tester.tap(forgeEntry);
+    await tester.pump();
+    expect(opened, 0, reason: 'a locked entry must open nothing');
+
+    // NO SESSION — the deny-by-default case. Present and locked, never absent.
+    await pumpMarketplace(tester, sessionRole: null);
+    expect(forgeEntry, findsOneWidget);
+    expect(find.descendant(of: forgeEntry, matching: find.byIcon(Icons.lock)),
+        findsOneWidget);
+
+    // …and a role the engine's vocabulary does not admit denies rather than
+    // being read as "not a member, so probably fine".
+    await pumpMarketplace(tester, sessionRole: 'superuser');
+    expect(forgeEntry, findsOneWidget);
+    expect(find.descendant(of: forgeEntry, matching: find.byIcon(Icons.lock)),
+        findsOneWidget);
+
+    // ALWAYS PRESENT means through the states that replace the shelves too: a
+    // search that matches nothing wipes the rails but not the entry.
+    await pumpMarketplace(tester, sessionRole: 'owner');
+    expect(forgeEntry, findsOneWidget);
+    await tester.enterText(
+        find.byKey(const ValueKey('marketplace.search')), 'zzzz');
+    await tester.pumpAndSettle();
+    expect(find.textContaining('No plugins match'), findsOneWidget);
+    expect(find.text('FFmpeg Transcode'), findsNothing);
+    expect(forgeEntry, findsOneWidget,
+        reason: 'the entry outlives the shelves it leads');
   });
 
   testWidgets('golden: marketplace', (tester) async {

@@ -1,0 +1,1 @@
+the app compiles as a real application not only as a test binary

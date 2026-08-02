@@ -1,0 +1,4 @@
+icon rail shows Explorer Boards Chat Lens and Market doors
+selecting a rail door swaps the home surface
+status bar reports peer count and mesh reachability
+status bar shows the signed-in identity

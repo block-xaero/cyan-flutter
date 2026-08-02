@@ -1,0 +1,6 @@
+the storefront renders featured plugins and stage aisles
+searching filters the catalogue
+opening a plugin shows its detail with tools and side effects
+installing a plugin reports progress and a terminal result
+an already installed plugin is shown as installed not installable
+the build a custom tool entry is always present and locked rather than hidden

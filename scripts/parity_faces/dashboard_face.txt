@@ -1,0 +1,10 @@
+the compiled DAG preview renders before a run starts
+a running workflow shows per step state
+an approval gate surfaces approve and reject actions
+approving a gate advances the run
+a finished run reports its terminal state
+run stats update from WorkflowStatsUpdated events
+a step offers run this step now out of order
+a needs lens park joins the approval list
+a needs lens card offers a complete affordance as a human override
+a parked step passes its dependencies through rather than blocking them

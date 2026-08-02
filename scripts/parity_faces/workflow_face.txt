@@ -1,0 +1,5 @@
+add step appends an authored step to the board
+typing at mentions a plugin and offers its tools
+typing hash mentions an artifact
+compile turns authored steps into a preview DAG
+an ambiguous step prompts rather than guessing a tool

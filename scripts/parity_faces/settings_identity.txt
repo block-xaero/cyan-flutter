@@ -1,0 +1,4 @@
+settings renders and persists user preferences
+the roster panel lists group members and their roles
+the constitution editor loads and saves house rules
+a group invite can be issued and scanned

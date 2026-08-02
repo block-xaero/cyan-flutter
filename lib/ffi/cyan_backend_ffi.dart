@@ -47,9 +47,20 @@ class CyanBackendFFI implements CyanBackend {
 
   // ---- tree mutation --------------------------------------------------------
   //
-  // `cyan_create_board` / `cyan_rename_board` / `cyan_delete_board` are already
-  // bound (cyan_bindings.dart); these are the seam-side names for them. Void on
-  // the wire, exactly like the Swift actor sends.
+  // `cyan_create_group` / `cyan_create_workspace` / `cyan_create_board` /
+  // `cyan_rename_board` / `cyan_delete_board` are already bound
+  // (cyan_bindings.dart); these are the seam-side names for them. Void on the
+  // wire, exactly like the Swift actor sends.
+
+  @override
+  // `CyanFFI.createGroup` already defaults to the `folder.fill` / `#00AEEF`
+  // pair `commitRename` hardcodes on the Swift side. The engine seeds General +
+  // Plugins behind this call and reports them as WorkspaceCreated events.
+  Future<void> createGroup(String name) async => CyanFFI.createGroup(name);
+
+  @override
+  Future<void> createWorkspace(String groupId, String name) async =>
+      CyanFFI.createWorkspace(groupId, name);
 
   @override
   Future<void> createBoard(String workspaceId, String name) async =>
@@ -144,13 +155,242 @@ class CyanBackendFFI implements CyanBackend {
   // than fabricate data — a screen that loads nothing is correct for "not wired
   // yet", and the parity look is already proven by the Tier-1 goldens.
 
+  // The Workflow face IS wired: the authored steps are the board's `step`
+  // cells, and the compile stamps its plan into each cell's `metadata_json`.
+  // Same reading as Swift's `WorkflowViewModel.parseSteps`.
+
   @override
-  Future<Workflow> loadWorkflow(String boardId) async =>
-      Workflow(boardId: boardId);
+  Future<Workflow> loadWorkflow(String boardId) async {
+    final steps = _workflowSteps(boardId);
+    // Deploy/lock is its own engine row, not something the cells carry.
+    final state = await boardWorkflowState(boardId);
+    return Workflow(
+      boardId: boardId,
+      steps: steps,
+      isDeployed: state.error == null && state.isDeployed,
+      // "Compiled" is not a flag the engine keeps — it is visible in the cells:
+      // a compile is what puts a `pipeline` object into a step's metadata.
+      isCompiled: steps.isNotEmpty && steps.every(_isCompiled),
+    );
+  }
+
+  static bool _isCompiled(WorkflowStep s) =>
+      s.tool != null || s.destination != null || s.gate != null;
+
+  /// The board's authored steps, oldest-first by `cell_order`.
+  List<WorkflowStep> _workflowSteps(String boardId) {
+    final raw = CyanFFI.loadNotebookCells(boardId);
+    if (raw == null || raw.isEmpty) return const [];
+    final List<dynamic> cells;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      cells = decoded;
+    } catch (_) {
+      return const [];
+    }
+
+    final out = <({int order, WorkflowStep step})>[];
+    for (final cell in cells) {
+      if (cell is! Map<String, dynamic>) continue;
+      final kind = cell['cell_type'] as String?;
+      // `timecode_note` cells are run RESULTS the executor persisted — their
+      // metadata carries a `pipeline_step_id`, never an authored step.
+      if (kind == 'timecode_note') continue;
+      final id = cell['id'] as String?;
+      if (id == null) continue;
+      final text = cell['content'] as String? ?? '';
+      // Authored English can never parse as a JSON container, so a cell whose
+      // BODY is one is a run result an older build wrote into the ledger —
+      // whatever kind or metadata it carries.
+      if (_isJsonBody(text)) continue;
+      final meta = _decode(cell['metadata_json'] as String?);
+      final plan = meta?['pipeline'];
+      if (kind != 'step' && plan is! Map<String, dynamic>) continue;
+      out.add((
+        order: _int(cell['cell_order']),
+        step: _workflowStep(id, text, meta),
+      ));
+    }
+    out.sort((a, b) => a.order.compareTo(b.order));
+    return [for (final e in out) e.step];
+  }
+
+  static bool _isJsonBody(String text) {
+    final trimmed = text.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return false;
+    try {
+      final parsed = jsonDecode(trimmed);
+      return parsed is Map || parsed is List;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// One step's compile verdict, read from the cell metadata the compile wrote.
+  /// The bind is ENGINE truth (`mcp_tool` / `mcp_tool_miss`) — never guessed
+  /// from the pipeline config's model placeholder, which would show every step
+  /// as routed to the lens.
+  WorkflowStep _workflowStep(
+      String id, String text, Map<String, dynamic>? meta) {
+    final plan = meta?['pipeline'];
+    if (plan is! Map<String, dynamic>) {
+      // Authored but not yet compiled: no chips, and no ambiguity verdict
+      // either — nothing has tried to resolve it yet.
+      return WorkflowStep(id: id, text: text);
+    }
+    var tool = _boundToolName(meta);
+    if (tool == null) {
+      final model = plan['model'] as String?;
+      // `cyan-lens` is the MODEL placeholder, not a tool — rendering it as one
+      // reads as "routes to cyan-lens" on every step.
+      if (model != null && model.isNotEmpty && model != 'cyan-lens') {
+        tool = model;
+      }
+    }
+    final missed = meta?['mcp_tool_miss'] is Map<String, dynamic>;
+    return WorkflowStep(
+      id: id,
+      text: text,
+      tool: tool,
+      destination: _executorLabel(plan['executor'] as String?),
+      boundInputs: (plan['depends_on'] as List<dynamic>?)?.cast<String>() ??
+          const <String>[],
+      gate: plan['auto_advance'] == true
+          ? StepGate.noApproval
+          : StepGate.needsApproval,
+      // The compile ran and resolved nothing: the face asks rather than
+      // inventing a tool for it.
+      isAmbiguous: tool == null || missed,
+    );
+  }
+
+  /// The tool a compile BOUND to a cell, as engine truth: the `mcp_tool` the
+  /// bind wrote, else the command its pipeline runs. Null when the compile
+  /// resolved nothing — the model placeholder is deliberately not read here,
+  /// because "routes to the lens" is not a bound tool.
+  static String? _boundToolName(Map<String, dynamic>? meta) {
+    final bound = meta?['mcp_tool'];
+    if (bound is Map<String, dynamic> &&
+        bound['plugin_id'] is String &&
+        bound['tool'] is String) {
+      return '${bound['plugin_id']}.${bound['tool']}';
+    }
+    final plan = meta?['pipeline'];
+    if (plan is Map<String, dynamic>) {
+      final command = (plan['command'] as String?)?.trim();
+      if (command != null && command.isNotEmpty) return command;
+    }
+    return null;
+  }
+
+  static String? _executorLabel(String? executor) => switch (executor) {
+        'local' => 'Local',
+        'cloud' => 'Cloud',
+        'manual' => 'Manual',
+        'lens' => 'AI (Lens)',
+        _ => null,
+      };
+
+  // The notebook DOCUMENT: the same `cyan_load_notebook_cells` ledger the
+  // Workflow face reads its steps out of, unfiltered — every cell the board
+  // holds, in `cell_order`.
+
+  @override
+  Future<List<NotebookCell>> notebookCells(String boardId) async {
+    final raw = CyanFFI.loadNotebookCells(boardId);
+    if (raw == null || raw.isEmpty) return const [];
+    final List<dynamic> cells;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is! List) return const [];
+      cells = decoded;
+    } catch (_) {
+      return const [];
+    }
+
+    final out = <NotebookCell>[];
+    for (final cell in cells) {
+      if (cell is! Map<String, dynamic>) continue;
+      final id = cell['id'] as String?;
+      if (id == null) continue;
+      final meta = _decode(cell['metadata_json'] as String?);
+      out.add(NotebookCell(
+        id: id,
+        boardId: cell['board_id'] as String? ?? boardId,
+        kind: notebookCellKindFrom(cell['cell_type'] as String?),
+        order: _int(cell['cell_order']),
+        content: cell['content'] as String? ?? '',
+        output: cell['output'] as String?,
+        language: meta?['language'] as String?,
+        tool: _boundToolName(meta),
+        generatedFrom: meta?['generated_from'] as String?,
+        caption: meta?['caption'] as String?,
+        collapsed: cell['collapsed'] == true,
+      ));
+    }
+    out.sort((a, b) => a.order.compareTo(b.order));
+    return out;
+  }
+
+  @override
+  Future<WorkflowStep?> addWorkflowStep(String boardId, String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return null;
+    final existing = _workflowSteps(boardId);
+    final step = WorkflowStep(
+      id: 'step-${DateTime.now().microsecondsSinceEpoch}',
+      text: trimmed,
+    );
+    final saved = CyanFFI.saveNotebookCell(
+        boardId, _stepCell(boardId, step, existing.length));
+    return saved ? step : null;
+  }
+
+  @override
+  Future<bool> updateWorkflowStep(
+      String boardId, String stepId, String text) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return false;
+    final steps = _workflowSteps(boardId);
+    final index = steps.indexWhere((s) => s.id == stepId);
+    if (index < 0) return false;
+    return CyanFFI.saveNotebookCell(
+      boardId,
+      _stepCell(boardId, WorkflowStep(id: stepId, text: trimmed), index),
+    );
+  }
+
+  /// The `cyan_save_notebook_cell` payload for an authored step. `cell_type` is
+  /// always `step` — the engine coerces anyway, we are explicit.
+  Map<String, dynamic> _stepCell(String boardId, WorkflowStep step, int order) {
+    final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    return {
+      'id': step.id,
+      'board_id': boardId,
+      'cell_type': 'step',
+      'cell_order': order,
+      'content': step.text,
+      'collapsed': false,
+      'created_at': now,
+      'updated_at': now,
+    };
+  }
 
   @override
   Future<BoardNotes> loadNotes(String boardId) async =>
       BoardNotes(boardId: boardId, fileName: 'notes.md', content: '');
+
+  // The board container's face, straight through to the engine's board-mode
+  // pair — the two verbs Swift's `BoardFaceBridge` wraps.
+
+  @override
+  Future<String?> boardActiveFace(String boardId) async =>
+      CyanFFI.getBoardMode(boardId);
+
+  @override
+  Future<bool> setBoardActiveFace(String boardId, String face) async =>
+      CyanFFI.setBoardMode(boardId, face);
 
   @override
   Future<List<OpsRun>> loadOpsRuns() async => const [];
@@ -262,6 +502,38 @@ class CyanBackendFFI implements CyanBackend {
   Future<void> loadChatHistory(String boardId) async =>
       CyanFFI.loadChatHistory(boardId);
 
+  @override
+  Future<ChatMessage?> sendChat(String boardId, String message,
+      {String? parentId}) async {
+    // Whitespace-only is refused HERE, before the wire — the engine would
+    // happily gossip an empty message to every peer.
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) return null;
+    CyanFFI.sendChat(boardId, trimmed, parentId: parentId);
+    // The send is VOID on the wire: the engine mints the id and echoes the
+    // message back as a `ChatSent` frame rather than answering here. The
+    // transcript therefore comes from the event stream, and this local echo
+    // carries no id to claim one the engine did not mint.
+    return ChatMessage(
+      id: '',
+      author: 'You',
+      isOwn: true,
+      body: trimmed,
+      timeLabel: _clockLabel(DateTime.now()),
+    );
+  }
+
+  @override
+  Future<void> deleteChat(String messageId) async =>
+      CyanFFI.deleteChat(messageId);
+
+  /// A wall-clock stamp as the transcript renders it (`10:14 AM`).
+  static String _clockLabel(DateTime t) {
+    final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
+    final m = t.minute.toString().padLeft(2, '0');
+    return '$h:$m ${t.hour < 12 ? 'AM' : 'PM'}';
+  }
+
   // ---- unread ---------------------------------------------------------------
 
   @override
@@ -281,6 +553,34 @@ class CyanBackendFFI implements CyanBackend {
   Future<void> markRead(String scopeId) async => CyanFFI.markRead(scopeId);
 
   // ---- files ----------------------------------------------------------------
+
+  @override
+  Future<List<CyanFile>> filesForBoard(String boardId) async {
+    // An empty list is the engine's answer for a board with no files, and it
+    // is also what a dead binding leaves — both mean there is nothing to list.
+    final json = CyanFFI.getFiles({'type': 'board', 'id': boardId});
+    if (json == null) return const [];
+    final decoded = jsonDecode(json);
+    if (decoded is! List) return const [];
+    return [
+      for (final row in decoded)
+        if (row is Map<String, dynamic>) CyanFile.fromJson(row),
+    ];
+  }
+
+  @override
+  Future<bool> requestFileDownload(String fileId) async =>
+      CyanFFI.requestFileDownload(fileId);
+
+  @override
+  Future<FileTransfer?> fileStatus(String fileId) async {
+    // Null is the engine's "I do not know that id" — a file it cannot place has
+    // no transfer to report, and reporting `unknown` instead would tell a
+    // caller the file exists.
+    final map = _decode(CyanFFI.getFileStatus(fileId));
+    if (map == null) return null;
+    return FileTransfer.fromJson(map);
+  }
 
   @override
   Future<void> deleteFile(String fileId) async => CyanFFI.deleteFile(fileId);

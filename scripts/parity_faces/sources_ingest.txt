@@ -1,0 +1,4 @@
+the sources sheet adds a media source to a board
+scan now materialises runs for newly found media
+a source reports its last scan time
+a scan that finds nothing reports that rather than failing silently

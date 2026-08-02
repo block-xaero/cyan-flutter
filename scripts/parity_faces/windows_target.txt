@@ -1,0 +1,3 @@
+the windows runner scaffold is present and analyze clean
+the windows CMake configuration names the cyan engine library
+the app entrypoint selects a backend without a platform assertion

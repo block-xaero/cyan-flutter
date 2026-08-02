@@ -1,0 +1,6 @@
+the template picker lists available workflow templates
+choosing a template clones its steps onto the board
+the clone reports how many steps landed and which plugins are ready
+a template clone failure names the plugin that failed
+save as template carries the board standing notes
+the clone reports its plugin auto install outcome

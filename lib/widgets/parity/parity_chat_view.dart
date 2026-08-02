@@ -6,24 +6,30 @@
 // is left-aligned with a colored author (own = cyan, others = green), a faint
 // timestamp, and a markdown-rendered body — over a composer.
 //
-// Driven ENTIRELY through the `CyanBackend` seam (via `boardChatProvider`). This
-// widget never touches `CyanFFI` directly — that is the parity rule.
+// Driven ENTIRELY through the `CyanBackend` seam (via `boardChatControllerProvider`,
+// which reads `loadChat` and writes `sendChat` / `deleteChat`). This widget
+// never touches `CyanFFI` directly — that is the parity rule.
+//
+// The lane is BOARD-SCOPED: [boardId] is the whole chat address, so the
+// composer sends to this board and to no other, and a view with no board id
+// cannot send at all.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
-import '../../providers/cyan_backend_provider.dart';
+import '../../providers/board_chat_controller.dart';
 import '../../theme/monokai_theme.dart';
 
 class ParityChatView extends ConsumerWidget {
-  /// The board whose transcript to show.
+  /// The board whose transcript to show — and the scope every send addresses.
   final String boardId;
 
   /// The chat's title (board / workspace name).
   final String title;
 
-  /// Sending a composed message — UI-only here; the host wires the relay.
+  /// Fired after a message is SENT (the engine took it), so a host can react.
+  /// The transcript itself does not need this — it re-reads the engine.
   final void Function(String)? onSend;
 
   const ParityChatView({
@@ -35,7 +41,8 @@ class ParityChatView extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final chatAsync = ref.watch(boardChatProvider(boardId));
+    final chat = ref.watch(boardChatControllerProvider(boardId));
+    final controller = ref.read(boardChatControllerProvider(boardId).notifier);
 
     return Material(
       color: MonokaiTheme.background,
@@ -45,27 +52,42 @@ class ParityChatView extends ConsumerWidget {
           _Header(title: title),
           const Divider(height: 1, color: MonokaiTheme.divider),
           Expanded(
-            child: chatAsync.when(
-              loading: () => const Center(
-                child: CircularProgressIndicator(color: MonokaiTheme.cyan),
-              ),
-              error: (e, _) => Center(
-                child: Text('Failed to load chat: $e',
-                    style: MonokaiTheme.bodyMedium
-                        .copyWith(color: MonokaiTheme.red)),
-              ),
-              data: (messages) => messages.isEmpty
-                  ? const _Empty()
-                  : ListView(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      children: [
-                        for (final m in messages) _MessageRow(message: m),
-                      ],
-                    ),
-            ),
+            child: switch (chat) {
+              BoardChatState(loading: true) => const Center(
+                  child: CircularProgressIndicator(color: MonokaiTheme.cyan),
+                ),
+              BoardChatState(error: final String e) => Center(
+                  child: Text(e,
+                      style: MonokaiTheme.bodyMedium
+                          .copyWith(color: MonokaiTheme.red)),
+                ),
+              BoardChatState(isEmpty: true) => const _Empty(),
+              _ => ListView(
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  children: [
+                    for (final m in chat.messages)
+                      _MessageRow(
+                        message: m,
+                        // Your own message is yours to remove. The engine
+                        // soft-deletes and gossips a tombstone, so the row goes
+                        // everywhere it went, not just here.
+                        onDelete: m.isOwn && m.id.isNotEmpty
+                            ? () => controller.delete(m.id)
+                            : null,
+                      ),
+                  ],
+                ),
+            },
           ),
           const Divider(height: 1, color: MonokaiTheme.divider),
-          _Composer(onSend: onSend),
+          _Composer(
+            enabled: controller.hasScope,
+            onSubmit: (text) async {
+              final sent = await controller.send(text);
+              if (sent) onSend?.call(text.trim());
+              return sent;
+            },
+          ),
         ],
       ),
     );
@@ -122,7 +144,11 @@ class _Header extends StatelessWidget {
 
 class _MessageRow extends StatelessWidget {
   final ChatMessage message;
-  const _MessageRow({required this.message});
+
+  /// Removing this message. Null when it is not this operator's to remove.
+  final VoidCallback? onDelete;
+
+  const _MessageRow({required this.message, this.onDelete});
 
   @override
   Widget build(BuildContext context) {
@@ -140,6 +166,21 @@ class _MessageRow extends StatelessWidget {
                       color: authorColor, fontWeight: FontWeight.w600)),
               const SizedBox(width: 8),
               Text(message.timeLabel, style: MonokaiTheme.labelSmall),
+              if (onDelete != null) ...[
+                const Spacer(),
+                IconButton(
+                  onPressed: onDelete,
+                  icon: const Icon(Icons.delete_outline, size: 14),
+                  color: MonokaiTheme.comment,
+                  hoverColor: MonokaiTheme.red.withValues(alpha: 0.15),
+                  splashRadius: 14,
+                  visualDensity: VisualDensity.compact,
+                  padding: EdgeInsets.zero,
+                  constraints:
+                      const BoxConstraints.tightFor(width: 22, height: 22),
+                  tooltip: 'Delete message',
+                ),
+              ],
             ],
           ),
           const SizedBox(height: 4),
@@ -195,9 +236,52 @@ class _MarkdownBody extends StatelessWidget {
   }
 }
 
-class _Composer extends StatelessWidget {
-  final void Function(String)? onSend;
-  const _Composer({this.onSend});
+/// The composer. A REAL text field — what is typed here is what is sent, and
+/// the field only clears once the engine has taken the message.
+class _Composer extends StatefulWidget {
+  /// Sends [text]; answers whether it was taken. False leaves the draft in
+  /// place so a refused send never silently eats what was typed.
+  final Future<bool> Function(String text) onSubmit;
+
+  /// False when the lane has no board to send to — the composer says so rather
+  /// than accepting text that has nowhere to go.
+  final bool enabled;
+
+  const _Composer({required this.onSubmit, this.enabled = true});
+
+  @override
+  State<_Composer> createState() => _ComposerState();
+}
+
+class _ComposerState extends State<_Composer> {
+  final _controller = TextEditingController();
+  final _focus = FocusNode();
+  bool _sending = false;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focus.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!widget.enabled || _sending) return;
+    final text = _controller.text;
+    // Whitespace-only is not a message. The seam refuses it too; refusing here
+    // as well keeps the composer from clearing a draft that was never sent.
+    if (text.trim().isEmpty) return;
+
+    setState(() => _sending = true);
+    final sent = await widget.onSubmit(text);
+    if (!mounted) return;
+    setState(() => _sending = false);
+    if (sent) {
+      _controller.clear();
+      // Keep the caret in the composer — a sent message should not cost focus.
+      _focus.requestFocus();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -208,7 +292,7 @@ class _Composer extends StatelessWidget {
           Expanded(
             child: Container(
               padding:
-                  const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
               decoration: BoxDecoration(
                 color: MonokaiTheme.selection,
                 borderRadius: BorderRadius.circular(8),
@@ -218,9 +302,24 @@ class _Composer extends StatelessWidget {
               child: Row(
                 children: [
                   Expanded(
-                    child: Text('Message…',
-                        style: MonokaiTheme.bodySmall
-                            .copyWith(color: MonokaiTheme.comment)),
+                    child: TextField(
+                      controller: _controller,
+                      focusNode: _focus,
+                      enabled: widget.enabled,
+                      style: MonokaiTheme.bodySmall
+                          .copyWith(color: MonokaiTheme.foreground),
+                      cursorColor: MonokaiTheme.cyan,
+                      textInputAction: TextInputAction.send,
+                      onSubmitted: (_) => _submit(),
+                      decoration: InputDecoration(
+                        isDense: true,
+                        border: InputBorder.none,
+                        hintText:
+                            widget.enabled ? 'Message…' : 'No board selected',
+                        hintStyle: MonokaiTheme.bodySmall
+                            .copyWith(color: MonokaiTheme.comment),
+                      ),
+                    ),
                   ),
                   const Icon(Icons.alternate_email,
                       size: 14, color: MonokaiTheme.comment),
@@ -229,17 +328,34 @@ class _Composer extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => onSend?.call(''),
-            child: Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: MonokaiTheme.cyan,
-                borderRadius: BorderRadius.circular(8),
-              ),
-              child: const Icon(Icons.send,
-                  size: 16, color: MonokaiTheme.background),
-            ),
+          // Rebuilds with the field so Send reads as live only once there is
+          // something to send.
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: _controller,
+            builder: (context, value, _) {
+              final live = widget.enabled &&
+                  !_sending &&
+                  value.text.trim().isNotEmpty;
+              return Semantics(
+                button: true,
+                enabled: live,
+                label: 'Send message',
+                child: GestureDetector(
+                  onTap: _submit,
+                  child: Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: live
+                          ? MonokaiTheme.cyan
+                          : MonokaiTheme.cyan.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.send,
+                        size: 16, color: MonokaiTheme.background),
+                  ),
+                ),
+              );
+            },
           ),
         ],
       ),

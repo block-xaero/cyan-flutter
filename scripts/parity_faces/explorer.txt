@@ -1,0 +1,5 @@
+the explorer tree renders groups workspaces and boards with disclosure
+selecting a row selects it rather than only expanding it
+new board files into the selected workspace not the last used one
+the explorer supports rename and delete of a board
+a new board lands in the group that is selected not the last used one

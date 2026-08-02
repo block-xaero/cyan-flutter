@@ -1,0 +1,3 @@
+lens is invoked on demand and not a persistent dock
+asking lens shows a pending state then an answer
+a lens failure surfaces an error rather than hanging
