@@ -312,21 +312,17 @@ typedef CyanReorderNotebookCellsDart = bool Function(Pointer<Utf8> boardId, Poin
 typedef CyanLoadCellElementsNative = Pointer<Utf8> Function(Pointer<Utf8> cellId);
 typedef CyanLoadCellElementsDart = Pointer<Utf8> Function(Pointer<Utf8> cellId);
 
-// Integration
-typedef CyanIntegrationCommandNative = Bool Function(Pointer<Utf8> json);
-typedef CyanIntegrationCommandDart = bool Function(Pointer<Utf8> json);
+// Integration verbs were REMOVED from the engine — integrations moved to MCP
+// servers in cyan-backend/Lens and the client owns no integration logic. iOS
+// deleted its @_silgen_name decls at the same time ("cyan-backend is removing
+// the cyan_integration_* FFI symbols, so iOS must not reference them"). Flutter
+// never did, and because _bindAllUnsafe binds in one try block, that single
+// stale lookup threw and no-opped ALL 160 verbs — the app ran fully inert
+// against a healthy engine. Do not re-add these without engine symbols.
 
-typedef CyanPollIntegrationEventsNative = Pointer<Utf8> Function();
-typedef CyanPollIntegrationEventsDart = Pointer<Utf8> Function();
 
-typedef CyanGetConnectedIntegrationsNative = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
-typedef CyanGetConnectedIntegrationsDart = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
 
-typedef CyanGetIntegrationGraphNative = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
-typedef CyanGetIntegrationGraphDart = Pointer<Utf8> Function(Pointer<Utf8> scopeId);
 
-typedef CyanSetGraphFocusNative = Bool Function(Pointer<Utf8> scopeId, Pointer<Utf8> focusJson);
-typedef CyanSetGraphFocusDart = bool Function(Pointer<Utf8> scopeId, Pointer<Utf8> focusJson);
 
 // AI
 typedef CyanAiCommandNative = Bool Function(Pointer<Utf8> json);
@@ -732,12 +728,6 @@ class CyanBindings {
   late final CyanReorderNotebookCellsDart reorderNotebookCells;
   late final CyanLoadCellElementsDart loadCellElements;
   
-  // Integration
-  late final CyanIntegrationCommandDart integrationCommand;
-  late final CyanPollIntegrationEventsDart pollIntegrationEvents;
-  late final CyanGetConnectedIntegrationsDart getConnectedIntegrations;
-  late final CyanGetIntegrationGraphDart getIntegrationGraph;
-  late final CyanSetGraphFocusDart setGraphFocus;
   
   // AI
   late final CyanAiCommandDart aiCommand;
@@ -857,6 +847,12 @@ class CyanBindings {
   static String? _degradedReason;
   static String? get degradedReason => _degradedReason;
 
+  /// Every path the resolver tried, in order, whether or not it existed.
+  /// "The engine could not be loaded" is unactionable; "I looked here, here and
+  /// here" tells whoever is holding the broken build exactly what to fix.
+  static List<String> _triedPaths = const [];
+  static List<String> get triedPaths => List.unmodifiable(_triedPaths);
+
   /// True when the engine is absent and every verb is a no-op.
   static bool get isDegraded => _degradedReason != null;
 
@@ -881,6 +877,18 @@ class CyanBindings {
     print(' CYAN ENGINE NOT LOADED — THE APP IS A SHELL');
     print(' $reason');
     print('');
+    if (_triedPaths.isEmpty) {
+      print(' The resolver had NO candidate paths for this platform.');
+    } else {
+      print(' Paths tried, in order:');
+      for (final p in _triedPaths) {
+        final exists = (p.contains('/') || p.contains(r'\\'))
+            ? (File(p).existsSync() ? 'present' : 'missing')
+            : 'system loader';
+        print('   - $p  [$exists]');
+      }
+    }
+    print('');
     print(' Every engine verb is a no-op. Screens will render and');
     print(' nothing will happen. This build must not ship.');
     print(' Build the engine and stage it:');
@@ -890,9 +898,10 @@ class CyanBindings {
     print('           -> windows/Libraries/cyan_backend.dll');
     print('=========================================================');
     print('');
-    // Fires in debug/profile, compiled out of release — a developer cannot
-    // walk past this, while a customer build still degrades rather than crashes.
-    assert(false, 'Cyan engine not loaded: $reason');
+    // Deliberately NOT `assert(false)`. That was the first attempt, and it threw
+    // out of _load, past main, and left an unexplained BLACK WINDOW — strictly
+    // worse than the silent no-op it replaced. `main` reads `isDegraded` and
+    // shows a screen that names the fault instead.
   }
   
   // Walks the per-target plan from `CyanEngineLibrary` — Windows, Linux and
@@ -907,6 +916,8 @@ class CyanBindings {
           '',
       resolvedExecutable: Platform.resolvedExecutable,
     );
+
+    _triedPaths = List.unmodifiable(plan.candidatePaths);
 
     for (final path in plan.candidatePaths) {
       // A bare file name is resolved by the OS loader, not the filesystem, so
@@ -937,6 +948,31 @@ class CyanBindings {
     // thing. If any critical symbol is missing, we fall back to all no-ops.
     // This is safe because DynamicLibrary.process() will have either ALL
     // the cyan_* symbols (static lib linked) or NONE of them.
+    // PRE-FLIGHT. `_bindAllUnsafe` binds all 155 verbs inside ONE try block, so
+    // the FIRST missing symbol aborts the rest and every verb becomes a no-op —
+    // a single stale name silently disables the whole engine. That is not a
+    // hypothetical: five `cyan_integration_*` verbs stayed in this file after
+    // the engine dropped them, and the app ran completely inert against a
+    // perfectly good dylib.
+    //
+    // Checking every name FIRST turns "one symbol threw" into the full list of
+    // what is actually missing, which is the difference between a five-minute
+    // fix and a six-month blind spot.
+    final missing = <String>[];
+    for (final sym in _requiredSymbols) {
+      try {
+        _lib.lookup<NativeFunction<Void Function()>>(sym);
+      } catch (_) {
+        missing.add(sym);
+      }
+    }
+    if (missing.isNotEmpty) {
+      _degrade('the engine is missing ${missing.length} symbol(s) this build '
+          'expects: ${missing.join(', ')}');
+      _setNoOps();
+      return;
+    }
+
     try {
       _bindAllUnsafe();
     } catch (e) {
@@ -1068,12 +1104,6 @@ class CyanBindings {
     reorderNotebookCells = _lib.lookupFunction<CyanReorderNotebookCellsNative, CyanReorderNotebookCellsDart>('cyan_reorder_notebook_cells');
     loadCellElements = _lib.lookupFunction<CyanLoadCellElementsNative, CyanLoadCellElementsDart>('cyan_load_cell_elements');
     
-    // Integration
-    integrationCommand = _lib.lookupFunction<CyanIntegrationCommandNative, CyanIntegrationCommandDart>('cyan_integration_command');
-    pollIntegrationEvents = _lib.lookupFunction<CyanPollIntegrationEventsNative, CyanPollIntegrationEventsDart>('cyan_poll_integration_events');
-    getConnectedIntegrations = _lib.lookupFunction<CyanGetConnectedIntegrationsNative, CyanGetConnectedIntegrationsDart>('cyan_get_connected_integrations');
-    getIntegrationGraph = _lib.lookupFunction<CyanGetIntegrationGraphNative, CyanGetIntegrationGraphDart>('cyan_get_integration_graph');
-    setGraphFocus = _lib.lookupFunction<CyanSetGraphFocusNative, CyanSetGraphFocusDart>('cyan_set_graph_focus');
     
     // AI
     aiCommand = _lib.lookupFunction<CyanAiCommandNative, CyanAiCommandDart>('cyan_ai_command');
@@ -1294,12 +1324,6 @@ class CyanBindings {
     reorderNotebookCells = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
     loadCellElements = (Pointer<Utf8> p) => _nullptr;
     
-    // Integration
-    integrationCommand = (Pointer<Utf8> p) => false;
-    pollIntegrationEvents = () => _nullptr;
-    getConnectedIntegrations = (Pointer<Utf8> p) => _nullptr;
-    getIntegrationGraph = (Pointer<Utf8> p) => _nullptr;
-    setGraphFocus = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
     
     // AI
     aiCommand = (Pointer<Utf8> p) => false;
@@ -1401,3 +1425,165 @@ class CyanBindings {
     seedPersonas = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
   }
 }
+
+/// Every engine symbol `_bindAllUnsafe` looks up, derived from this file.
+/// Kept beside the bindings so the pre-flight check and the binder can never
+/// disagree about what 'required' means. `engine_symbol_drift_test` asserts
+/// this list is a subset of what the staged engine actually exports.
+const List<String> _requiredSymbols = <String>[
+  'cyan_act_on_timecode_note',
+  'cyan_add_board_label',
+  'cyan_ai_command',
+  'cyan_autocomplete_path',
+  'cyan_board_review_assignee',
+  'cyan_board_set_review_assignee',
+  'cyan_board_video_media',
+  'cyan_board_workflow_state',
+  'cyan_build_commit',
+  'cyan_bundle_pubkey',
+  'cyan_changelist_command',
+  'cyan_clear_whiteboard',
+  'cyan_constitution_effective',
+  'cyan_constitution_resolved',
+  'cyan_create_anonymous_session',
+  'cyan_create_board',
+  'cyan_create_group',
+  'cyan_create_workspace',
+  'cyan_delete_board',
+  'cyan_delete_chat',
+  'cyan_delete_file',
+  'cyan_delete_group',
+  'cyan_delete_identity',
+  'cyan_delete_notebook_cell',
+  'cyan_delete_whiteboard_element',
+  'cyan_delete_workspace',
+  'cyan_exit_anonymous_mode',
+  'cyan_export_group',
+  'cyan_export_notes_markdown',
+  'cyan_extract_file_text',
+  'cyan_free_string',
+  'cyan_friendly_node_id',
+  'cyan_get_all_boards',
+  'cyan_get_all_peers',
+  'cyan_get_anonymous_status',
+  'cyan_get_board_link',
+  'cyan_get_board_metadata',
+  'cyan_get_board_mode',
+  'cyan_get_boards_for_group',
+  'cyan_get_boards_for_workspace',
+  'cyan_get_boards_metadata',
+  'cyan_get_file_local_path',
+  'cyan_get_file_status',
+  'cyan_get_files',
+  'cyan_get_group_members',
+  'cyan_get_group_peer_count',
+  'cyan_get_group_peers',
+  'cyan_get_my_node_id',
+  'cyan_get_my_profile',
+  'cyan_get_node_id',
+  'cyan_get_object_count',
+  'cyan_get_production_role',
+  'cyan_get_profiles_batch',
+  'cyan_get_top_boards',
+  'cyan_get_total_peer_count',
+  'cyan_get_user_profile',
+  'cyan_get_whiteboard_element_count',
+  'cyan_get_workspaces_for_group',
+  'cyan_get_xaero_id',
+  'cyan_import_group',
+  'cyan_ingest_command',
+  'cyan_init',
+  'cyan_init_with_identity',
+  'cyan_install_plugin_bundle',
+  'cyan_is_board_owner',
+  'cyan_is_board_pinned',
+  'cyan_is_group_owner',
+  'cyan_is_ready',
+  'cyan_is_workspace_owner',
+  'cyan_issue_grant_qr',
+  'cyan_leave_board',
+  'cyan_leave_group',
+  'cyan_leave_workspace',
+  'cyan_load_cell_elements',
+  'cyan_load_chat_history',
+  'cyan_load_notebook_cells',
+  'cyan_load_timecode_notes',
+  'cyan_load_whiteboard_elements',
+  'cyan_mark_read',
+  'cyan_note_delete',
+  'cyan_note_list',
+  'cyan_note_list_scoped',
+  'cyan_note_put',
+  'cyan_note_put_scoped',
+  'cyan_parse_lens_command',
+  'cyan_pin_board',
+  'cyan_pin_set',
+  'cyan_pin_summary_as_board',
+  'cyan_pipeline_approve',
+  'cyan_pipeline_approve_as',
+  'cyan_pipeline_compile',
+  'cyan_pipeline_reject',
+  'cyan_pipeline_reject_as',
+  'cyan_pipeline_reset',
+  'cyan_pipeline_reset_step',
+  'cyan_pipeline_retry',
+  'cyan_pipeline_run_step_local',
+  'cyan_pipeline_status',
+  'cyan_plugin_catalog',
+  'cyan_plugin_config_get',
+  'cyan_plugin_config_set',
+  'cyan_poll_ai_insights',
+  'cyan_poll_ai_response',
+  'cyan_poll_events',
+  'cyan_rate_board',
+  'cyan_record_board_view',
+  'cyan_remove_board_label',
+  'cyan_rename_board',
+  'cyan_rename_group',
+  'cyan_rename_workspace',
+  'cyan_reorder_notebook_cells',
+  'cyan_request_file_download',
+  'cyan_resolve_file_handle',
+  'cyan_reveal_anonymous_identity',
+  'cyan_review_add_comment',
+  'cyan_review_command',
+  'cyan_run_pipeline',
+  'cyan_save_notebook_cell',
+  'cyan_save_timecode_note',
+  'cyan_save_whiteboard_element',
+  'cyan_scan_grant_qr',
+  'cyan_search_boards_by_label',
+  'cyan_seed_demo',
+  'cyan_seed_demo_if_empty',
+  'cyan_seed_personas',
+  'cyan_selector_resolve',
+  'cyan_send_chat',
+  'cyan_send_command',
+  'cyan_send_direct_chat',
+  'cyan_set_board_labels',
+  'cyan_set_board_mode',
+  'cyan_set_board_model',
+  'cyan_set_board_skills',
+  'cyan_set_data_dir',
+  'cyan_set_discovery_key',
+  'cyan_set_my_profile',
+  'cyan_set_production_role',
+  'cyan_set_xaero_id',
+  'cyan_sso_install_grant',
+  'cyan_sso_sign_out',
+  'cyan_start_direct_chat',
+  'cyan_step_edit_travel',
+  'cyan_template_clone_outcome',
+  'cyan_template_list',
+  'cyan_template_save',
+  'cyan_template_save_from_board',
+  'cyan_template_save_v2',
+  'cyan_unpin_board',
+  'cyan_unread_counts',
+  'cyan_update_peer_status',
+  'cyan_upload_file',
+  'cyan_upload_file_to_group',
+  'cyan_upload_file_to_workspace',
+  'cyan_workflow_autocomplete',
+  'cyan_workflow_from_template',
+];

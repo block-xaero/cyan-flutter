@@ -12,7 +12,9 @@ import 'providers/auth_provider.dart';
 import 'providers/cyan_backend_provider.dart';
 import 'ffi/cyan_backend.dart';
 import 'ffi/cyan_backend_ffi.dart';
+import 'ffi/cyan_bindings.dart';
 import 'ffi/ffi_helpers.dart';
+import 'screens/engine_unavailable_screen.dart';
 import 'services/python_executor.dart';
 import 'services/model_registry.dart';
 
@@ -20,10 +22,12 @@ import 'services/model_registry.dart';
 ///
 /// Every target — macOS, Windows, Linux — gets the same FFI adapter. Which
 /// engine binary that adapter opens is decided by `CyanEngineLibrary`, keyed on
-/// the running OS, and a target with no binary degrades to the bindings'
-/// local-only fallbacks. So there is deliberately no `Platform.isMacOS` gate
-/// and no assertion here: adding one would make the Windows runner abort at
-/// startup instead of launching against whatever engine it can find.
+/// the running OS. There is deliberately no `Platform.isMacOS` gate here — the
+/// adapter is the same everywhere and a per-OS branch would rot.
+///
+/// This function stays unconditional. The engine-missing case is handled ONCE,
+/// in `main`, by refusing to start rather than by branching the backend: a
+/// second no-op backend would be another way to look like it works.
 CyanBackend selectCyanBackend() => CyanBackendFFI();
 
 void main() async {
@@ -37,6 +41,28 @@ void main() async {
 
   // Initialize model registry
   ModelRegistry.instance.initialize();
+
+  // Force the engine to resolve BEFORE the first frame, and refuse to present a
+  // working-looking app if it did not.
+  //
+  // The binder degrades to no-ops when the engine is absent — legitimately, on
+  // iOS, where the engine is linked statically and its symbols come from the
+  // process. What is NOT legitimate is a desktop build shipping in that state:
+  // every screen renders, every button responds, and nothing is written. That is
+  // indistinguishable from working right up until a customer loses a day's work,
+  // and it is exactly how a six-month-old engine went unnoticed on macOS.
+  //
+  // So a degraded build stops here and says why. This is the last line of
+  // defence; the build itself already fails when the engine is unstaged
+  // (macOS "Embed Cyan Engine" phase, Windows CMake FATAL_ERROR).
+  CyanBindings.instance;
+  if (CyanBindings.isDegraded) {
+    runApp(EngineUnavailableApp(
+      reason: CyanBindings.degradedReason ?? 'unknown',
+      triedPaths: CyanBindings.triedPaths,
+    ));
+    return;
+  }
 
   runApp(
     ProviderScope(

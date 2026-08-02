@@ -1185,58 +1185,15 @@ class CyanFFI {
     }
   }
   
-  // ==========================================================================
-  // INTEGRATION
-  // ==========================================================================
-  
-  static bool integrationCommand(Map<String, dynamic> command) {
-    final ptr = jsonEncode(command).toNativeUtf8();
-    try {
-      return _b.integrationCommand(ptr);
-    } finally {
-      calloc.free(ptr);
-    }
-  }
-  
-  static String? pollIntegrationEvents() {
-    final ptr = _b.pollIntegrationEvents();
-    if (ptr == nullptr) return null;
-    return ptr.toDartStringAndFree();
-  }
-  
-  static String? getConnectedIntegrations(String scopeId) {
-    final ptr = scopeId.toNativeUtf8();
-    try {
-      final result = _b.getConnectedIntegrations(ptr);
-      if (result == nullptr) return null;
-      return result.toDartStringAndFree();
-    } finally {
-      calloc.free(ptr);
-    }
-  }
-  
-  static String? getIntegrationGraph(String scopeId) {
-    final ptr = scopeId.toNativeUtf8();
-    try {
-      final result = _b.getIntegrationGraph(ptr);
-      if (result == nullptr) return null;
-      return result.toDartStringAndFree();
-    } finally {
-      calloc.free(ptr);
-    }
-  }
-  
-  static bool setGraphFocus(String scopeId, Map<String, dynamic> focus) {
-    final sPtr = scopeId.toNativeUtf8();
-    final fPtr = jsonEncode(focus).toNativeUtf8();
-    try {
-      return _b.setGraphFocus(sPtr, fPtr);
-    } finally {
-      calloc.free(sPtr);
-      calloc.free(fPtr);
-    }
-  }
-  
+  // INTEGRATION — deleted, not stubbed.
+  //
+  // Integrations moved to MCP servers in cyan-backend/Lens; the client owns no
+  // integration logic. The engine dropped the cyan_integration_* symbols and iOS
+  // deleted its declarations in the same change. These five wrappers were the
+  // last references to them, called by nothing, and they kept five dead lookups
+  // alive in the binder — which threw inside _bindAllUnsafe and no-opped all 155
+  // verbs. "Delete, don't abstract", exactly as the iOS removal plan said.
+
   // ==========================================================================
   // AI
   // ==========================================================================
