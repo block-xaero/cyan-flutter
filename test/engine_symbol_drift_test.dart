@@ -30,17 +30,39 @@ File _stagedEngine() {
   return File('$root/linux/Libraries/libcyan_backend.so');
 }
 
+/// dumpbin lives under the MSVC toolchain rather than on PATH, so find it.
+String? _dumpbin() {
+  const root = r'C:\Program Files (x86)\Microsoft Visual Studio\2022';
+  for (final edition in ['BuildTools', 'Community', 'Professional', 'Enterprise']) {
+    final dir = Directory('$root\\$edition\\VC\\Tools\\MSVC');
+    if (!dir.existsSync()) continue;
+    for (final v in dir.listSync().whereType<Directory>()) {
+      final f = File('${v.path}\\bin\\Hostx64\\x64\\dumpbin.exe');
+      if (f.existsSync()) return f.path;
+    }
+  }
+  return null;
+}
+
 /// Symbols the engine exports, read from the binary rather than from a list
 /// somebody maintains by hand — a hand-maintained list is the bug being tested.
 Set<String> _exported(File lib) {
+  // Windows has no nm. It has dumpbin, which ships with the VS build tools the
+  // Windows target already requires — and reading a PE EXPORT TABLE is the right
+  // thing anyway: nm on a DLL reports internal Rust symbols too, so the count
+  // would be thousands and the comparison meaningless.
   final tools = Platform.isMacOS
       ? [
           ['nm', ['-gU', lib.path]],
         ]
-      : [
-          ['llvm-nm', ['--extern-only', '--defined-only', lib.path]],
-          ['nm', ['--extern-only', '--defined-only', lib.path]],
-        ];
+      : Platform.isWindows
+          ? [
+              [_dumpbin() ?? 'dumpbin', ['/EXPORTS', lib.path]],
+            ]
+          : [
+              ['llvm-nm', ['--extern-only', '--defined-only', lib.path]],
+              ['nm', ['--extern-only', '--defined-only', lib.path]],
+            ];
   for (final t in tools) {
     try {
       final r = Process.runSync(t[0] as String, t[1] as List<String>);
