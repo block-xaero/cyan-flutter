@@ -1,0 +1,6 @@
+the real engine symbols resolve rather than degrading to no ops
+a release build refuses to start when the engine cannot be resolved
+initialising the engine creates a real database on disk
+creating a group through the engine changes persisted state
+reading the tree back returns what was written
+the engine resolver names the exact paths it tried when it fails

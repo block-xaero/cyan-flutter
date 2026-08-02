@@ -1,0 +1,3 @@
+a backend call that throws is surfaced to the user not swallowed
+a long running engine call reports progress rather than freezing the surface
+the app reports which engine build it loaded

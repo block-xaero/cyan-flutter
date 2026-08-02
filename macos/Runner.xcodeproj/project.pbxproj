@@ -241,6 +241,7 @@
 				C5154F34ED0A869AA8F86360 /* [CP] Check Pods Manifest.lock */,
 				33CC10E92044A3C60003C045 /* Sources */,
 				33CC10EA2044A3C60003C045 /* Frameworks */,
+				CY4N0001ENG1NEC0PY0001 /* Embed Cyan Engine */,
 				33CC10EB2044A3C60003C045 /* Resources */,
 				33CC110E2044A8840003C045 /* Bundle Framework */,
 				3399D490228B24CF009A79C7 /* ShellScript */,
@@ -328,6 +329,23 @@
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXShellScriptBuildPhase section */
+		CY4N0001ENG1NEC0PY0001 /* Embed Cyan Engine */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/Libraries/libcyan_core.dylib",
+			);
+			name = "Embed Cyan Engine";
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(FRAMEWORKS_FOLDER_PATH)/libcyan_core.dylib",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "# Bundle the Cyan engine. Before this phase existed the dylib was a\n# hand-placed artifact in build/ that survived every rebuild for six months —\n# a clean or a fresh clone produced an app with NO engine, and the Dart side\n# degraded to silent no-ops. Fail loudly instead.\nset -e\nSRC=\"$SRCROOT/Libraries/libcyan_core.dylib\"\nDEST=\"$BUILT_PRODUCTS_DIR/$FRAMEWORKS_FOLDER_PATH\"\nif [ ! -f \"$SRC\" ]; then echo \"error: engine missing at $SRC\"; exit 1; fi\nmkdir -p \"$DEST\"\ncp -f \"$SRC\" \"$DEST/libcyan_core.dylib\"\ncodesign -f -s - \"$DEST/libcyan_core.dylib\" >/dev/null 2>&1 || true\n";
+		};
 		3399D490228B24CF009A79C7 /* ShellScript */ = {
 			isa = PBXShellScriptBuildPhase;
 			alwaysOutOfDate = 1;

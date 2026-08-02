@@ -1,0 +1,5 @@
+the windows resolver looks for cyan backend dll beside the executable first
+the windows resolver falls back to the system loader by bare name
+a missing windows dll produces a named error not a silent no op
+the macos resolver uses the statically linked process symbols
+the resolver decision is unit testable without the platform present
