@@ -360,10 +360,65 @@ class CyanBackendFFI implements CyanBackend {
 
   static String _str(dynamic v) => v is String ? v : '';
 
+  // The Dashboard's DAG is the pipeline SNAPSHOT, seen from the run side.
+  // `cyan_pipeline_status` already answers everything the face draws — the
+  // per-step state, which lane each step runs in, and which one holds the gate
+  // — so this reads it rather than inventing a second run shape.
+
   @override
   Future<WorkflowRun?> loadRun(String boardId) async {
-    // Run hydration arrives with the Dashboard screen (row 4). Until the engine
-    // surfaces a run shape through this seam, return null rather than fake one.
+    final status = await pipelineStatus(boardId);
+    // A board with no run is NOT an error, and neither is an unreachable
+    // engine — but they are different, and only one of them may be drawn as
+    // "No run yet". The face gets null for both because the seam has no error
+    // channel here; the difference is visible through [pipelineStatus], which
+    // the face can ask for when it wants to distinguish them.
+    if (status.error != null || status.steps.isEmpty) return null;
+
+    return WorkflowRun(
+      boardId: status.boardId,
+      // The run has no title of its own — the SwiftUI header names the BOARD,
+      // so this does too rather than minting a label the engine never wrote.
+      title: _boardName(boardId) ?? boardId,
+      steps: [
+        for (final s in status.steps)
+          RunStep(
+            id: s.stepId,
+            title: s.title,
+            // Which LANE the step lives in. A manual executor is a human step,
+            // and so is a producer-review hold whatever its executor says — the
+            // hold is the human half by definition.
+            kind: s.executor == 'manual' || s.isReviewHold
+                ? RunStepKind.human
+                : RunStepKind.ai,
+            status: _runStepStatus(s.status),
+          ),
+      ],
+    );
+  }
+
+  /// The engine's per-step state as the DAG draws it. `needsLens` is a PARK on
+  /// the model, and the human override is what settles it — so it belongs with
+  /// the gate, not with the failures. Drawing it red would say the run broke
+  /// when the run is waiting.
+  static RunStepStatus _runStepStatus(PipelineStepState s) => switch (s) {
+        PipelineStepState.pending => RunStepStatus.pending,
+        PipelineStepState.running => RunStepStatus.running,
+        PipelineStepState.aiComplete => RunStepStatus.awaitingApproval,
+        PipelineStepState.needsLens => RunStepStatus.awaitingApproval,
+        PipelineStepState.humanApproved => RunStepStatus.done,
+        PipelineStepState.failed => RunStepStatus.failed,
+      };
+
+  /// One board's name from the metadata verb. Null when the engine does not
+  /// know the id — the caller then shows the id, which is at least traceable.
+  String? _boardName(String boardId) {
+    for (final row in _boardRows()) {
+      if (_str(row['id']) == boardId) {
+        final name = _str(row['name']);
+        return name.isEmpty ? null : name;
+      }
+    }
     return null;
   }
 
@@ -597,9 +652,42 @@ class CyanBackendFFI implements CyanBackend {
     };
   }
 
+  // The Notes face is a DOCUMENT, and the document is the board's markdown
+  // cells — the same `cyan_load_notebook_cells` ledger the Workflow face reads
+  // its steps out of. SwiftUI's `NotesEditorViewModel.load()` is the reference
+  // and this reproduces its three branches exactly, including the odd one.
+
+  /// What SwiftUI writes into an untouched board's editor. It is a TEMPLATE,
+  /// not content: it appears only when the board has no cells at all, so it can
+  /// never overwrite something the engine holds.
+  static const String _emptyNotesTemplate = '# Notes\n\nStart typing here...\n';
+
   @override
-  Future<BoardNotes> loadNotes(String boardId) async =>
-      BoardNotes(boardId: boardId, fileName: 'notes.md', content: '');
+  Future<BoardNotes> loadNotes(String boardId) async {
+    final cells = await notebookCells(boardId);
+    final markdown = [
+      for (final c in cells)
+        if (c.kind == NotebookCellKind.markdown) c.content,
+    ];
+
+    // Swift: first markdown cell wins; no cells at all gets the template;
+    // otherwise join the markdown ones. That last branch can only ever be
+    // reached when there are NO markdown cells (a board of code/image/step
+    // cells), where the join is empty — reproduced rather than "corrected",
+    // because an empty editor over a board with no prose is the honest reading
+    // and matching the reference is the point of this port.
+    final content = markdown.isNotEmpty
+        ? markdown.first
+        : (cells.isEmpty ? _emptyNotesTemplate : '');
+
+    return BoardNotes(
+      boardId: boardId,
+      // The engine stores no file name for a board's notes — the editor's
+      // title bar is a label, not a path.
+      fileName: 'notes.md',
+      content: content,
+    );
+  }
 
   // The board container's face, straight through to the engine's board-mode
   // pair — the two verbs Swift's `BoardFaceBridge` wraps.
