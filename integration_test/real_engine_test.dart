@@ -53,6 +53,24 @@ DynamicLibrary _engine() {
       'symbols and silently no-op. The Embed Cyan Engine build phase did not run.');
 }
 
+/// Point the engine's data dir at [tmp] BEFORE it boots.
+///
+/// `DATA_DIR` is a process-lifetime `OnceCell` that defaults to `"."`, and the
+/// blob swarm roots its content-addressed store at `<data>/blobs/<node>`. With
+/// `flutter test` the working directory is the REPO, so every Tier-2 run was
+/// dropping a half-megabyte SQLite blob store into the source tree — and one of
+/// them got committed (058a69e). Set it first and the engine writes nothing
+/// here at all.
+void _keepTheEngineOutOfTheRepo(DynamicLibrary lib, Directory tmp) {
+  final p = tmp.path.toNativeUtf8();
+  final ok = lib.lookupFunction<Bool Function(Pointer<Utf8>),
+      bool Function(Pointer<Utf8>)>('cyan_set_data_dir')(p);
+  calloc.free(p);
+  expect(ok, isTrue,
+      reason: 'cyan_set_data_dir refused ${tmp.path} — the engine would fall '
+          'back to "." and write its blob store into the repository');
+}
+
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
@@ -62,6 +80,7 @@ void main() {
   setUpAll(() {
     lib = _engine();
     tmp = Directory.systemTemp.createTempSync('cyan_tier2_');
+    _keepTheEngineOutOfTheRepo(lib, tmp);
   });
   // The engine parks its `CyanSystem` in a process-lifetime `OnceCell` and
   // exports NO shutdown verb (checked against the PE export table — there is no

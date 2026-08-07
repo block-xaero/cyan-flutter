@@ -132,6 +132,18 @@ void main() {
     _lib = _engine();
     tmp = Directory.systemTemp.createTempSync('cyan_roundtrip_');
 
+    // BEFORE the boot. `DATA_DIR` is a process-lifetime OnceCell defaulting to
+    // ".", and the blob swarm roots its store at `<data>/blobs/<node>` — under
+    // `flutter test` that "." is the REPO, which is how a blob store from this
+    // very file ended up committed in 058a69e.
+    final dataDir = tmp.path.toNativeUtf8();
+    final dirOk = _lib.lookupFunction<Bool Function(Pointer<Utf8>),
+        bool Function(Pointer<Utf8>)>('cyan_set_data_dir')(dataDir);
+    calloc.free(dataDir);
+    expect(dirOk, isTrue,
+        reason: 'cyan_set_data_dir refused ${tmp.path} — the engine would '
+            'write its blob store into the repository');
+
     // A throwaway identity in a throwaway directory. Nothing here touches the
     // developer's real ~/.cyan data — this suite must never be able to damage
     // a working install.

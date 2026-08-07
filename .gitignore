@@ -60,3 +60,9 @@ lib/config/secrets.dart
 
 # Staged engine — built from cyan-backend, never committed (65 MB)
 windows/Libraries/*.dll
+
+# Engine runtime state written by the Tier-2 suites. cyan-backend's DATA_DIR is
+# a OnceCell defaulting to ".", and under `flutter test` that "." is THIS repo,
+# so the blob swarm rooted its store here. The suites now call
+# cyan_set_data_dir(<temp>) first; this keeps a stray run out of the tree.
+/blobs/

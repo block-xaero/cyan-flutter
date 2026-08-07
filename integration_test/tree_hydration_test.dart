@@ -57,6 +57,13 @@ void main() {
   setUpAll(() async {
     tmp = Directory.systemTemp.createTempSync('cyan_tree_');
 
+    // BEFORE the boot: the engine's `DATA_DIR` is a process-lifetime OnceCell
+    // that defaults to ".", and its blob store roots at `<data>/blobs/<node>`.
+    // Under `flutter test` that "." is the REPOSITORY.
+    expect(CyanFFI.setDataDir(tmp.path), isTrue,
+        reason: 'the engine refused ${tmp.path} as its data dir and would '
+            'write its blob store into the source tree');
+
     // A throwaway identity in a throwaway directory — this suite must never be
     // able to damage a working install. Same boot the round trip uses, because
     // a bare `cyan_init` leaves no identity to stamp the seeded groups with.

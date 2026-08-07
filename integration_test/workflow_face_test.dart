@@ -48,6 +48,10 @@ void main() {
 
   setUpAll(() async {
     tmp = Directory.systemTemp.createTempSync('cyan_workflow_');
+    // BEFORE the boot — see tree_hydration_test.dart: the engine's data dir
+    // defaults to "." and its blob store would land in the repository.
+    expect(CyanFFI.setDataDir(tmp.path), isTrue,
+        reason: 'the engine refused ${tmp.path} as its data dir');
     final ok = CyanFFI.initWithIdentity(
       dbPath: '${tmp.path}/cyan.db',
       secretKeyHex: List.filled(64, 'c').join(),
