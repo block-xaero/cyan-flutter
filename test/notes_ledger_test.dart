@@ -12,9 +12,11 @@
 //   • deleting a note removes it from the ledger
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cyan_flutter/ffi/fake_cyan_backend.dart';
+import 'package:cyan_flutter/ffi/parity_models.dart';
 import 'package:cyan_flutter/providers/notes_ledger_provider.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_ledger.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_view.dart';
@@ -59,7 +61,15 @@ void main() {
     // AUTHOR — the resolved name and the craft role the engine stamped at
     // authoring time. Never the raw node id.
     expect(ravi.authorId, 'node-ravi-91de');
-    expect(find.text('Ravi Shah · editor'), findsOneWidget);
+    // Scoped to THIS note's row: the same teammate authors more than one note
+    // on the board, and asserting a bare text match would only be testing that
+    // the fixture happens to have one of them.
+    expect(
+        tester
+            .widget<Text>(
+                find.byKey(const ValueKey('notes-ledger-author-n-note-eng-1')))
+            .data,
+        'Ravi Shah · editor');
     expect(find.textContaining(ravi.authorId), findsNothing);
     // This device's own notes read "You" rather than its node id.
     expect(find.text('You · producer'), findsNWidgets(2));
@@ -205,5 +215,140 @@ void main() {
     // The rest of the ledger is untouched — a delete removes ONE note.
     expect(find.text('Nothing ships outside the device before the review gate.'),
         findsOneWidget);
+  });
+
+  // ── C7: what the note is ABOUT and where it CAME FROM ────────────────────
+
+  testWidgets('a row shows its anchor and its from-chat provenance',
+      (tester) async {
+    final backend = FakeCyanBackend();
+    await pumpParity(tester, const ParityNotesView(boardId: _board),
+        backend: backend, size: _face);
+
+    final decision =
+        (await backend.noteList(_board)).firstWhere((n) => n.kind == 'decision');
+    expect(decision.anchorKind, 'step');
+    expect(decision.anchorId, 'step-audio-conform');
+    expect(decision.originRef, 'chat:msg-eng-42');
+
+    // It files under DECISIONS, with its kind chip…
+    expect(find.text('DECISIONS'), findsOneWidget);
+    expect(find.text('decision'), findsOneWidget);
+    // …the human anchor label, truncated the way the reference truncates it…
+    expect(
+        tester
+            .widget<Text>(find
+                .byKey(ValueKey('notes-ledger-anchor-${decision.id}')))
+            .data,
+        'on step step-a');
+    // …and the glyph that says a human did not type this here.
+    expect(find.byKey(ValueKey('notes-ledger-fromchat-${decision.id}')),
+        findsOneWidget);
+    expect(find.text('from chat'), findsOneWidget);
+
+    // A note with no anchor draws NEITHER — no placeholder, no "unanchored".
+    expect(find.byKey(const ValueKey('notes-ledger-anchor-n-note-eng-1')),
+        findsNothing);
+    expect(find.byKey(const ValueKey('notes-ledger-fromchat-n-note-eng-1')),
+        findsNothing);
+  });
+
+  test('an anchor kind this build does not know renders no label at all', () {
+    // The four the reference knows.
+    expect(
+        const CyanNote(id: 'a', anchorKind: 'step', anchorId: 'step-titles')
+            .anchorLabel,
+        'on step step-t');
+    expect(
+        const CyanNote(id: 'a', anchorKind: 'board', anchorId: 'b-1')
+            .anchorLabel,
+        'board');
+    expect(
+        const CyanNote(id: 'a', anchorKind: 'run', anchorId: 'r-9').anchorLabel,
+        'run r-9');
+    expect(
+        const CyanNote(id: 'a', anchorKind: 'frame', anchorId: '1020')
+            .anchorLabel,
+        'frame 1020');
+    // A kind from a newer engine: an honest blank, never a confident mislabel.
+    expect(
+        const CyanNote(id: 'a', anchorKind: 'shot', anchorId: 's-4').anchorLabel,
+        isNull);
+    // A HALF anchor is no anchor — the engine coerces it that way too.
+    expect(const CyanNote(id: 'a', anchorKind: 'step').anchorLabel, isNull);
+    expect(const CyanNote(id: 'a', anchorId: 'step-x').anchorLabel, isNull);
+    // Provenance is only chat provenance when it says so.
+    expect(
+        const CyanNote(id: 'a', originRef: 'chat:m1').isPromotedFromChat, isTrue);
+    expect(
+        const CyanNote(id: 'a', originRef: 'email:m1').isPromotedFromChat,
+        isFalse);
+    expect(const CyanNote(id: 'a').isPromotedFromChat, isFalse);
+  });
+
+  test('an anchored write carries the anchor and the provenance through the '
+      'seam', () async {
+    final backend = FakeCyanBackend();
+    final queued = await backend.notePutAnchored(
+      _board,
+      'Lock the grade before the DCP.',
+      kind: 'decision',
+      anchorKind: 'step',
+      anchorId: 'step-titles',
+      originRef: 'chat:msg-eng-99',
+      authorRole: 'colorist',
+    );
+    expect(queued, isTrue);
+
+    final written = (await backend.noteList(_board))
+        .firstWhere((n) => n.text == 'Lock the grade before the DCP.');
+    expect(written.kind, 'decision');
+    expect(written.anchorKind, 'step');
+    expect(written.anchorId, 'step-titles');
+    expect(written.originRef, 'chat:msg-eng-99');
+    expect(written.authorRole, 'colorist');
+    expect(written.anchorLabel, 'on step step-t');
+    expect(written.isPromotedFromChat, isTrue);
+
+    // A HALF anchor is stored as NO anchor rather than a dangling one.
+    await backend.notePutAnchored(_board, 'Half-anchored.',
+        anchorKind: 'step');
+    final half = (await backend.noteList(_board))
+        .firstWhere((n) => n.text == 'Half-anchored.');
+    expect(half.anchorKind, isNull);
+    expect(half.anchorId, isNull);
+  });
+
+  testWidgets('Copy notes puts the ENGINE\'s markdown on the clipboard',
+      (tester) async {
+    final backend = FakeCyanBackend();
+    String? copied;
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied = (call.arguments as Map)['text'] as String?;
+        }
+        return null;
+      },
+    );
+    addTearDown(() => tester.binding.defaultBinaryMessenger
+        .setMockMethodCallHandler(SystemChannels.platform, null));
+
+    await pumpParity(tester, const ParityNotesView(boardId: _board),
+        backend: backend, size: _face);
+
+    await tester.tap(find.byKey(const ValueKey('notes-ledger-copy')));
+    await tester.pumpAndSettle();
+
+    // It is the engine's own rendering, verbatim — not a re-render of the rows.
+    expect(copied, isNotNull, reason: 'nothing reached the clipboard');
+    expect(copied, await backend.exportNotesMarkdown(_board));
+    expect(find.text('Copied'), findsOneWidget);
+
+    // The receipt is a beat, not a state: the button goes back to offering the
+    // copy rather than reading "Copied" forever.
+    await tester.pump(const Duration(milliseconds: 1600));
+    expect(find.text('Copy notes'), findsOneWidget);
   });
 }

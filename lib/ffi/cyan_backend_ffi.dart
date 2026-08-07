@@ -1487,6 +1487,45 @@ class CyanBackendFFI implements CyanBackend {
   }
 
   @override
+  Future<bool> notePutAnchored(
+    String boardId,
+    String text, {
+    String? noteId,
+    String? tenantId,
+    String scope = 'board',
+    String kind = 'editor-note',
+    String? anchorKind,
+    String? anchorId,
+    String? originRef,
+    String? authorRole,
+  }) async {
+    // The C verbs hardcode the C7 keys to null, so an anchored note has to go
+    // through the JSON command door. `cyan_send_command` ignores its component
+    // argument outright — the command's own `type` is what routes it.
+    //
+    // A key is written ONLY when it is set: the engine's `PutNote` is
+    // `#[serde(default)]` on every optional, so an explicit null and an absent
+    // key mean the same thing to it, but an absent key keeps the pre-C7 wire
+    // byte-identical, which is the shape the reference sends.
+    final body = <String, dynamic>{
+      'type': 'PutNote',
+      'board_id': boardId,
+      'note_id': noteId,
+      'tenant_id': tenantId,
+      'text': text,
+      'scope': scope,
+      'kind': kind,
+      if (anchorKind != null && anchorKind.isNotEmpty)
+        'anchor_kind': anchorKind,
+      if (anchorId != null && anchorId.isNotEmpty) 'anchor_id': anchorId,
+      if (originRef != null && originRef.isNotEmpty) 'origin_ref': originRef,
+      if (authorRole != null && authorRole.isNotEmpty)
+        'author_role': authorRole,
+    };
+    return CyanFFI.sendCommand('notes', jsonEncode(body));
+  }
+
+  @override
   Future<void> noteDelete(String id) async => CyanFFI.noteDelete(id);
 
   // ---- timecoded notes: review pinned to a moment in the asset ----------------

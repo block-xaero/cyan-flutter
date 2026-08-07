@@ -1859,6 +1859,15 @@ class CyanNote {
   /// and null whenever the engine recorded none — never inferred here.
   final String? authorRole;
 
+  /// CHAT C7 — what the note is anchored to WITHIN the board (`step` | `board` |
+  /// `run` | `frame`), with [anchorId] naming the thing. Both null ⇒ unanchored.
+  final String? anchorKind;
+  final String? anchorId;
+
+  /// CHAT C7 — where the note CAME FROM. `chat:<message_id>` for a note promoted
+  /// out of the chat lane; the inbound lane stamps its own external ids here.
+  final String? originRef;
+
   const CyanNote({
     required this.id,
     this.boardId = '',
@@ -1871,23 +1880,56 @@ class CyanNote {
     this.scope = 'board',
     this.kind = 'editor-note',
     this.authorRole,
+    this.anchorKind,
+    this.anchorId,
+    this.originRef,
   });
 
   factory CyanNote.fromJson(Map<String, dynamic> j) {
-    final role = j['author_role'] as String?;
+    String? opt(String key) {
+      final v = j[key] as String?;
+      return (v == null || v.isEmpty) ? null : v;
+    }
+
     return CyanNote(
       id: j['id'] as String? ?? '',
       boardId: j['board_id'] as String? ?? '',
       tenantId: j['tenant_id'] as String? ?? '',
       authorId: j['author_id'] as String? ?? '',
       authorName: j['author_name'] as String? ?? '',
-      text: j['text'] as String? ?? '',
+      // The engine's DTO spells it `text`; the app-side wire and the note EVENTS
+      // spell it `content`. Both are read, exactly as `BoardNote.from` does —
+      // one spelling would silently blank every note off the other lane.
+      text: j['text'] as String? ?? j['content'] as String? ?? '',
       createdAt: (j['created_at'] as num?)?.toInt() ?? 0,
       updatedAt: (j['updated_at'] as num?)?.toInt() ?? 0,
       scope: j['scope'] as String? ?? 'board',
       kind: j['kind'] as String? ?? 'editor-note',
-      authorRole: (role == null || role.isEmpty) ? null : role,
+      authorRole: opt('author_role'),
+      anchorKind: opt('anchor_kind'),
+      anchorId: opt('anchor_id'),
+      originRef: opt('origin_ref'),
     );
+  }
+
+  /// PROVENANCE: this note was promoted out of the chat lane (⌘⇧E on the Mac).
+  /// The ledger row draws the from-chat glyph on these.
+  bool get isPromotedFromChat => originRef?.startsWith('chat:') ?? false;
+
+  /// The human anchor label for a ledger row; null when unanchored. An anchor
+  /// kind this build does not know renders NO label — an honest blank beats a
+  /// confident mislabel.
+  String? get anchorLabel {
+    final kind = anchorKind;
+    final id = anchorId;
+    if (kind == null || id == null) return null;
+    return switch (kind) {
+      'step' => 'on step ${id.length <= 6 ? id : id.substring(0, 6)}',
+      'board' => 'board',
+      'run' => 'run $id',
+      'frame' => 'frame $id',
+      _ => null,
+    };
   }
 }
 

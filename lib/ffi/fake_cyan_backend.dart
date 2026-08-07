@@ -2779,6 +2779,26 @@ class FakeCyanBackend implements CyanBackend {
       kind: 'editor-note',
       authorRole: 'editor',
     ),
+    // A DECISION promoted out of the chat lane (⌘⇧E on the Mac) and anchored to
+    // the step it was taken about. Both halves of the C7 lane at once: the
+    // ledger row draws its anchor label AND its from-chat provenance, and
+    // neither can be rendered from a note that carries only kind and text.
+    CyanNote(
+      id: 'n-dec-eng-1',
+      boardId: 'b-eng-1',
+      tenantId: 'g-eng',
+      authorId: 'node-ravi-91de',
+      authorName: 'Ravi Shah',
+      text: 'We ship the 1080 proxy for producer review; the master stays here.',
+      createdAt: _stamp(6),
+      updatedAt: _stamp(6),
+      scope: 'board',
+      kind: 'decision',
+      authorRole: 'editor',
+      anchorKind: 'step',
+      anchorId: 'step-audio-conform',
+      originRef: 'chat:msg-eng-42',
+    ),
   ];
 
   /// Monotonic clock for writes, so later notes sort after earlier ones without
@@ -2878,6 +2898,68 @@ class FakeCyanBackend implements CyanBackend {
       updatedAt: stamp,
       authorRole: _productionRole.isEmpty ? null : _productionRole,
     ));
+  }
+
+  @override
+  Future<bool> notePutAnchored(
+    String boardId,
+    String text, {
+    String? noteId,
+    String? tenantId,
+    String scope = 'board',
+    String kind = 'editor-note',
+    String? anchorKind,
+    String? anchorId,
+    String? originRef,
+    String? authorRole,
+  }) async {
+    // The engine coerces a HALF anchor (a kind with no id, or an id with no
+    // kind) to no anchor at all rather than storing a dangling one — the ledger
+    // row then draws no label, which is the honest reading.
+    final anchored = (anchorKind?.isNotEmpty ?? false) &&
+        (anchorId?.isNotEmpty ?? false);
+    final stamp = _stamp(0) + (++_noteSeq);
+    final existing = noteId == null
+        ? -1
+        : _noteStore.indexWhere((note) => note.id == noteId);
+    if (existing >= 0) {
+      final prior = _noteStore[existing];
+      _noteStore[existing] = CyanNote(
+        id: prior.id,
+        boardId: prior.boardId,
+        tenantId: prior.tenantId,
+        authorId: prior.authorId,
+        authorName: prior.authorName,
+        text: text,
+        createdAt: prior.createdAt,
+        updatedAt: stamp,
+        scope: scope,
+        kind: kind,
+        authorRole: authorRole ?? prior.authorRole,
+        anchorKind: anchored ? anchorKind : prior.anchorKind,
+        anchorId: anchored ? anchorId : prior.anchorId,
+        originRef: originRef ?? prior.originRef,
+      );
+      return true;
+    }
+    _noteStore.add(CyanNote(
+      id: noteId ?? 'n-$kind-$boardId-$_noteSeq',
+      boardId: boardId,
+      tenantId: tenantId ?? _groupIdFor(boardId),
+      authorId: profile?.nodeId ?? '',
+      authorName: profile?.label ?? '',
+      text: text,
+      createdAt: stamp,
+      updatedAt: stamp,
+      scope: scope,
+      kind: kind,
+      authorRole: authorRole ??
+          (_productionRole.isEmpty ? null : _productionRole),
+      anchorKind: anchored ? anchorKind : null,
+      anchorId: anchored ? anchorId : null,
+      originRef: (originRef?.isEmpty ?? true) ? null : originRef,
+    ));
+    return true;
   }
 
   @override

@@ -223,6 +223,22 @@ class NotesLedgerController extends StateNotifier<NotesLedgerState> {
     return true;
   }
 
+  /// The board's ledger rendered as markdown — the ENGINE's own rendering
+  /// (`cyan_export_notes_markdown`), so a copy taken here reads identically to
+  /// one taken from the shipping Mac app. Null when the engine rendered nothing
+  /// to copy; the caller then puts nothing on the clipboard rather than
+  /// clearing it.
+  Future<String?> markdownExport() async {
+    try {
+      final markdown = await _backend.exportNotesMarkdown(boardId);
+      if (markdown == null || markdown.isEmpty) return null;
+      return markdown;
+    } catch (e) {
+      if (mounted) state = state.copyWith(error: 'Could not export notes: $e');
+      return null;
+    }
+  }
+
   /// Remove a note from the ledger.
   Future<bool> deleteNote(String id) async {
     try {

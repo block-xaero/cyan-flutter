@@ -502,6 +502,30 @@ abstract class CyanBackend {
   Future<void> notePut(String boardId, String text,
       {String? noteId, String? tenantId});
 
+  /// Write a note carrying its ANCHOR and its PROVENANCE — the C7 lane the
+  /// ledger's anchor label and from-chat glyph are drawn from.
+  ///
+  /// The plain C verbs (`cyan_note_put` / `cyan_note_put_scoped`) hardcode
+  /// `anchor_kind`/`anchor_id`/`origin_ref` to null, so an anchored note cannot
+  /// be written through them at all. The engine takes one through the JSON
+  /// command door (`cyan_send_command` with a `PutNote` body), which is exactly
+  /// what SwiftUI's `BoardNote.toJSON()` feeds it. Fire-and-forget like the
+  /// other note writes: callers re-read.
+  ///
+  /// False when the command could not even be queued.
+  Future<bool> notePutAnchored(
+    String boardId,
+    String text, {
+    String? noteId,
+    String? tenantId,
+    String scope = 'board',
+    String kind = 'editor-note',
+    String? anchorKind,
+    String? anchorId,
+    String? originRef,
+    String? authorRole,
+  });
+
   /// Delete a note by id. Fire-and-forget for the same reason as [notePut].
   Future<void> noteDelete(String id);
 

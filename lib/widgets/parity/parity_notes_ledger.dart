@@ -14,7 +14,10 @@
 // SwiftUI reference (read-only):
 //   cyan-iOS/Cyan/Cyan/Views/BoardNotesLedgerView.swift
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
@@ -38,8 +41,14 @@ class _ParityNotesLedgerState extends ConsumerState<ParityNotesLedger> {
   String? _editingId;
   bool _busy = false;
 
+  /// The copy action's own receipt, cleared after a beat — the reference's
+  /// "Copied" label.
+  bool _copied = false;
+  Timer? _copiedReset;
+
   @override
   void dispose() {
+    _copiedReset?.cancel();
     _compose.dispose();
     _edit.dispose();
     super.dispose();
@@ -75,6 +84,23 @@ class _ParityNotesLedgerState extends ConsumerState<ParityNotesLedger> {
     });
   }
 
+  /// Copy the ledger as markdown, for pasting onto another board's notes. The
+  /// clipboard is only touched when the engine actually rendered something —
+  /// a failed export must not silently WIPE what the operator had copied.
+  Future<void> _copyMarkdown() async {
+    final markdown = await _controller.markdownExport();
+    if (!mounted || markdown == null) return;
+    await Clipboard.setData(ClipboardData(text: markdown));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    // Held so it can be CANCELLED on dispose: a face torn down inside the
+    // receipt's window would otherwise leave a timer firing into a dead state.
+    _copiedReset?.cancel();
+    _copiedReset = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _copied = false);
+    });
+  }
+
   Future<void> _delete(String id) async {
     if (_busy) return;
     setState(() => _busy = true);
@@ -101,6 +127,26 @@ class _ParityNotesLedgerState extends ConsumerState<ParityNotesLedger> {
             enabled: !_busy,
             onAdd: _add,
           ),
+          // The ledger's own affordance on what it holds. "Create workflow" —
+          // the reference's other action — is a LENS TRANSPILE over HTTP
+          // (NotesIntentViewModel → the /transpile lane), so it belongs to the
+          // LensApi seam and is deliberately NOT drawn here: a button with no
+          // lane behind it is worse than no button.
+          if (!state.isEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(10, 0, 10, 6),
+              child: Row(
+                children: [
+                  _Pill(
+                    key: const ValueKey('notes-ledger-copy'),
+                    label: _copied ? 'Copied' : 'Copy notes',
+                    tint: MonokaiTheme.surfaceLight,
+                    onTap: _busy ? null : _copyMarkdown,
+                  ),
+                  const Spacer(),
+                ],
+              ),
+            ),
           const Divider(height: 1, color: MonokaiTheme.divider),
           if (state.error != null)
             Padding(
@@ -381,6 +427,44 @@ class _LedgerRow extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     )),
               ),
+              // WHAT the note is about, when the engine recorded an anchor. An
+              // anchor kind this build does not know renders nothing at all —
+              // an honest blank beats a confident mislabel.
+              if (note.anchorLabel != null) ...[
+                const SizedBox(width: 6),
+                Flexible(
+                  child: Text(
+                    note.anchorLabel!,
+                    key: ValueKey('notes-ledger-anchor-${note.id}'),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: MonokaiTheme.labelSmall.copyWith(
+                      fontFamily: 'monospace',
+                      color: MonokaiTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+              // WHERE it came from: a note promoted out of the chat lane says so,
+              // so the ledger never reads as if someone authored it here.
+              if (note.isPromotedFromChat) ...[
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: 'Promoted from the chat lane (${note.originRef})',
+                  child: Row(
+                    key: ValueKey('notes-ledger-fromchat-${note.id}'),
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.chat_bubble_outline,
+                          size: 9, color: MonokaiTheme.comment),
+                      const SizedBox(width: 2),
+                      Text('from chat',
+                          style: MonokaiTheme.labelSmall
+                              .copyWith(color: MonokaiTheme.comment)),
+                    ],
+                  ),
+                ),
+              ],
               const Spacer(),
               if (!editing) ...[
                 _RowAction(
