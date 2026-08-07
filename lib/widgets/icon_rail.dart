@@ -15,7 +15,6 @@ class IconRail extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final currentMode = ref.watch(viewModeProvider);
     final showConsole = ref.watch(showConsoleProvider);
-    final showDMs = ref.watch(showDMsPanelProvider);
     
     return Container(
       width: 56,  // Match Swift: frame(width: 56)
@@ -73,16 +72,6 @@ class IconRail extends ConsumerWidget {
             accentColor: const Color(0xFF66D9EF),  // Cyan
             onTap: () => ref.read(showConsoleProvider.notifier).state = !showConsole,
           ),
-          
-          // DMs
-          _RailButton(
-            icon: Icons.mark_chat_unread_outlined,
-            label: 'DMs',
-            isSelected: showDMs,
-            accentColor: const Color(0xFFF92672),  // Pink/red
-            onTap: () => ref.read(showDMsPanelProvider.notifier).state = !showDMs,
-          ),
-          
           const Spacer(),
           
           // Bottom section: Actions

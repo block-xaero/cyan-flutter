@@ -34,9 +34,6 @@ class ViewModeNotifier extends StateNotifier<ViewMode> {
   }
 }
 
-/// DMs panel visibility (separate from main chat)
-final showDMsPanelProvider = StateProvider<bool>((ref) => false);
-
 /// Console visibility
 final showConsoleProvider = StateProvider<bool>((ref) => false);
 

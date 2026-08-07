@@ -9,7 +9,6 @@ import '../widgets/status_bar.dart';
 import '../widgets/file_tree_widget.dart';
 import '../widgets/all_boards_grid.dart';
 import '../widgets/full_chat_view.dart';
-import '../widgets/dms_panel.dart';
 import '../widgets/board_detail_view.dart';
 import '../providers/selection_provider.dart';
 import '../providers/navigation_provider.dart';
@@ -64,8 +63,7 @@ class _MainContent extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final viewMode = ref.watch(viewModeProvider);
-    final showDMs = ref.watch(showDMsPanelProvider);
-    
+
     Widget content;
     
     switch (viewMode) {
@@ -83,22 +81,7 @@ class _MainContent extends ConsumerWidget {
         break;
     }
     
-    // Wrap with optional panels
-    return Row(
-      children: [
-        // Main content
-        Expanded(child: content),
-        
-        // DMs panel (if shown)
-        if (showDMs) ...[
-          Container(width: 1, color: MonokaiTheme.divider),
-          const SizedBox(
-            width: 320,
-            child: DMsPanel(),
-          ),
-        ],
-      ],
-    );
+    return content;
   }
 }
 
