@@ -63,7 +63,26 @@ void main() {
     lib = _engine();
     tmp = Directory.systemTemp.createTempSync('cyan_tier2_');
   });
-  tearDownAll(() => tmp.deleteSync(recursive: true));
+  // The engine parks its `CyanSystem` in a process-lifetime `OnceCell` and
+  // exports NO shutdown verb (checked against the PE export table — there is no
+  // cyan_close/cyan_shutdown/cyan_deinit), so the SQLite handle `cyan_init`
+  // opens stays open until the process exits. POSIX unlinks an open file
+  // happily; Windows refuses with errno 32 and the whole file goes red on
+  // cleanup while every assertion in it passed.
+  //
+  // So the temp dir is reaped by the OS here, not by us — but say that OUT LOUD
+  // instead of swallowing it, and still fail on any other deletion error.
+  tearDownAll(() {
+    try {
+      tmp.deleteSync(recursive: true);
+    } on PathAccessException catch (e) {
+      if (!Platform.isWindows) rethrow;
+      // ignore: avoid_print
+      print('note: left ${tmp.path} for the OS to reap — the engine still holds '
+          'the database open and Windows will not unlink an open file. It has '
+          'no shutdown verb to call. ($e)');
+    }
+  });
 
   // THE POINT OF THIS FILE. A silent no-op fallback is the production hazard:
   // the app must reach a REAL symbol, not a null-degraded stub.
@@ -107,7 +126,7 @@ void main() {
   // uninitialised engine hard-crashes the process. That is engine behaviour and
   // belongs in its own test, not here.
   test('the bundled engine exposes the FULL verb surface, not a stale subset', () {
-    const expectedAtLeast = 150; // engine ships 155; a stale build had 88
+    const expectedAtLeast = 150; // engine ships 157; a stale build had 88
     var found = 0;
     for (final v in _knownVerbs) {
       try {
@@ -115,21 +134,29 @@ void main() {
         found++;
       } catch (_) {}
     }
+    final rebuild = Platform.isWindows
+        ? 'Rebuild windows\\Libraries\\cyan_backend.dll from cyan-backend '
+            '(cargo build --release --lib) and re-stage it beside the runner.'
+        : 'Rebuild macos/Libraries/libcyan_core.dylib from cyan-backend and '
+            'confirm the Embed Cyan Engine phase ran.';
     expect(found, greaterThanOrEqualTo(expectedAtLeast),
         reason: 'only $found of ${_knownVerbs.length} engine verbs resolved in the '
-            'bundled dylib — it is STALE. Rebuild macos/Libraries/libcyan_core.dylib '
-            'from cyan-backend and confirm the Embed Cyan Engine phase ran.');
+            'bundled engine — it is STALE. $rebuild');
   });
 }
 
-/// The engine's exported verb surface, captured from the built dylib.
+/// The engine's exported verb surface, captured from the built library.
 /// If the engine gains verbs this list is stale — regenerate with:
-///   nm -gU <libcyan_backend.dylib> | grep -oE '_cyan_[a-z0-9_]+' | sed 's/^_//' | sort -u
+///   macOS:   nm -gU <libcyan_backend.dylib> | grep -oE '_cyan_[a-z0-9_]+' | sed 's/^_//' | sort -u
+///   Windows: dumpbin /EXPORTS <cyan_backend.dll>   (a PE export table, NOT nm —
+///            nm on a DLL also reports internal Rust symbols, thousands of them)
 const _knownVerbs = <String>[
   'cyan_act_on_timecode_note',
   'cyan_add_board_label',
   'cyan_ai_command',
   'cyan_autocomplete_path',
+  'cyan_autopilot_get',
+  'cyan_autopilot_set',
   'cyan_board_review_assignee',
   'cyan_board_set_review_assignee',
   'cyan_board_video_media',
