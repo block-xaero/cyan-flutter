@@ -67,7 +67,7 @@ Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\
 | # | tier-2 target | status | notes |
 |---|---|---|---|
 | T1 | `integration_test/real_engine_test.dart` | **green (4/4, Windows)** | engine loads from `windows\Libraries`, `cyan_init` writes a real db, full 157-verb surface resolves. The reported ":66 stale symbols" was a misdiagnosis — dumpbin `/EXPORTS` confirms every listed verb exists; the failure was `tearDownAll` (no engine shutdown verb ⇒ SQLite stays open ⇒ Windows won't unlink). |
-| T2 | `integration_test/engine_roundtrip_test.dart` | todo | write through FFI, read back two ways |
+| T2 | `integration_test/engine_roundtrip_test.dart` | **green (2/2, Windows)** | passed on Windows unmodified: `cyan_init_with_identity` boots, `cyan_create_group`/`cyan_create_workspace` write, and the event bus + `cyan_get_workspaces_for_group` agree on the full set. The Windows write path is real. |
 | T3+ | real FFI hydration per screen | todo | Boards/Explorer → Workflow → Dashboard → Notes → Ops trio → Marketplace → Lens → Chat |
 
 **Seam truth:** `CyanBackendFFI`'s loaders (`loadWorkflow`, `loadNotes`, `loadOpsRuns`,

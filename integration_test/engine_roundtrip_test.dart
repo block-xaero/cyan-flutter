@@ -151,10 +151,18 @@ void main() {
         reason: 'boot returned true but wrote no database');
   });
 
+  // Same story as real_engine_test.dart: the engine holds the database open for
+  // the life of the process and exports no shutdown verb, so on Windows this
+  // unlink cannot succeed. Tolerate exactly that and NAME it — a bare
+  // `catch (_)` here would also hide a genuine cleanup bug.
   tearDownAll(() {
     try {
       tmp.deleteSync(recursive: true);
-    } catch (_) {/* the engine may still hold the WAL; the temp dir is disposable */}
+    } on FileSystemException catch (e) {
+      // ignore: avoid_print
+      print('note: left ${tmp.path} for the OS to reap — the engine still holds '
+          'the database/WAL open and has no shutdown verb to call. ($e)');
+    }
   });
 
   // ── behaviour: creating a group through the engine changes persisted state ──
