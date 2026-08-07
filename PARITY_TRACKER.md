@@ -64,10 +64,14 @@ proceed and Rick eyeballs the built app at the end.
 | 12 | Login / landing (front door) | ci-green | n/a | ParityLoginView — PRE-SESSION, so plain callbacks, NOT the seam (login happens before a backend session exists). Brand block (mark + "Cyan" + "Decentralized Collaboration"), two-mode segmented picker (Personal / Organization), personal = Create your identity (no account) + offline promise + Restore (Scan QR · Backup key), organization = optional tenant field + Sign in with your organization, red error notice box, loading overlay, durable-XaeroID footer; 8 widget tests (`test/login_view_test.dart`) |
 
 ## Tier-2 — the REAL engine (Windows, cyan-win)  ← live section
-The 302 widget tests all drive `FakeCyanBackend`; they prove wiring and say nothing about
-whether the engine is reached. Tier-2 runs against the natively built
-`cyan-backend/target/release/cyan_backend.dll`, staged at `windows\Libraries\`.
-Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\flutter\bin`).
+The 416 Tier-1 tests drive the two FAKES (`FakeCyanBackend`, `FakeLensApi`); they prove wiring
+and say nothing about whether the engine — or the lens — is reached. Tier-2 runs against the
+natively built `cyan-backend/target/release/cyan_backend.dll`, staged at `windows\Libraries\`.
+Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\flutter\bin`),
+**ONE FILE PER INVOCATION** — the engine parks `CyanSystem` in a process-lifetime `OnceCell`, so
+a second suite in the same run is refused its init and fails to load.
+There is no Tier-2 for the `LensApi` seam on this box: no lens runs here (see the seam-truth
+note below).
 
 | # | tier-2 target | status | notes |
 |---|---|---|---|
@@ -84,8 +88,8 @@ Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\
 | T11 | Notes LEDGER (`integration_test/notes_ledger_face_test.dart`) | **green (4/4, Windows)** | The receipt for PHASE-2 D2. A note authored through the seam comes back with the engine's own id, tenant and clocks; an edit lands in place without restamping `created_at` or minting a second note; a delete removes exactly one; and the C7 anchor + provenance survive the JSON-door write, so the ledger row's two new chips are drawn from data the engine kept. Every assertion POLLS — `cyan_note_put` queues a command and acknowledges nothing. |
 | T12 | Notes EDITOR (`integration_test/notes_editor_face_test.dart`) | **green (4/4, Windows) · save BLOCKED** | The row-5 block, proved through the face's own controller and with the toolbar's verdict pinned: the engine accepts the write, `storedKind` comes back `step`, `readBack` is false, and the face reports **"Not saved"** with the reason rather than a green dot. The A2 reviewer rail reads the board's `review_comment` timecoded notes and filters everything else out. |
 | T13 | Sources sheet (`integration_test/sources_face_test.dart`) | **green (6/6, Windows)** | All six ingest ops. `scan_now` over a folder with one media file: discovered 1 / ingested 1 / deduped 0; a SECOND scan: 1 / 0 / 1 — ingest is content-addressed, so a scheduled sensor does not duplicate the board's assets on every tick. `runs_for_board` matches what the scan materialized; `scan_due` obeys the caller's clock; an unknown op is an ERROR the sheet can show. **No production change was needed — this lane was already right end to end.** |
-| T15 | Autopilot lane (`integration_test/autopilot_face_test.dart`) | **green (6/6, Windows)** | Row 22's engine half. The default is `off` (every gate human), the mode round-trips and is PER BOARD, the kill switch works, a mode outside `autopilot::set_mode`'s vocabulary never reaches the engine and the board keeps what it had, and an unknown board answers a mode rather than throwing. Both verbs answer the JSON envelope, NOT a bool — a bool-returning binder would have dereferenced a JSON pointer as one. Also pins that `approved_by` reaches Dart, which is the field the Auto-approved chip is keyed on; driving the autopilot PUMP to a real policy clearance is Rust-internal and needs a bound model, so the data path is proved and the pump is not. |
 | T14 | Template picker (`integration_test/templates_face_test.dart`) | **green (5/5, Windows)** | The catalog is usable (every row has an id and a name), a clone materializes real authorable step cells, `cyan_template_clone_outcome` reports the typed result the picker polls for, and the NEW Replace lane really clears — the engine takes the deletes, a fresh clone lands on the cleared slate, and no old id comes back. Deleting an id the board never had is REFUSED, which is what stops a Replace believing it cleared a board it did not. |
+| T15 | Autopilot lane (`integration_test/autopilot_face_test.dart`) | **green (6/6, Windows)** | Row 22's engine half. The default is `off` (every gate human), the mode round-trips and is PER BOARD, the kill switch works, a mode outside `autopilot::set_mode`'s vocabulary never reaches the engine and the board keeps what it had, and an unknown board answers a mode rather than throwing. Both verbs answer the JSON envelope, NOT a bool — a bool-returning binder would have dereferenced a JSON pointer as one. Also pins that `approved_by` reaches Dart, which is the field the Auto-approved chip is keyed on; driving the autopilot PUMP to a real policy clearance is Rust-internal and needs a bound model, so the data path is proved and the pump is not. |
 
 ### Blocked, with the reason — checked against the engine's export table, not assumed
 | # | screen | why it is blocked | what would unblock it |
