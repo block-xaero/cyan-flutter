@@ -2143,9 +2143,30 @@ class FakeCyanBackend implements CyanBackend {
             waitingOn: step.reviewHold ? step.waitingOn : null,
             isLocalGate: step.localGate &&
                 step.status == PipelineStepState.aiComplete,
+            approvedBy: step.approvedBy,
           ),
       ],
     );
+  }
+
+  /// Per-board autopilot mode. The engine's default is `off` and so is this —
+  /// a board that has never been flipped gates on humans.
+  final Map<String, String> _autopilot = {};
+
+  @override
+  Future<String> autopilotMode(String boardId) async =>
+      _autopilot[boardId] ?? 'off';
+
+  @override
+  Future<String> setAutopilotMode(String boardId, String mode) async {
+    // The engine owns the vocabulary; an unknown mode is REFUSED and the board
+    // keeps the mode it had, so a caller cannot talk this fake into a state the
+    // real engine would reject.
+    if (!const {'off', 'assist', 'autopilot'}.contains(mode)) {
+      return autopilotMode(boardId);
+    }
+    _autopilot[boardId] = mode;
+    return mode;
   }
 
   @override
@@ -2163,7 +2184,27 @@ class FakeCyanBackend implements CyanBackend {
     // an assignee, so it only moves through [pipelineApproveAs].
     if (step.reviewHold) return false;
     step.status = PipelineStepState.humanApproved;
+    step.approvedBy = _clearedBy(boardId, null);
     return true;
+  }
+
+  /// The autopilot policy card id, verbatim from `autopilot.rs`. The `policy:`
+  /// prefix is what every reader keys the "was this a person?" question on.
+  static const String policyCardId = 'policy:dev-floor@v0';
+
+  /// Who a clearance is attributed to. A board flipped to AUTOPILOT has its
+  /// gates cleared by the POLICY, and the clearance says so — mirroring
+  /// `autopilot.rs`, which stamps `approved_by: POLICY_CARD_ID`. A fake that
+  /// recorded the operator's name here would make a policy clearance
+  /// indistinguishable from a human one, which is the exact thing the
+  /// Dashboard's chip exists to keep apart.
+  String? _clearedBy(String boardId, String? reviewer) {
+    if ((_autopilot[boardId] ?? 'off') == 'autopilot') return policyCardId;
+    if (reviewer != null && reviewer.isNotEmpty) return reviewer;
+    // An unscoped approve carries no reviewer on the wire either — the engine
+    // records whoever the session is. "you" is this fake's stand-in, and the
+    // only thing that matters about it is that it is NOT the policy prefix.
+    return 'you';
   }
 
   @override
@@ -2176,6 +2217,7 @@ class FakeCyanBackend implements CyanBackend {
     final refusal = _gateRefusal(step, reviewer);
     if (refusal != null) return PipelineAck(success: false, error: refusal);
     step.status = PipelineStepState.humanApproved;
+    step.approvedBy = _clearedBy(boardId, reviewer);
     return PipelineAck.ok;
   }
 
@@ -6424,6 +6466,10 @@ class _FakePipelineStep {
   String? aiResult;
   String? error;
 
+  /// WHO cleared this step's gate — a reviewer's name, or the autopilot policy
+  /// card (`policy:<card>`), exactly as `autopilot.rs` stamps it.
+  String? approvedBy;
+
   /// The step has executed at least once — cost and duration only accrue then.
   bool hasRun = false;
 
@@ -6436,6 +6482,7 @@ class _FakePipelineStep {
     error = null;
     aiResult = null;
     hasRun = false;
+    approvedBy = null;
   }
 }
 

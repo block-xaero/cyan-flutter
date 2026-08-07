@@ -125,12 +125,22 @@ class RunStep {
   final RunStepKind kind;
   final RunStepStatus status;
 
+  /// WHO cleared this step's gate — a person, or the autopilot policy card the
+  /// engine records as `policy:<card>`. Null when nothing has cleared it.
+  final String? approvedBy;
+
   const RunStep({
     required this.id,
     required this.title,
     required this.kind,
     required this.status,
+    this.approvedBy,
   });
+
+  /// The gate was cleared by POLICY, not by a person — the DAG draws its own
+  /// chip for this rather than a generic "Approved". The UI never lies about
+  /// who decided.
+  bool get isPolicyCleared => approvedBy?.startsWith('policy:') == true;
 }
 
 @immutable
@@ -1506,6 +1516,12 @@ class PipelineStep {
   /// this one regardless of [waitingOn].
   final bool isLocalGate;
 
+  /// WHO cleared this step's gate — the engine's `approved_by`. A human
+  /// reviewer's name, or the autopilot POLICY CARD that cleared it, which the
+  /// engine writes as `policy:<card>` (`autopilot.rs`). Null when nothing has
+  /// cleared it yet.
+  final String? approvedBy;
+
   const PipelineStep({
     required this.stepId,
     required this.title,
@@ -1520,7 +1536,16 @@ class PipelineStep {
     this.isReviewHold = false,
     this.waitingOn,
     this.isLocalGate = false,
+    this.approvedBy,
   });
+
+  /// This gate was cleared by the autopilot POLICY, not by a person.
+  ///
+  /// The distinction is the whole point of the design's §1: the UI never lies
+  /// about who decided. A policy-cleared gate gets its own chip carrying the
+  /// evidence-stamped card id — never a generic "Approved" that reads as a
+  /// human having looked at it.
+  bool get isPolicyCleared => approvedBy?.startsWith('policy:') == true;
 }
 
 /// The persisted single-run snapshot for a board (`cyan_pipeline_status`).

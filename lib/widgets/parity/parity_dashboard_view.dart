@@ -463,9 +463,14 @@ class _HumanSignal extends StatelessWidget {
           'Parked',
           MonokaiTheme.orange
         ),
-      DashboardStepState.approved ||
-      DashboardStepState.done =>
-        (Icons.verified, 'Approved', MonokaiTheme.green),
+      // AUTOPILOT (design §1): the UI never lies about who decided. A gate the
+      // POLICY cleared gets its own chip — a different word, a different
+      // colour, and the evidence-stamped card id on hover — never a generic
+      // "Approved", which reads as a person having looked at it.
+      DashboardStepState.approved || DashboardStepState.done => step
+              .isPolicyCleared
+          ? (Icons.airplanemode_active, 'Auto-approved', MonokaiTheme.purple)
+          : (Icons.verified, 'Approved', MonokaiTheme.green),
       DashboardStepState.failed => (
           Icons.gpp_bad,
           'Rejected',
@@ -473,7 +478,16 @@ class _HumanSignal extends StatelessWidget {
         ),
       _ => (Icons.person, 'Human', MonokaiTheme.comment),
     };
-    return _Lane(icon: icon, label: label, color: color);
+    final lane = _Lane(icon: icon, label: label, color: color);
+    // The card id is the EVIDENCE for a policy clearance. It rides on hover
+    // rather than in the chip, exactly as the reference does — the operator
+    // needs to see WHICH card cleared their gate without the DAG growing a
+    // column for it.
+    final card = step.approvedBy;
+    if (step.isPolicyCleared && card != null) {
+      return Tooltip(message: card, child: lane);
+    }
+    return lane;
   }
 }
 

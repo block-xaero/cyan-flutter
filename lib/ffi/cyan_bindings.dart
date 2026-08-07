@@ -377,6 +377,16 @@ typedef CyanPipelineStatusDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanPipelineApproveNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
 typedef CyanPipelineApproveDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> stepId);
 
+// Autopilot (design §1) — the per-board mode and its kill switch. Both return
+// the standard JSON envelope, NOT a bool: `{"success":true,"mode":"…"}`.
+typedef CyanAutopilotSetNative = Pointer<Utf8> Function(
+    Pointer<Utf8> boardId, Pointer<Utf8> mode);
+typedef CyanAutopilotSetDart = Pointer<Utf8> Function(
+    Pointer<Utf8> boardId, Pointer<Utf8> mode);
+
+typedef CyanAutopilotGetNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+typedef CyanAutopilotGetDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
+
 typedef CyanPipelineApproveAsNative = Pointer<Utf8> Function(
   Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
 typedef CyanPipelineApproveAsDart = Pointer<Utf8> Function(
@@ -768,6 +778,8 @@ class CyanBindings {
   late final CyanPipelineCompileDart pipelineCompile;
   late final CyanRunPipelineDart runPipeline;
   late final CyanPipelineStatusDart pipelineStatus;
+  late final CyanAutopilotSetDart autopilotSet;
+  late final CyanAutopilotGetDart autopilotGet;
   late final CyanPipelineApproveDart pipelineApprove;
   late final CyanPipelineApproveAsDart pipelineApproveAs;
   late final CyanPipelineRejectDart pipelineReject;
@@ -1144,6 +1156,8 @@ class CyanBindings {
     pipelineCompile = _lib.lookupFunction<CyanPipelineCompileNative, CyanPipelineCompileDart>('cyan_pipeline_compile');
     runPipeline = _lib.lookupFunction<CyanRunPipelineNative, CyanRunPipelineDart>('cyan_run_pipeline');
     pipelineStatus = _lib.lookupFunction<CyanPipelineStatusNative, CyanPipelineStatusDart>('cyan_pipeline_status');
+    autopilotSet = _lib.lookupFunction<CyanAutopilotSetNative, CyanAutopilotSetDart>('cyan_autopilot_set');
+    autopilotGet = _lib.lookupFunction<CyanAutopilotGetNative, CyanAutopilotGetDart>('cyan_autopilot_get');
     pipelineApprove = _lib.lookupFunction<CyanPipelineApproveNative, CyanPipelineApproveDart>('cyan_pipeline_approve');
     pipelineApproveAs = _lib.lookupFunction<CyanPipelineApproveAsNative, CyanPipelineApproveAsDart>('cyan_pipeline_approve_as');
     pipelineReject = _lib.lookupFunction<CyanPipelineRejectNative, CyanPipelineRejectDart>('cyan_pipeline_reject');
@@ -1364,6 +1378,8 @@ class CyanBindings {
     pipelineCompile = (Pointer<Utf8> p) => _nullptr;
     runPipeline = (Pointer<Utf8> p) => _nullptr;
     pipelineStatus = (Pointer<Utf8> p) => _nullptr;
+    autopilotSet = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    autopilotGet = (Pointer<Utf8> p) => _nullptr;
     pipelineApprove = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
     pipelineApproveAs = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) => _nullptr;
     pipelineReject = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
@@ -1559,6 +1575,8 @@ const List<String> _requiredSymbols = <String>[
   'cyan_pipeline_retry',
   'cyan_pipeline_run_step_local',
   'cyan_pipeline_status',
+  'cyan_autopilot_set',
+  'cyan_autopilot_get',
   'cyan_plugin_catalog',
   'cyan_plugin_config_get',
   'cyan_plugin_config_set',

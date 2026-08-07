@@ -76,6 +76,10 @@ class DagStep {
   /// The engine's own error text for a failed step.
   final String? error;
 
+  /// WHO cleared this step's gate — the engine's `approved_by`: a person, or
+  /// the autopilot policy card, which the engine writes as `policy:<card>`.
+  final String? approvedBy;
+
   const DagStep({
     required this.id,
     required this.title,
@@ -89,7 +93,13 @@ class DagStep {
     this.isReviewHold = false,
     this.waitingOn,
     this.error,
+    this.approvedBy,
   });
+
+  /// AUTOPILOT (design §1) — this gate was cleared by the POLICY, not a person.
+  /// The DAG draws its own chip for it, carrying the evidence-stamped card id,
+  /// rather than a generic "Approved" that would read as a human having looked.
+  bool get isPolicyCleared => approvedBy?.startsWith('policy:') == true;
 
   DagStep copyWith({
     String? title,
@@ -113,6 +123,7 @@ class DagStep {
         isReviewHold: isReviewHold,
         waitingOn: waitingOn,
         error: error,
+        approvedBy: approvedBy,
       );
 
   /// A human has to act before this step can move.
@@ -625,6 +636,7 @@ class DashboardController extends StateNotifier<DashboardState> {
           isReviewHold: s.isReviewHold,
           waitingOn: s.waitingOn,
           error: s.error,
+          approvedBy: s.approvedBy,
         ),
     ];
 

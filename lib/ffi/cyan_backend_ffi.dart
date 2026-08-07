@@ -392,6 +392,7 @@ class CyanBackendFFI implements CyanBackend {
                 ? RunStepKind.human
                 : RunStepKind.ai,
             status: _runStepStatus(s.status),
+            approvedBy: s.approvedBy,
           ),
       ],
     );
@@ -1227,6 +1228,36 @@ class CyanBackendFFI implements CyanBackend {
     );
   }
 
+  /// The engine's default, and the one this seam falls back to whenever it
+  /// cannot read a real answer. "I do not know" must read as "every gate is
+  /// still yours" — the opposite default would silently claim a delegation.
+  static const String _autopilotOff = 'off';
+
+  /// The three modes the engine's `autopilot::set_mode` admits. A mode outside
+  /// them is not sent: the engine owns the vocabulary, and a client that
+  /// invents one gets a refusal it would then have to explain.
+  static const Set<String> autopilotModes = {'off', 'assist', 'autopilot'};
+
+  @override
+  Future<String> autopilotMode(String boardId) async {
+    final map = _decode(CyanFFI.autopilotGet(boardId));
+    if (map == null || map['success'] != true) return _autopilotOff;
+    final mode = map['mode'] as String?;
+    return (mode == null || mode.isEmpty) ? _autopilotOff : mode;
+  }
+
+  @override
+  Future<String> setAutopilotMode(String boardId, String mode) async {
+    if (!autopilotModes.contains(mode)) return autopilotMode(boardId);
+    final map = _decode(CyanFFI.autopilotSet(boardId, mode));
+    // The write is only believed through a READ-BACK. `cyan_autopilot_set`
+    // echoes the mode it was handed on success, which is not the same fact as
+    // the engine holding it — and a toolbar that says AUTOPILOT over a board
+    // still gating on humans is the exact lie this control exists to prevent.
+    if (map == null || map['success'] != true) return autopilotMode(boardId);
+    return autopilotMode(boardId);
+  }
+
   @override
   Future<bool> pipelineApprove(String boardId, String stepId) async =>
       CyanFFI.pipelineApprove(boardId, stepId);
@@ -1358,6 +1389,10 @@ class CyanBackendFFI implements CyanBackend {
         isReviewHold: item['review_hold'] as bool? ?? false,
         waitingOn: item['waiting_on'] as String?,
         isLocalGate: item['local_gate'] as bool? ?? false,
+        // `pipeline.rs` emits the step's `human_reviewer` here, and the
+        // autopilot writes its POLICY CARD id into the same field. The face
+        // needs both to tell a person's approval from the policy's.
+        approvedBy: item['approved_by'] as String?,
       ));
     }
     return out;

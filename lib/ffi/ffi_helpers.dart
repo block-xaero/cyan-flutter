@@ -1311,6 +1311,35 @@ class CyanFFI {
     }
   }
   
+  /// AUTOPILOT (design §1) — set a board's mode (`off` | `assist` |
+  /// `autopilot`). Returns the engine's JSON envelope; both verbs answer
+  /// `{"success":…,"mode":"…"}` rather than a bare bool, so the caller can tell
+  /// a refusal from a mode.
+  static String? autopilotSet(String boardId, String mode) {
+    final boardPtr = boardId.toNativeUtf8();
+    final modePtr = mode.toNativeUtf8();
+    try {
+      final result = _b.autopilotSet(boardPtr, modePtr);
+      if (result == nullptr) return null;
+      return result.toDartStringAndFree();
+    } finally {
+      calloc.free(boardPtr);
+      calloc.free(modePtr);
+    }
+  }
+
+  /// AUTOPILOT — read a board's mode. The engine defaults to `off`.
+  static String? autopilotGet(String boardId) {
+    final ptr = boardId.toNativeUtf8();
+    try {
+      final result = _b.autopilotGet(ptr);
+      if (result == nullptr) return null;
+      return result.toDartStringAndFree();
+    } finally {
+      calloc.free(ptr);
+    }
+  }
+
   static bool pipelineApprove(String boardId, String stepId) {
     final boardPtr = boardId.toNativeUtf8();
     final stepPtr = stepId.toNativeUtf8();

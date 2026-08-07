@@ -77,10 +77,56 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
   String? _error;
   bool _busy = false;
 
+  /// The board's autopilot mode as the ENGINE holds it. Starts at `off`, which
+  /// is both the engine's default and the safe reading of "not yet asked" —
+  /// every gate is still the operator's until something says otherwise.
+  String _autopilot = 'off';
+
+  @override
+  void initState() {
+    super.initState();
+    _readAutopilot();
+  }
+
+  @override
+  void didUpdateWidget(covariant ParityWorkflowView old) {
+    super.didUpdateWidget(old);
+    // Re-pointing the face at another board must not leave the previous
+    // board's mode on the toolbar — the same keying bug row 16 found on Notes.
+    if (old.boardId != widget.boardId) {
+      setState(() => _autopilot = 'off');
+      _readAutopilot();
+    }
+  }
+
   @override
   void dispose() {
     _draft.dispose();
     super.dispose();
+  }
+
+  Future<void> _readAutopilot() async {
+    final board = widget.boardId;
+    final mode = await ref.read(cyanBackendProvider).autopilotMode(board);
+    if (!mounted || board != widget.boardId) return;
+    setState(() => _autopilot = mode);
+  }
+
+  /// Flip the mode, and show what the ENGINE answered rather than what was
+  /// asked for. `setAutopilotMode` reads back, so a refused write leaves the
+  /// toolbar telling the truth instead of claiming a delegation that never
+  /// happened.
+  Future<void> _setAutopilot(String mode) async {
+    final board = widget.boardId;
+    final settled =
+        await ref.read(cyanBackendProvider).setAutopilotMode(board, mode);
+    if (!mounted || board != widget.boardId) return;
+    setState(() {
+      _autopilot = settled;
+      _error = settled == mode
+          ? null
+          : 'The engine kept autopilot on ${settled.toUpperCase()}.';
+    });
   }
 
   // ---- authoring -----------------------------------------------------------
@@ -340,6 +386,8 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
               onReview: _review,
               onReset: _reset,
               onTemplates: _openTemplates,
+              autopilotMode: _autopilot,
+              onSetAutopilot: _setAutopilot,
             ),
             if (wf.isDeployed) const _LockedBanner(),
             if (_error != null)
@@ -641,12 +689,18 @@ class _Toolbar extends StatelessWidget {
   /// exactly the board a template is for.
   final VoidCallback? onTemplates;
 
+  /// The board's autopilot mode as the ENGINE holds it, and the setter.
+  final String autopilotMode;
+  final void Function(String mode)? onSetAutopilot;
+
   const _Toolbar({
     required this.workflow,
     this.onRun,
     this.onReview,
     this.onReset,
     this.onTemplates,
+    this.autopilotMode = 'off',
+    this.onSetAutopilot,
   });
 
   @override
@@ -686,6 +740,8 @@ class _Toolbar extends StatelessWidget {
             onTap: onRun,
           ),
           const SizedBox(width: 8),
+          _AutopilotControl(mode: autopilotMode, onSet: onSetAutopilot),
+          const SizedBox(width: 8),
           _ToolButton(
             icon: locked ? Icons.lock_open : Icons.lock,
             label: locked ? 'Unlock' : 'Deploy',
@@ -702,6 +758,78 @@ class _Toolbar extends StatelessWidget {
             onTap: onReset,
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// AUTOPILOT (design §1) — the per-board mode, beside Run.
+///
+/// Flipping to AUTOPILOT is the human ADOPTION act: the policy card starts
+/// clearing gates, and every clearance is stamped `policy:<card>` so the
+/// Dashboard can say who really decided. Flipping back is the KILL SWITCH.
+/// The label always shows the mode the ENGINE holds — never the one that was
+/// tapped — because a toolbar reading AUTOPILOT over a board still gating on
+/// humans is precisely the lie this control exists to prevent.
+class _AutopilotControl extends StatelessWidget {
+  final String mode;
+  final void Function(String mode)? onSet;
+
+  const _AutopilotControl({required this.mode, this.onSet});
+
+  /// The engine's vocabulary (`autopilot::set_mode`), in escalation order.
+  static const List<String> modes = ['off', 'assist', 'autopilot'];
+
+  static const String help = 'Autopilot: OFF = every gate human · '
+      'ASSIST = earned classes only · '
+      'AUTOPILOT = policy clears gates, you get digests + this kill switch';
+
+  Color get _tint => switch (mode) {
+        'autopilot' => MonokaiTheme.purple,
+        'assist' => MonokaiTheme.orange,
+        _ => MonokaiTheme.comment,
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: help,
+      child: PopupMenuButton<String>(
+        key: const ValueKey('workflow.autopilot'),
+        tooltip: '',
+        enabled: onSet != null,
+        onSelected: (m) => onSet?.call(m),
+        color: MonokaiTheme.surfaceLighter,
+        itemBuilder: (_) => [
+          for (final m in modes)
+            PopupMenuItem<String>(
+              key: ValueKey('workflow.autopilot.$m'),
+              value: m,
+              child: Row(
+                children: [
+                  Text(m.toUpperCase(), style: MonokaiTheme.labelMedium),
+                  const Spacer(),
+                  if (m == mode)
+                    const Icon(Icons.check,
+                        size: 12, color: MonokaiTheme.green),
+                ],
+              ),
+            ),
+        ],
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+                mode == 'autopilot'
+                    ? Icons.airplanemode_active
+                    : Icons.airplanemode_inactive,
+                size: 14,
+                color: _tint),
+            const SizedBox(width: 4),
+            Text(mode == 'off' ? 'Autopilot' : mode.toUpperCase(),
+                style: MonokaiTheme.labelMedium.copyWith(color: _tint)),
+          ],
+        ),
       ),
     );
   }

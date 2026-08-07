@@ -378,6 +378,23 @@ abstract class CyanBackend {
   /// cost, and the step currently holding the gate. Pure read.
   Future<PipelineStatus> pipelineStatus(String boardId);
 
+  /// AUTOPILOT (design §1) — a board's autopilot mode: `off` (every gate is
+  /// human), `assist` (earned classes only), `autopilot` (the policy card
+  /// clears gates; you get digests and the kill switch).
+  ///
+  /// Reading it is a READ, and it answers the engine's own default (`off`) for
+  /// a board that has never been flipped — an unreachable engine also answers
+  /// `off`, because the safe reading of "I do not know" is "every gate is
+  /// still yours".
+  Future<String> autopilotMode(String boardId);
+
+  /// Set a board's autopilot mode. Flipping TO `autopilot` is the human
+  /// ADOPTION act that delegates gate clearance to the policy; flipping back is
+  /// the kill switch. Answers the mode the ENGINE now holds, not the one that
+  /// was asked for — a refused write must not leave the toolbar claiming a
+  /// delegation that never happened.
+  Future<String> setAutopilotMode(String boardId, String mode);
+
   /// Clear a step's approval gate. False when the gate would not move.
   Future<bool> pipelineApprove(String boardId, String stepId);
 
