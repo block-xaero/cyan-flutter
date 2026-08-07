@@ -328,7 +328,11 @@ class CyanFFI {
     }
   }
   
-  static bool seedDemoIfEmpty() => _b.seedDemoIfEmpty();
+  /// INERT in this engine — the command it queues is a no-op kept for ABI
+  /// stability ("R10FB §D: demo seeding has been REMOVED"). The verb that
+  /// really seeds is [seedDemo]. Void on the wire, so there is nothing to
+  /// return and a bool here could only have been invented.
+  static void seedDemoIfEmpty() => _b.seedDemoIfEmpty();
   
   // ==========================================================================
   // STATS
@@ -671,22 +675,35 @@ class CyanFFI {
     }
   }
   
-  static String? getBoardsMetadata(List<String> boardIds) {
-    final json = jsonEncode(boardIds);
-    final ptr = json.toNativeUtf8();
+  /// Board metadata for a SCOPE — `scopeType` is the engine's own vocabulary
+  /// (`workspace` / `group` / …) and `scopeId` the id under it. It has never
+  /// taken a list of board ids; the old wrapper sent it one and the engine read
+  /// the JSON array as a scope kind that matches nothing.
+  static String? getBoardsMetadata(String scopeType, String scopeId) {
+    final tPtr = scopeType.toNativeUtf8();
+    final iPtr = scopeId.toNativeUtf8();
     try {
-      final result = _b.getBoardsMetadata(ptr);
+      final result = _b.getBoardsMetadata(tPtr, iPtr);
       if (result == nullptr) return null;
       return result.toDartStringAndFree();
     } finally {
-      calloc.free(ptr);
+      calloc.free(tPtr);
+      calloc.free(iPtr);
     }
   }
-  
-  static String? getTopBoards(int limit) {
-    final ptr = _b.getTopBoards(limit);
-    if (ptr == nullptr) return null;
-    return ptr.toDartStringAndFree();
+
+  /// The group's top boards. The GROUP is the first argument — the old wrapper
+  /// passed the limit into that slot, and the engine dereferenced the integer
+  /// as a string pointer.
+  static String? getTopBoards(String groupId, int limit) {
+    final gPtr = groupId.toNativeUtf8();
+    try {
+      final ptr = _b.getTopBoards(gPtr, limit);
+      if (ptr == nullptr) return null;
+      return ptr.toDartStringAndFree();
+    } finally {
+      calloc.free(gPtr);
+    }
   }
   
   static String? getBoardLink(String boardId) {
@@ -888,25 +905,37 @@ class CyanFFI {
     }
   }
   
-  static bool startDirectChat(String peerId, String workspaceId) {
+  /// Open a direct-chat stream with a peer. Void on the wire — the engine
+  /// queues the command and answers with a `ChatStreamReady` event, not a
+  /// return value.
+  static void startDirectChat(String peerId, String workspaceId) {
     final pPtr = peerId.toNativeUtf8();
     final wPtr = workspaceId.toNativeUtf8();
     try {
-      return _b.startDirectChat(pPtr, wPtr);
+      _b.startDirectChat(pPtr, wPtr);
     } finally {
       calloc.free(pPtr);
       calloc.free(wPtr);
     }
   }
   
-  static bool sendDirectChat(String peerId, String message) {
+  /// A direct message to a peer, in a WORKSPACE — the engine files the DM under
+  /// one, so there is no peer-only send. Void on the wire (it queues a command),
+  /// which is why nothing is returned: a bool here could only be invented.
+  /// [parentId] threads the message under an existing one.
+  static void sendDirectChat(String peerId, String workspaceId, String message,
+      {String? parentId}) {
     final pPtr = peerId.toNativeUtf8();
+    final wPtr = workspaceId.toNativeUtf8();
     final mPtr = message.toNativeUtf8();
+    final parentPtr = (parentId ?? '').toNativeUtf8();
     try {
-      return _b.sendDirectChat(pPtr, mPtr);
+      _b.sendDirectChat(pPtr, wPtr, mPtr, parentPtr);
     } finally {
       calloc.free(pPtr);
+      calloc.free(wPtr);
       calloc.free(mPtr);
+      calloc.free(parentPtr);
     }
   }
   
@@ -927,29 +956,31 @@ class CyanFFI {
     }
   }
   
-  static String? uploadFileToGroup(String path, String groupId) {
-    final pPtr = path.toNativeUtf8();
+  /// Upload a local file into a GROUP. Void on the wire: the engine queues the
+  /// upload and the file appears through the tree/file events, so there is no
+  /// id to hand back. The old wrapper read a `Pointer<Utf8>` out of a function
+  /// that returns nothing, then dereferenced and freed it — and passed the
+  /// arguments in the opposite order to the one the engine declares.
+  static void uploadFileToGroup(String path, String groupId) {
     final gPtr = groupId.toNativeUtf8();
+    final pPtr = path.toNativeUtf8();
     try {
-      final result = _b.uploadFileToGroup(pPtr, gPtr);
-      if (result == nullptr) return null;
-      return result.toDartStringAndFree();
+      _b.uploadFileToGroup(gPtr, pPtr);
     } finally {
-      calloc.free(pPtr);
       calloc.free(gPtr);
+      calloc.free(pPtr);
     }
   }
-  
-  static String? uploadFileToWorkspace(String path, String workspaceId) {
-    final pPtr = path.toNativeUtf8();
+
+  /// Upload a local file into a WORKSPACE. Same shape as [uploadFileToGroup].
+  static void uploadFileToWorkspace(String path, String workspaceId) {
     final wPtr = workspaceId.toNativeUtf8();
+    final pPtr = path.toNativeUtf8();
     try {
-      final result = _b.uploadFileToWorkspace(pPtr, wPtr);
-      if (result == nullptr) return null;
-      return result.toDartStringAndFree();
+      _b.uploadFileToWorkspace(wPtr, pPtr);
     } finally {
-      calloc.free(pPtr);
       calloc.free(wPtr);
+      calloc.free(pPtr);
     }
   }
   
@@ -1056,24 +1087,23 @@ class CyanFFI {
     }
   }
   
+  /// The board id travels INSIDE the element JSON — the engine refuses a
+  /// payload whose `board_id` is empty, so the wrapper stamps its own argument
+  /// in rather than trusting every caller to remember it.
   static bool saveWhiteboardElement(String boardId, Map<String, dynamic> element) {
-    final bPtr = boardId.toNativeUtf8();
-    final ePtr = jsonEncode(element).toNativeUtf8();
+    final ePtr = jsonEncode(_withBoardId(boardId, element)).toNativeUtf8();
     try {
-      return _b.saveWhiteboardElement(bPtr, ePtr);
+      return _b.saveWhiteboardElement(ePtr);
     } finally {
-      calloc.free(bPtr);
       calloc.free(ePtr);
     }
   }
-  
+
   static bool deleteWhiteboardElement(String boardId, String elementId) {
-    final bPtr = boardId.toNativeUtf8();
     final ePtr = elementId.toNativeUtf8();
     try {
-      return _b.deleteWhiteboardElement(bPtr, ePtr);
+      return _b.deleteWhiteboardElement(ePtr);
     } finally {
-      calloc.free(bPtr);
       calloc.free(ePtr);
     }
   }
@@ -1127,40 +1157,54 @@ class CyanFFI {
     return null;
   }
   
+  /// The board id travels INSIDE the cell JSON — the verb takes the cell alone,
+  /// and the engine refuses a payload whose `board_id` is empty. Stamping the
+  /// wrapper's own argument in is what lets callers that only ever passed it
+  /// positionally (board_detail_view's `_saveCell`) keep working.
   static bool saveNotebookCell(String boardId, Map<String, dynamic> cell) {
     // Always save to in-memory cache first
     _NotebookCache.saveCell(boardId, cell);
-    
-    final bPtr = boardId.toNativeUtf8();
-    final cPtr = jsonEncode(cell).toNativeUtf8();
+
+    final cPtr = jsonEncode(_withBoardId(boardId, cell)).toNativeUtf8();
     try {
-      final result = _b.saveNotebookCell(bPtr, cPtr);
+      final result = _b.saveNotebookCell(cPtr);
       debugPrint('CyanFFI.saveNotebookCell: FFI result=$result for $boardId');
       return result;
     } catch (e) {
+      // NOT true. The cache is a read fallback, not a write: reporting a save
+      // the engine never made is how an author face looks like it works and
+      // loses the operator's writes on the next launch.
       debugPrint('CyanFFI.saveNotebookCell FFI error: $e');
-      return true; // Return true since we saved to cache
+      return false;
     } finally {
-      calloc.free(bPtr);
       calloc.free(cPtr);
     }
   }
-  
+
   static bool deleteNotebookCell(String boardId, String cellId) {
     // Delete from in-memory cache
     _NotebookCache.deleteCell(boardId, cellId);
-    
-    final bPtr = boardId.toNativeUtf8();
+
     final cPtr = cellId.toNativeUtf8();
     try {
-      return _b.deleteNotebookCell(bPtr, cPtr);
+      return _b.deleteNotebookCell(cPtr);
     } catch (e) {
       debugPrint('CyanFFI.deleteNotebookCell FFI error: $e');
-      return true; // Return true since we deleted from cache
+      return false; // same reason as the save above
     } finally {
-      calloc.free(bPtr);
       calloc.free(cPtr);
     }
+  }
+
+  /// A payload with its `board_id` filled in from [boardId] when the caller did
+  /// not carry one. Never overwrites a board id the caller DID set — a cell
+  /// that names its own board is the authority, and silently re-homing it would
+  /// move the operator's work.
+  static Map<String, dynamic> _withBoardId(
+      String boardId, Map<String, dynamic> payload) {
+    final existing = payload['board_id'];
+    if (existing is String && existing.isNotEmpty) return payload;
+    return {...payload, 'board_id': boardId};
   }
   
   static bool reorderNotebookCells(String boardId, List<String> order) {

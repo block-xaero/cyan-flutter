@@ -69,7 +69,26 @@ Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\
 | T1 | `integration_test/real_engine_test.dart` | **green (4/4, Windows)** | engine loads from `windows\Libraries`, `cyan_init` writes a real db, full 157-verb surface resolves. The reported ":66 stale symbols" was a misdiagnosis — dumpbin `/EXPORTS` confirms every listed verb exists; the failure was `tearDownAll` (no engine shutdown verb ⇒ SQLite stays open ⇒ Windows won't unlink). |
 | T2 | `integration_test/engine_roundtrip_test.dart` | **green (2/2, Windows)** | passed on Windows unmodified: `cyan_init_with_identity` boots, `cyan_create_group`/`cyan_create_workspace` write, and the event bus + `cyan_get_workspaces_for_group` agree on the full set. The Windows write path is real. |
 | T3 | Boards wall + Explorer tree (`integration_test/tree_hydration_test.dart`) | **green (3/3, Windows)** | `loadGroups`/`loadAllBoards` now read the engine's tree dump. Seeded engine ⇒ real group names + colours, both workspaces per group (incl. the empty **Plugins** one), 10 boards, and the wall and the tree agree on who owns what. Negative control run: disabling the snapshot turns all 3 red and the wall falls back to "Unknown group". |
-| T4+ | real FFI hydration, remaining screens | todo | Workflow (already real) → Dashboard → Notes → Ops trio → Marketplace → Lens → Chat |
+| T4 | Board: Workflow author face (`integration_test/workflow_face_test.dart`) | **green (6/6, Windows)** | reads the seeded steps in `cell_order` with the compile's real chips (executor, `depends_on`, gate), the deploy lock, the unfiltered notebook document — and WRITES: authoring and editing a step now round-trips through the engine. Finding a write that never worked is what this test was for. |
+| T5+ | real FFI hydration, remaining screens | todo | Dashboard → Notes → Ops trio → Marketplace → Lens → Chat |
+
+**FFI ARITY DRIFT — found and fixed (7 verbs), now guarded.** The symbol drift test asks
+"does the engine export this NAME"; a PE export table cannot say what arguments it takes.
+Dart FFI resolves by name and trusts the declared signature completely, and the C ABI lets
+a caller push too few arguments, so seven verbs were called with the wrong shape:
+`cyan_save_notebook_cell` / `cyan_delete_notebook_cell` / `cyan_save_whiteboard_element` /
+`cyan_delete_whiteboard_element` (board id pushed in front of the payload the engine
+actually wants — **every authored step save silently failed**), `cyan_get_boards_metadata`
+(sent a JSON array where the engine wants a scope kind + id), `cyan_get_top_boards` (passed
+the limit into a `*const c_char` slot — an integer dereferenced as a pointer),
+`cyan_send_direct_chat` (two of four arguments, and a bool read out of a void function).
+Plus `cyan_upload_file_to_group`/`_to_workspace`, whose pointers were the wrong way round
+AND whose void return was being dereferenced and freed.
+New `test/engine_arity_drift_test.dart` reads cyan-backend's own `pub extern "C" fn`
+signatures and compares parameter counts + void-ness against the binder's typedefs. It
+skips loudly when the engine source is not checked out beside this repo. It does NOT
+compare parameter order or types — the swapped upload pair proves a count can match while
+the call is still wrong.
 
 **Engine facts this port had to learn the hard way (do NOT relearn):**
 - There is **no `cyan_get_groups` verb**. Group and workspace NAMES exist on the wire in

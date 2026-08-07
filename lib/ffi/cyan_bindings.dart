@@ -1,4 +1,4 @@
-// ffi/cyan_bindings.dart
+﻿// ffi/cyan_bindings.dart
 // Complete FFI bindings for all 87 cyan_* functions
 // Generated from: nm -gU libcyan_backend_macos.a | grep " T _cyan_"
 
@@ -68,8 +68,10 @@ typedef CyanSendCommandDart = bool Function(Pointer<Utf8> component, Pointer<Utf
 typedef CyanPollEventsNative = Pointer<Utf8> Function(Pointer<Utf8> component);
 typedef CyanPollEventsDart = Pointer<Utf8> Function(Pointer<Utf8> component);
 
-typedef CyanSeedDemoIfEmptyNative = Bool Function();
-typedef CyanSeedDemoIfEmptyDart = bool Function();
+// Returns VOID — it queues an (inert) command. The old Bool read a return
+// register the engine never wrote.
+typedef CyanSeedDemoIfEmptyNative = Void Function();
+typedef CyanSeedDemoIfEmptyDart = void Function();
 
 // Stats
 typedef CyanGetObjectCountNative = Int32 Function();
@@ -178,11 +180,22 @@ typedef CyanRecordBoardViewDart = bool Function(Pointer<Utf8> boardId);
 typedef CyanGetBoardMetadataNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanGetBoardMetadataDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 
-typedef CyanGetBoardsMetadataNative = Pointer<Utf8> Function(Pointer<Utf8> boardIdsJson);
-typedef CyanGetBoardsMetadataDart = Pointer<Utf8> Function(Pointer<Utf8> boardIdsJson);
+// A SCOPE, not a list of ids: the engine selects the metadata rows under
+// (`workspace` | `group` | â€¦, id). The one-argument binding sent it a JSON
+// array where it expected a scope kind, and left the second argument to
+// whatever happened to be in the register.
+typedef CyanGetBoardsMetadataNative = Pointer<Utf8> Function(
+    Pointer<Utf8> scopeType, Pointer<Utf8> scopeId);
+typedef CyanGetBoardsMetadataDart = Pointer<Utf8> Function(
+    Pointer<Utf8> scopeType, Pointer<Utf8> scopeId);
 
-typedef CyanGetTopBoardsNative = Pointer<Utf8> Function(Int32 limit);
-typedef CyanGetTopBoardsDart = Pointer<Utf8> Function(int limit);
+// The group comes FIRST. The old binding passed the limit where the engine
+// reads a `*const c_char` and dereferenced a small integer as a pointer â€” not
+// merely wrong, an access violation waiting for its first caller.
+typedef CyanGetTopBoardsNative = Pointer<Utf8> Function(
+    Pointer<Utf8> groupId, Int32 limit);
+typedef CyanGetTopBoardsDart = Pointer<Utf8> Function(
+    Pointer<Utf8> groupId, int limit);
 
 typedef CyanGetBoardLinkNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanGetBoardLinkDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
@@ -232,21 +245,32 @@ typedef CyanLoadChatHistoryDart = void Function(Pointer<Utf8> boardId);
 typedef CyanDeleteChatNative = Void Function(Pointer<Utf8> id);
 typedef CyanDeleteChatDart = void Function(Pointer<Utf8> id);
 
-typedef CyanStartDirectChatNative = Bool Function(Pointer<Utf8> peerId, Pointer<Utf8> workspaceId);
-typedef CyanStartDirectChatDart = bool Function(Pointer<Utf8> peerId, Pointer<Utf8> workspaceId);
+// Returns VOID: it queues a command, it does not answer.
+typedef CyanStartDirectChatNative = Void Function(Pointer<Utf8> peerId, Pointer<Utf8> workspaceId);
+typedef CyanStartDirectChatDart = void Function(Pointer<Utf8> peerId, Pointer<Utf8> workspaceId);
 
-typedef CyanSendDirectChatNative = Bool Function(Pointer<Utf8> peerId, Pointer<Utf8> message);
-typedef CyanSendDirectChatDart = bool Function(Pointer<Utf8> peerId, Pointer<Utf8> message);
+// FOUR arguments and it returns VOID. The two-argument bool binding put the
+// message where the engine reads a workspace id, read the message and the
+// parent id out of uninitialised registers, and then read a bool out of a
+// function that returns nothing.
+typedef CyanSendDirectChatNative = Void Function(Pointer<Utf8> peerId,
+    Pointer<Utf8> workspaceId, Pointer<Utf8> message, Pointer<Utf8> parentId);
+typedef CyanSendDirectChatDart = void Function(Pointer<Utf8> peerId,
+    Pointer<Utf8> workspaceId, Pointer<Utf8> message, Pointer<Utf8> parentId);
 
 // Files
 typedef CyanUploadFileNative = Pointer<Utf8> Function(Pointer<Utf8> path, Pointer<Utf8> scopeJson);
 typedef CyanUploadFileDart = Pointer<Utf8> Function(Pointer<Utf8> path, Pointer<Utf8> scopeJson);
 
-typedef CyanUploadFileToGroupNative = Pointer<Utf8> Function(Pointer<Utf8> path, Pointer<Utf8> groupId);
-typedef CyanUploadFileToGroupDart = Pointer<Utf8> Function(Pointer<Utf8> path, Pointer<Utf8> groupId);
+// The GROUP comes first and the verb returns VOID. The old binding had the
+// arguments the wrong way round AND read a Pointer<Utf8> out of a function
+// that returns nothing — then dereferenced and freed it.
+typedef CyanUploadFileToGroupNative = Void Function(Pointer<Utf8> groupId, Pointer<Utf8> path);
+typedef CyanUploadFileToGroupDart = void Function(Pointer<Utf8> groupId, Pointer<Utf8> path);
 
-typedef CyanUploadFileToWorkspaceNative = Pointer<Utf8> Function(Pointer<Utf8> path, Pointer<Utf8> workspaceId);
-typedef CyanUploadFileToWorkspaceDart = Pointer<Utf8> Function(Pointer<Utf8> path, Pointer<Utf8> workspaceId);
+// Same story as the group upload: workspace first, returns nothing.
+typedef CyanUploadFileToWorkspaceNative = Void Function(Pointer<Utf8> workspaceId, Pointer<Utf8> path);
+typedef CyanUploadFileToWorkspaceDart = void Function(Pointer<Utf8> workspaceId, Pointer<Utf8> path);
 
 typedef CyanRequestFileDownloadNative = Bool Function(Pointer<Utf8> fileId);
 typedef CyanRequestFileDownloadDart = bool Function(Pointer<Utf8> fileId);
@@ -284,11 +308,14 @@ typedef CyanMarkReadDart = void Function(Pointer<Utf8> scopeId);
 typedef CyanLoadWhiteboardElementsNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanLoadWhiteboardElementsDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 
-typedef CyanSaveWhiteboardElementNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> elementJson);
-typedef CyanSaveWhiteboardElementDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> elementJson);
+// ONE argument, same shape as the notebook cell save: the element JSON carries
+// its own `board_id`.
+typedef CyanSaveWhiteboardElementNative = Bool Function(Pointer<Utf8> elementJson);
+typedef CyanSaveWhiteboardElementDart = bool Function(Pointer<Utf8> elementJson);
 
-typedef CyanDeleteWhiteboardElementNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> elementId);
-typedef CyanDeleteWhiteboardElementDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> elementId);
+// ONE argument: the element id.
+typedef CyanDeleteWhiteboardElementNative = Bool Function(Pointer<Utf8> elementId);
+typedef CyanDeleteWhiteboardElementDart = bool Function(Pointer<Utf8> elementId);
 
 typedef CyanClearWhiteboardNative = Bool Function(Pointer<Utf8> boardId);
 typedef CyanClearWhiteboardDart = bool Function(Pointer<Utf8> boardId);
@@ -300,11 +327,14 @@ typedef CyanGetWhiteboardElementCountDart = int Function(Pointer<Utf8> boardId);
 typedef CyanLoadNotebookCellsNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanLoadNotebookCellsDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 
-typedef CyanSaveNotebookCellNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> cellJson);
-typedef CyanSaveNotebookCellDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> cellJson);
+// ONE argument. The cell JSON carries its own `board_id` â€” passing a board id
+// first made the engine parse THAT as the cell and refuse every save.
+typedef CyanSaveNotebookCellNative = Bool Function(Pointer<Utf8> cellJson);
+typedef CyanSaveNotebookCellDart = bool Function(Pointer<Utf8> cellJson);
 
-typedef CyanDeleteNotebookCellNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> cellId);
-typedef CyanDeleteNotebookCellDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> cellId);
+// ONE argument: the cell id. The engine deletes by cell id alone.
+typedef CyanDeleteNotebookCellNative = Bool Function(Pointer<Utf8> cellId);
+typedef CyanDeleteNotebookCellDart = bool Function(Pointer<Utf8> cellId);
 
 typedef CyanReorderNotebookCellsNative = Bool Function(Pointer<Utf8> boardId, Pointer<Utf8> orderJson);
 typedef CyanReorderNotebookCellsDart = bool Function(Pointer<Utf8> boardId, Pointer<Utf8> orderJson);
@@ -312,12 +342,12 @@ typedef CyanReorderNotebookCellsDart = bool Function(Pointer<Utf8> boardId, Poin
 typedef CyanLoadCellElementsNative = Pointer<Utf8> Function(Pointer<Utf8> cellId);
 typedef CyanLoadCellElementsDart = Pointer<Utf8> Function(Pointer<Utf8> cellId);
 
-// Integration verbs were REMOVED from the engine — integrations moved to MCP
+// Integration verbs were REMOVED from the engine â€” integrations moved to MCP
 // servers in cyan-backend/Lens and the client owns no integration logic. iOS
 // deleted its @_silgen_name decls at the same time ("cyan-backend is removing
 // the cyan_integration_* FFI symbols, so iOS must not reference them"). Flutter
 // never did, and because _bindAllUnsafe binds in one try block, that single
-// stale lookup threw and no-opped ALL 160 verbs — the app ran fully inert
+// stale lookup threw and no-opped ALL 160 verbs â€” the app ran fully inert
 // against a healthy engine. Do not re-add these without engine symbols.
 
 
@@ -474,7 +504,7 @@ typedef CyanLoadTimecodeNotesDart = Pointer<Utf8> Function(Pointer<Utf8> boardId
 typedef CyanActOnTimecodeNoteNative = Pointer<Utf8> Function(Pointer<Utf8> noteJson);
 typedef CyanActOnTimecodeNoteDart = Pointer<Utf8> Function(Pointer<Utf8> noteJson);
 
-// The same rail exported as a markdown timeline — raw markdown, not JSON
+// The same rail exported as a markdown timeline â€” raw markdown, not JSON
 typedef CyanExportNotesMarkdownNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanExportNotesMarkdownDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 
@@ -836,7 +866,7 @@ class CyanBindings {
 
   /// Why the engine is not loaded, or null when it loaded cleanly.
   ///
-  /// The no-op fallback below is legitimate — iOS links the engine statically,
+  /// The no-op fallback below is legitimate â€” iOS links the engine statically,
   /// so its symbols come from the process rather than a dylib. What is NOT
   /// legitimate is that fallback being SILENT: a degraded app renders every
   /// screen, accepts every tap and does nothing, and the only trace is a print
@@ -861,7 +891,7 @@ class CyanBindings {
       _lib = _loadLibrary();
       _bindFunctions();
       _loaded = _degradedReason == null;
-      if (_loaded) print('✅ Cyan FFI bindings loaded');
+      if (_loaded) print('âœ… Cyan FFI bindings loaded');
     } catch (e) {
       _degrade('the engine library could not be opened: $e');
       _setNoOps();
@@ -869,12 +899,12 @@ class CyanBindings {
     }
   }
 
-  /// Record — loudly — that the app is running without an engine.
+  /// Record â€” loudly â€” that the app is running without an engine.
   void _degrade(String reason) {
     _degradedReason = reason;
     print('');
     print('=========================================================');
-    print(' CYAN ENGINE NOT LOADED — THE APP IS A SHELL');
+    print(' CYAN ENGINE NOT LOADED â€” THE APP IS A SHELL');
     print(' $reason');
     print('');
     if (_triedPaths.isEmpty) {
@@ -899,12 +929,12 @@ class CyanBindings {
     print('=========================================================');
     print('');
     // Deliberately NOT `assert(false)`. That was the first attempt, and it threw
-    // out of _load, past main, and left an unexplained BLACK WINDOW — strictly
+    // out of _load, past main, and left an unexplained BLACK WINDOW â€” strictly
     // worse than the silent no-op it replaced. `main` reads `isDegraded` and
     // shows a screen that names the fault instead.
   }
   
-  // Walks the per-target plan from `CyanEngineLibrary` — Windows, Linux and
+  // Walks the per-target plan from `CyanEngineLibrary` â€” Windows, Linux and
   // macOS all take this one path. There is no `else { throw }` arm: an OS with
   // no engine binary resolves to an empty candidate list and lands on the
   // process symbols, so the app entrypoint never aborts on a platform check.
@@ -925,16 +955,16 @@ class CyanBindings {
       final isPath = path.contains('/') || path.contains('\\');
       if (isPath && !File(path).existsSync()) continue;
       try {
-        print('🔗 Loading engine: $path');
+        print('ðŸ”— Loading engine: $path');
         return DynamicLibrary.open(path);
       } catch (e) {
-        print('⚠️ Failed to open $path: $e');
+        print('âš ï¸ Failed to open $path: $e');
       }
     }
 
     // Static lib linked into the binary (iOS/macOS xcframework), or nothing at
-    // all — `_bindFunctions` falls back to no-ops when the symbols are absent.
-    print('🔗 Falling back to DynamicLibrary.process()');
+    // all â€” `_bindFunctions` falls back to no-ops when the symbols are absent.
+    print('ðŸ”— Falling back to DynamicLibrary.process()');
     return DynamicLibrary.process();
   }
   
@@ -949,7 +979,7 @@ class CyanBindings {
     // This is safe because DynamicLibrary.process() will have either ALL
     // the cyan_* symbols (static lib linked) or NONE of them.
     // PRE-FLIGHT. `_bindAllUnsafe` binds all 155 verbs inside ONE try block, so
-    // the FIRST missing symbol aborts the rest and every verb becomes a no-op —
+    // the FIRST missing symbol aborts the rest and every verb becomes a no-op â€”
     // a single stale name silently disables the whole engine. That is not a
     // hypothetical: five `cyan_integration_*` verbs stayed in this file after
     // the engine dropped them, and the app ran completely inert against a
@@ -1224,7 +1254,7 @@ class CyanBindings {
     // Command/Event
     sendCommand = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
     pollEvents = (Pointer<Utf8> p) => _nullptr;
-    seedDemoIfEmpty = () => false;
+    seedDemoIfEmpty = () {};
     
     // Stats
     getObjectCount = () => 0;
@@ -1267,8 +1297,8 @@ class CyanBindings {
     
     // Board Metadata
     getBoardMetadata = (Pointer<Utf8> p) => _nullptr;
-    getBoardsMetadata = (Pointer<Utf8> p) => _nullptr;
-    getTopBoards = (int n) => _nullptr;
+    getBoardsMetadata = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    getTopBoards = (Pointer<Utf8> g, int n) => _nullptr;
     getBoardLink = (Pointer<Utf8> p) => _nullptr;
     searchBoardsByLabel = (Pointer<Utf8> p) => _nullptr;
     setBoardLabels = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
@@ -1290,13 +1320,13 @@ class CyanBindings {
     sendChat = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c) {};
     loadChatHistory = (Pointer<Utf8> p) {};
     deleteChat = (Pointer<Utf8> p) {};
-    startDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
-    sendDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    startDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    sendDirectChat = (Pointer<Utf8> a, Pointer<Utf8> b, Pointer<Utf8> c, Pointer<Utf8> d) {};
 
     // Files
     uploadFile = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
-    uploadFileToGroup = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
-    uploadFileToWorkspace = (Pointer<Utf8> a, Pointer<Utf8> b) => _nullptr;
+    uploadFileToGroup = (Pointer<Utf8> a, Pointer<Utf8> b) {};
+    uploadFileToWorkspace = (Pointer<Utf8> a, Pointer<Utf8> b) {};
     requestFileDownload = (Pointer<Utf8> p) => false;
     getFileStatus = (Pointer<Utf8> p) => _nullptr;
     getFiles = (Pointer<Utf8> p) => _nullptr;
@@ -1312,15 +1342,15 @@ class CyanBindings {
 
     // Whiteboard
     loadWhiteboardElements = (Pointer<Utf8> p) => _nullptr;
-    saveWhiteboardElement = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
-    deleteWhiteboardElement = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    saveWhiteboardElement = (Pointer<Utf8> a) => false;
+    deleteWhiteboardElement = (Pointer<Utf8> a) => false;
     clearWhiteboard = (Pointer<Utf8> p) => false;
     getWhiteboardElementCount = (Pointer<Utf8> p) => 0;
     
     // Notebook
     loadNotebookCells = (Pointer<Utf8> p) => _nullptr;
-    saveNotebookCell = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
-    deleteNotebookCell = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
+    saveNotebookCell = (Pointer<Utf8> a) => false;
+    deleteNotebookCell = (Pointer<Utf8> a) => false;
     reorderNotebookCells = (Pointer<Utf8> a, Pointer<Utf8> b) => false;
     loadCellElements = (Pointer<Utf8> p) => _nullptr;
     
