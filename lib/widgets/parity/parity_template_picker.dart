@@ -84,10 +84,41 @@ class _ParityTemplatePickerState extends ConsumerState<ParityTemplatePicker> {
     super.dispose();
   }
 
+  /// The clone waiting on a Replace / Append / Cancel decision, and the step
+  /// ids that decision is about. Null when no decision is pending.
+  String? _pendingCloneId;
+  List<String> _pendingReplaceIds = const [];
+
+  /// Ask before cloning onto a board that already has steps. A board with none
+  /// clones straight away — there is nothing to decide about.
   Future<void> _clone(CyanTemplate template) async {
     setState(() => _selectedId = template.id);
+    final steps = ref
+            .read(boardWorkflowProvider(widget.boardId))
+            .valueOrNull
+            ?.steps ??
+        const <WorkflowStep>[];
+    final existing = <String>[for (final s in steps) s.id];
+    if (existing.isNotEmpty) {
+      setState(() {
+        _pendingCloneId = template.id;
+        _pendingReplaceIds = existing;
+      });
+      return;
+    }
+    await _performClone(template.id, CloneMode.append, const []);
+  }
+
+  Future<void> _performClone(
+      String templateId, CloneMode mode, List<String> replacing) async {
+    setState(() {
+      _pendingCloneId = null;
+      _pendingReplaceIds = const [];
+    });
     final ok = await ref.read(templatesProvider(_scope).notifier).clone(
-          template.id,
+          templateId,
+          mode: mode,
+          replacingStepIds: replacing,
         );
     if (!mounted) return;
     // The clone materialized real cells on the board — re-read them off the
@@ -95,6 +126,11 @@ class _ParityTemplatePickerState extends ConsumerState<ParityTemplatePicker> {
     ref.invalidate(boardWorkflowProvider(widget.boardId));
     if (ok) widget.onCloned?.call();
   }
+
+  void _cancelClone() => setState(() {
+        _pendingCloneId = null;
+        _pendingReplaceIds = const [];
+      });
 
   Future<void> _save() async {
     final ok = await ref
@@ -118,6 +154,7 @@ class _ParityTemplatePickerState extends ConsumerState<ParityTemplatePicker> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _header(),
+          if (_pendingCloneId != null) _cloneDecision(),
           if (state.error != null) _errorBanner(state.error!),
           if (state.outcome != null)
             _CloneReport(
@@ -174,6 +211,93 @@ class _ParityTemplatePickerState extends ConsumerState<ParityTemplatePicker> {
                     .copyWith(color: MonokaiTheme.cyan)),
           ),
         ],
+      ),
+    );
+  }
+
+  /// The Replace / Append / Cancel decision a NON-empty board requires. Drawn
+  /// inline rather than as a modal: the operator can still see the list they
+  /// picked from while they decide what happens to the steps they already have.
+  Widget _cloneDecision() {
+    final count = _pendingReplaceIds.length;
+    final templateId = _pendingCloneId!;
+    return Container(
+      key: const ValueKey('templates.clone.decision'),
+      width: double.infinity,
+      padding: const EdgeInsets.fromLTRB(20, 10, 20, 10),
+      color: MonokaiTheme.yellow.withValues(alpha: 0.10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.warning_amber,
+                  size: 12, color: MonokaiTheme.yellow),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                    'This board already has $count workflow '
+                    'step${count == 1 ? '' : 's'}.',
+                    style: MonokaiTheme.labelMedium
+                        .copyWith(color: MonokaiTheme.yellow)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+              'Cloning the template can replace them or add its steps after '
+              'them.',
+              style:
+                  MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.comment)),
+          const SizedBox(height: 8),
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _decisionButton(
+                key: const ValueKey('templates.clone.replace'),
+                label: 'Replace existing steps',
+                tint: MonokaiTheme.red,
+                onTap: () => _performClone(
+                    templateId, CloneMode.replace, _pendingReplaceIds),
+              ),
+              _decisionButton(
+                key: const ValueKey('templates.clone.append'),
+                label: 'Append after existing steps',
+                tint: MonokaiTheme.cyan,
+                onTap: () =>
+                    _performClone(templateId, CloneMode.append, const []),
+              ),
+              _decisionButton(
+                key: const ValueKey('templates.clone.cancel'),
+                label: 'Cancel',
+                tint: MonokaiTheme.comment,
+                onTap: _cancelClone,
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _decisionButton({
+    required Key key,
+    required String label,
+    required Color tint,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      key: key,
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(5),
+          border: Border.all(color: tint),
+        ),
+        child: Text(label,
+            style: MonokaiTheme.labelSmall.copyWith(color: tint)),
       ),
     );
   }

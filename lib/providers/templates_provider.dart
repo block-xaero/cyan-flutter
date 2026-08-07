@@ -34,6 +34,11 @@ import 'cyan_backend_provider.dart';
 /// board's own group through the seam — the derivation the engine does.
 typedef TemplatesScope = ({String boardId, String tenantId});
 
+/// What a clone does to steps the board ALREADY has. A board with none never
+/// sees this choice; a board with some is always asked (FABLE_FULL_AUDIT Area
+/// B — cloning must never silently append onto somebody's authored workflow).
+enum CloneMode { append, replace }
+
 @immutable
 class TemplatesState {
   final bool loading;
@@ -196,17 +201,46 @@ class TemplatesController extends StateNotifier<TemplatesState> {
   /// Clone [templateId] onto this board as real step cells, then report what
   /// the engine did.
   ///
-  /// The clone APPENDS — it is additive, and the seam carries no verb that can
-  /// remove an authored step, so this never claims to replace one. Returns
-  /// whether an outcome landed.
+  /// [mode] is the decision a NON-EMPTY board forces (FABLE_FULL_AUDIT Area B):
+  /// cloning never silently appends onto steps somebody already authored.
+  /// [CloneMode.replace] clears exactly [replacingStepIds] — the ids the
+  /// operator was shown — through the seam BEFORE the clone dispatches, and
+  /// ABORTS if any of them refuses, because a half-cleared board is worse than
+  /// an uncleared one.
+  ///
+  /// Returns whether an outcome landed.
   Future<bool> clone(
     String templateId, {
+    CloneMode mode = CloneMode.append,
+    List<String> replacingStepIds = const [],
     int attempts = 90,
     Duration interval = const Duration(seconds: 1),
   }) async {
     if (state.cloningId != null) return false;
     final name = state.byId(templateId)?.name;
     state = state.copyWith(cloningId: templateId, clearError: true);
+
+    if (mode == CloneMode.replace && replacingStepIds.isNotEmpty) {
+      var cleared = true;
+      for (final id in replacingStepIds) {
+        try {
+          if (!await _backend.deleteWorkflowStep(boardId, id)) cleared = false;
+        } catch (_) {
+          cleared = false;
+        }
+        if (!cleared) break;
+      }
+      if (!cleared) {
+        if (mounted) {
+          state = state.copyWith(
+            clearCloning: true,
+            error: "Couldn't clear the existing steps before the clone.",
+          );
+        }
+        return false;
+      }
+    }
+
     try {
       await _backend.workflowFromTemplate(templateId, boardId,
           tenantId: state.tenantId);

@@ -27,6 +27,18 @@ Finder _clone(String templateId) =>
 Finder _installRow(String pluginId) =>
     find.byKey(ValueKey('templates.outcome.plugin.$pluginId'));
 
+/// Clone [templateId] onto a board that ALREADY has steps, choosing Append.
+/// A non-empty board is always asked first (FABLE_FULL_AUDIT Area B), so a bare
+/// tap on Clone is only half the gesture there.
+Future<void> _cloneAppending(WidgetTester tester, String templateId) async {
+  await tester.tap(_clone(templateId));
+  await tester.pumpAndSettle();
+  expect(find.byKey(const ValueKey('templates.clone.decision')), findsOneWidget,
+      reason: 'a board with steps must be ASKED, never silently appended to');
+  await tester.tap(find.byKey(const ValueKey('templates.clone.append')));
+  await tester.pumpAndSettle();
+}
+
 /// The template the tenant most recently saved, off the seam — the round trip
 /// is the point: a save that only lived in widget state is not a save.
 Future<CyanTemplate?> _lastUserTemplate(
@@ -102,8 +114,7 @@ void main() {
 
     expect((await backend.loadWorkflow('b-eng-2')).steps, hasLength(3));
 
-    await tester.tap(_clone('tpl-dailies'));
-    await tester.pumpAndSettle();
+    await _cloneAppending(tester, 'tpl-dailies');
 
     final steps = (await backend.loadWorkflow('b-eng-2')).steps;
     expect(steps, hasLength(7), reason: 'four template steps landed');
@@ -137,8 +148,7 @@ void main() {
         const ParityTemplatePicker(boardId: 'b-eng-2'),
         backend: backend);
 
-    await tester.tap(_clone('tpl-finishing'));
-    await tester.pumpAndSettle();
+    await _cloneAppending(tester, 'tpl-finishing');
 
     expect(find.byKey(const ValueKey('templates.outcome')), findsOneWidget);
     expect(find.textContaining('3 steps landed'), findsOneWidget);
@@ -170,8 +180,7 @@ void main() {
         const ParityTemplatePicker(boardId: 'b-eng-2'),
         backend: backend);
 
-    await tester.tap(_clone('tpl-finishing'));
-    await tester.pumpAndSettle();
+    await _cloneAppending(tester, 'tpl-finishing');
 
     // Named in the summary…
     expect(find.textContaining('1 failed (spec-deliver)'), findsOneWidget);
@@ -273,8 +282,7 @@ void main() {
     expect((await backend.pluginCatalog()).map((p) => p.id),
         isNot(contains('loudness')));
 
-    await tester.tap(_clone('tpl-finishing'));
-    await tester.pumpAndSettle();
+    await _cloneAppending(tester, 'tpl-finishing');
 
     expect(find.text('Plugin auto install'), findsOneWidget);
     expect(_installRow('loudness'), findsOneWidget);
@@ -287,8 +295,7 @@ void main() {
         contains('loudness'));
 
     // Cloning again reports the SECOND truth: already present, not re-fetched.
-    await tester.tap(_clone('tpl-finishing'));
-    await tester.pumpAndSettle();
+    await _cloneAppending(tester, 'tpl-finishing');
 
     expect(
       find.descendant(
@@ -332,6 +339,117 @@ void main() {
     expect((await backend.loadWorkflow('b-des-3')).steps, hasLength(4));
   });
 
+  // ---- FABLE_FULL_AUDIT Area B: a non-empty board is ASKED ------------------
+
+  testWidgets('cloning onto a board that has steps ASKS before it does '
+      'anything, and Cancel does nothing at all', (tester) async {
+    final backend = FakeCyanBackend();
+    var cloned = false;
+    await pumpParity(
+      tester,
+      ParityTemplatePicker(boardId: 'b-eng-2', onCloned: () => cloned = true),
+      backend: backend,
+    );
+
+    final before = (await backend.loadWorkflow('b-eng-2')).steps;
+    expect(before, hasLength(3));
+
+    await tester.tap(_clone('tpl-dailies'));
+    await tester.pumpAndSettle();
+
+    // The decision, with the count it is about — nothing has been written yet.
+    expect(find.byKey(const ValueKey('templates.clone.decision')),
+        findsOneWidget);
+    expect(find.text('This board already has 3 workflow steps.'),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('templates.clone.replace')),
+        findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('templates.clone.append')), findsOneWidget);
+    expect(
+        find.byKey(const ValueKey('templates.clone.cancel')), findsOneWidget);
+    expect((await backend.loadWorkflow('b-eng-2')).steps, hasLength(3),
+        reason: 'the clone dispatched before the human decided anything');
+
+    await tester.tap(find.byKey(const ValueKey('templates.clone.cancel')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('templates.clone.decision')), findsNothing);
+    expect((await backend.loadWorkflow('b-eng-2')).steps.map((s) => s.text),
+        before.map((s) => s.text));
+    expect(cloned, isFalse, reason: 'a cancelled clone told the host it cloned');
+  });
+
+  testWidgets('Replace clears exactly the steps the operator was shown, then '
+      'clones', (tester) async {
+    final backend = FakeCyanBackend();
+    await pumpParity(tester, const ParityTemplatePicker(boardId: 'b-eng-2'),
+        backend: backend);
+
+    final before = (await backend.loadWorkflow('b-eng-2')).steps;
+    expect(before, hasLength(3));
+
+    await tester.tap(_clone('tpl-dailies'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('templates.clone.replace')));
+    await tester.pumpAndSettle();
+
+    final after = (await backend.loadWorkflow('b-eng-2')).steps;
+    // The template's four steps and NOTHING else — the board's own three are
+    // gone from the engine, not merely hidden.
+    expect(after, hasLength(4));
+    expect(after.map((s) => s.text), [
+      "Ingest today's cards",
+      'Transcode viewing proxies',
+      'Wait for the editor to sign off',
+      'Publish the dailies to review',
+    ]);
+    for (final gone in before) {
+      expect(after.any((s) => s.id == gone.id), isFalse,
+          reason: '${gone.id} survived a Replace');
+    }
+  });
+
+  testWidgets('a Replace that cannot clear the board does NOT clone over it',
+      (tester) async {
+    // A half-cleared board is worse than an uncleared one: the operator asked
+    // for the old steps to go and the new ones to arrive, and getting neither
+    // is recoverable while getting half of each is not.
+    final backend = _RefusingDeleteBackend();
+    await pumpParity(tester, const ParityTemplatePicker(boardId: 'b-eng-2'),
+        backend: backend);
+
+    final before = (await backend.loadWorkflow('b-eng-2')).steps;
+
+    await tester.tap(_clone('tpl-dailies'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('templates.clone.replace')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('templates.error')), findsOneWidget);
+    expect(find.textContaining("Couldn't clear the existing steps"),
+        findsOneWidget);
+    final after = (await backend.loadWorkflow('b-eng-2')).steps;
+    expect(after.map((s) => s.text), before.map((s) => s.text),
+        reason: 'the board changed even though the clear failed');
+  });
+
+  testWidgets('a board with NO steps clones without being asked',
+      (tester) async {
+    final backend = FakeCyanBackend();
+    await pumpParity(tester, const ParityTemplatePicker(boardId: 'b-des-3'),
+        backend: backend);
+
+    expect((await backend.loadWorkflow('b-des-3')).steps, isEmpty);
+
+    await tester.tap(_clone('tpl-dailies'));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('templates.clone.decision')), findsNothing,
+        reason: 'there is nothing to decide about on an empty board');
+    expect((await backend.loadWorkflow('b-des-3')).steps, hasLength(4));
+  });
+
   testWidgets('golden: template picker', (tester) async {
     await pumpParity(
         tester, const ParityTemplatePicker(boardId: 'b-eng-2'));
@@ -340,4 +458,11 @@ void main() {
       matchesGoldenFile('golden/template_picker.png'),
     );
   }, tags: 'golden');
+}
+
+/// A backend whose step delete always refuses — the "the engine would not let
+/// go of the old steps" case a Replace has to survive without half-doing it.
+class _RefusingDeleteBackend extends FakeCyanBackend {
+  @override
+  Future<bool> deleteWorkflowStep(String boardId, String stepId) async => false;
 }

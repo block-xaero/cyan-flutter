@@ -636,6 +636,12 @@ class CyanBackendFFI implements CyanBackend {
     );
   }
 
+  @override
+  Future<bool> deleteWorkflowStep(String boardId, String stepId) async {
+    if (stepId.isEmpty) return false;
+    return CyanFFI.deleteNotebookCell(boardId, stepId);
+  }
+
   /// The `cyan_save_notebook_cell` payload for an authored step. `cell_type` is
   /// always `step` — the engine coerces anyway, we are explicit.
   Map<String, dynamic> _stepCell(String boardId, WorkflowStep step, int order) {

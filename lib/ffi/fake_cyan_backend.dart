@@ -377,6 +377,22 @@ class FakeCyanBackend implements CyanBackend {
     return true;
   }
 
+  @override
+  Future<bool> deleteWorkflowStep(String boardId, String stepId) async {
+    if (stepId.isEmpty) return false;
+    // The delete reaches BOTH halves of the ledger: an authored step and a step
+    // a previous clone materialized are the same kind of cell to the engine, so
+    // a Replace clone that could only clear the authored ones would leave the
+    // last template's steps behind.
+    final authored = _stepsOf(boardId);
+    final before = authored.length;
+    authored.removeWhere((s) => s.id == stepId);
+    final cloned = _clonedSteps[boardId];
+    final clonedBefore = cloned?.length ?? 0;
+    cloned?.removeWhere((s) => s.id == stepId);
+    return authored.length < before || (cloned?.length ?? 0) < clonedBefore;
+  }
+
   // ---- the notebook document -------------------------------------------------
   //
   // ONE ledger, read two ways: `loadWorkflow` takes the step cells out of it,

@@ -118,6 +118,14 @@ abstract class CyanBackend {
   /// stops being ambiguous. False when the write was refused.
   Future<bool> updateWorkflowStep(String boardId, String stepId, String text);
 
+  /// Remove one authored step cell from the board
+  /// (`cyan_delete_notebook_cell`). False when the engine refused it.
+  ///
+  /// The one caller that needs it is the template picker's REPLACE clone: a
+  /// non-empty board is asked Replace / Append / Cancel, and Replace clears
+  /// exactly the ids the operator was shown before the clone dispatches.
+  Future<bool> deleteWorkflowStep(String boardId, String stepId);
+
   /// Every cell of the board's notebook DOCUMENT, oldest-first by `cell_order`
   /// (`cyan_load_notebook_cells` — the same ledger [loadWorkflow] reads its
   /// steps out of, unfiltered).
