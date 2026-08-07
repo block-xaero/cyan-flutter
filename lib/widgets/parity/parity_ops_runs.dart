@@ -11,42 +11,123 @@
 // control (Runs · Cost · Efficiency) selects the console face; this widget owns
 // the Runs face.
 //
-// Driven ENTIRELY through the `CyanBackend` seam (via `opsRunsProvider`). This
-// widget never touches `CyanFFI` directly — that is the parity rule.
+// Driven ENTIRELY through the `LensApi` seam (via `opsRunsProvider`, D3). This
+// widget never touches HTTP or `CyanFFI` directly — that is the parity rule.
+//
+// The three actions are REAL: Retry / Approve / Reject POST to the lens through
+// `opsCommandProvider`, which re-reads the feed afterwards and surfaces the
+// lens's refusal in the operator's sight. The optional callbacks are an
+// OVERRIDE, not the wiring — a host screen that wants to confirm first supplies
+// one and the widget defers to it entirely.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
-import '../../providers/cyan_backend_provider.dart';
+import '../../providers/lens_console_provider.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_ops_scaffold.dart';
 
 class ParityOpsRuns extends ConsumerWidget {
-  /// Retry a failed run — UI-only here.
+  /// Intercept Retry. When null the widget POSTs to the lens itself.
   final void Function(OpsRun run)? onRetry;
 
-  /// Approve a run awaiting sign-off — UI-only here.
+  /// Intercept Approve. When null the widget POSTs to the lens itself.
   final void Function(OpsRun run)? onApprove;
 
-  const ParityOpsRuns({super.key, this.onRetry, this.onApprove});
+  /// Intercept Reject. When null the widget POSTs to the lens itself.
+  final void Function(OpsRun run)? onReject;
+
+  const ParityOpsRuns({
+    super.key,
+    this.onRetry,
+    this.onApprove,
+    this.onReject,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final runsAsync = ref.watch(opsRunsProvider);
+    final commands = ref.watch(opsCommandProvider);
+    final controller = ref.read(opsCommandProvider.notifier);
+
+    void act(void Function(OpsRun)? override, OpsRun run,
+        Future<void> Function(String) command) {
+      if (override != null) {
+        override(run);
+        return;
+      }
+      command(run.runId);
+    }
 
     return OpsScaffold(
       face: OpsFace.runs,
-      child: runsAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: MonokaiTheme.cyan),
-        ),
-        error: (e, _) => Center(
-          child: Text('Failed to load runs: $e',
-              style:
-                  MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
-        ),
-        data: (runs) => _Lanes(runs: runs, onRetry: onRetry, onApprove: onApprove),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (commands.lastError != null)
+            _RefusalBanner(message: commands.lastError!),
+          Expanded(
+            child: runsAsync.when(
+              loading: () => const Center(
+                child: CircularProgressIndicator(color: MonokaiTheme.cyan),
+              ),
+              // The lens being unreachable is a NAMED state, not a blank
+              // console — an empty board would read as "no runs", which is a
+              // claim this face has not earned.
+              error: (e, _) => Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Text('Failed to load runs: $e',
+                      key: const ValueKey('ops-runs-error'),
+                      textAlign: TextAlign.center,
+                      style: MonokaiTheme.bodyMedium
+                          .copyWith(color: MonokaiTheme.red)),
+                ),
+              ),
+              data: (runs) => _Lanes(
+                runs: runs,
+                busy: commands.busyRunIds,
+                onRetry: (r) => act(onRetry, r, controller.retry),
+                onApprove: (r) => act(onApprove, r, controller.approve),
+                onReject: (r) => act(onReject, r, controller.reject),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The lens's own words when it refused a command (e.g. the CONFLICT "only a
+/// Failed run can be retried"). Shown rather than swallowed: a tap that does
+/// nothing and says nothing is indistinguishable from a broken button.
+class _RefusalBanner extends StatelessWidget {
+  final String message;
+  const _RefusalBanner({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('ops-command-error'),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: MonokaiTheme.red.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: MonokaiTheme.red.withValues(alpha: 0.5)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline, size: 14, color: MonokaiTheme.red),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(message,
+                style: MonokaiTheme.labelMedium
+                    .copyWith(color: MonokaiTheme.red)),
+          ),
+        ],
       ),
     );
   }
@@ -54,10 +135,18 @@ class ParityOpsRuns extends ConsumerWidget {
 
 class _Lanes extends StatelessWidget {
   final List<OpsRun> runs;
-  final void Function(OpsRun run)? onRetry;
-  final void Function(OpsRun run)? onApprove;
+  final Set<String> busy;
+  final void Function(OpsRun run) onRetry;
+  final void Function(OpsRun run) onApprove;
+  final void Function(OpsRun run) onReject;
 
-  const _Lanes({required this.runs, this.onRetry, this.onApprove});
+  const _Lanes({
+    required this.runs,
+    required this.busy,
+    required this.onRetry,
+    required this.onApprove,
+    required this.onReject,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -73,29 +162,37 @@ class _Lanes extends StatelessWidget {
           title: 'Queued',
           accent: MonokaiTheme.textMuted,
           runs: queued,
+          busy: busy,
           onRetry: onRetry,
           onApprove: onApprove,
+          onReject: onReject,
         ),
         _Lane(
           title: 'Running',
           accent: MonokaiTheme.cyan,
           runs: running,
+          busy: busy,
           onRetry: onRetry,
           onApprove: onApprove,
+          onReject: onReject,
         ),
         _Lane(
           title: 'Action needed',
           accent: MonokaiTheme.yellow,
           runs: actionNeeded,
+          busy: busy,
           onRetry: onRetry,
           onApprove: onApprove,
+          onReject: onReject,
         ),
         _Lane(
           title: 'Done',
           accent: MonokaiTheme.green,
           runs: done,
+          busy: busy,
           onRetry: onRetry,
           onApprove: onApprove,
+          onReject: onReject,
         ),
       ],
     );
@@ -106,15 +203,19 @@ class _Lane extends StatelessWidget {
   final String title;
   final Color accent;
   final List<OpsRun> runs;
-  final void Function(OpsRun run)? onRetry;
-  final void Function(OpsRun run)? onApprove;
+  final Set<String> busy;
+  final void Function(OpsRun run) onRetry;
+  final void Function(OpsRun run) onApprove;
+  final void Function(OpsRun run) onReject;
 
   const _Lane({
     required this.title,
     required this.accent,
     required this.runs,
-    this.onRetry,
-    this.onApprove,
+    required this.busy,
+    required this.onRetry,
+    required this.onApprove,
+    required this.onReject,
   });
 
   @override
@@ -155,8 +256,10 @@ class _Lane extends StatelessWidget {
                       width: 300,
                       child: _RunCard(
                         run: r,
+                        isBusy: busy.contains(r.runId),
                         onRetry: onRetry,
                         onApprove: onApprove,
+                        onReject: onReject,
                       ),
                     ))
                 .toList(),
@@ -168,10 +271,21 @@ class _Lane extends StatelessWidget {
 
 class _RunCard extends StatelessWidget {
   final OpsRun run;
-  final void Function(OpsRun run)? onRetry;
-  final void Function(OpsRun run)? onApprove;
 
-  const _RunCard({required this.run, this.onRetry, this.onApprove});
+  /// A command is round-tripping for this run: the actions disable so a tap can
+  /// neither look like a no-op nor be double-fired.
+  final bool isBusy;
+  final void Function(OpsRun run) onRetry;
+  final void Function(OpsRun run) onApprove;
+  final void Function(OpsRun run) onReject;
+
+  const _RunCard({
+    required this.run,
+    required this.isBusy,
+    required this.onRetry,
+    required this.onApprove,
+    required this.onReject,
+  });
 
   String get _stripText => switch (run.status) {
         RunStatus.done || RunStatus.failed => run.durationLabel,
@@ -293,12 +407,22 @@ class _RunCard extends StatelessWidget {
                     children: [
                       if (run.status == RunStatus.failed)
                         _action('Retry', MonokaiTheme.orange, false,
-                            () => onRetry?.call(run)),
+                            isBusy ? null : () => onRetry(run)),
                       if (run.status == RunStatus.awaitingApproval) ...[
                         _action('Approve', MonokaiTheme.green, true,
-                            () => onApprove?.call(run)),
+                            isBusy ? null : () => onApprove(run)),
                         const SizedBox(width: 8),
-                        _action('Reject', MonokaiTheme.red, false, null),
+                        _action('Reject', MonokaiTheme.red, false,
+                            isBusy ? null : () => onReject(run)),
+                      ],
+                      if (isBusy) ...[
+                        const SizedBox(width: 10),
+                        const SizedBox(
+                          width: 12,
+                          height: 12,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2, color: MonokaiTheme.cyan),
+                        ),
                       ],
                     ],
                   ),

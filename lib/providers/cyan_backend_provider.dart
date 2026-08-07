@@ -55,25 +55,27 @@ final boardNotesProvider =
   return backend.loadNotes(boardId);
 });
 
-/// Ops console — all runs (row 6).
-final opsRunsProvider = FutureProvider<List<OpsRun>>((ref) async {
+// The Ops console's three faces — Runs (row 6), Cost (row 7) and Efficiency
+// (row 8) — MOVED to `providers/lens_console_provider.dart` under PHASE-2 D3.
+// They are not FFI: on the Mac they read cyan-lens over HTTP and always have,
+// which is why `loadCostMeter`/`loadEfficiency` could only ever answer zeros
+// here.
+
+/// The ENGINE-assembled run feed: every board's `cyan_pipeline_status`, mapped
+/// (Tier-2 T7 proves it). Deliberately NOT the same provider as the Ops
+/// console's — this is what the engine knows about runs on THIS device, and
+/// [opsRunsProvider] is what the tenant's lens knows.
+///
+/// Two callers, both of which must stay on this lane:
+///   • the boards WALL, whose card state is a local read;
+///   • the metering spine, whose drill-down is `loadRunTrace` — an ENGINE
+///     trace. A list from one lane and a drill-down from the other would let
+///     an operator tap a run that has no audit. When row 26 moves the audit to
+///     `GET /runs/{id}`, the list moves with it.
+final engineOpsRunsProvider = FutureProvider<List<OpsRun>>((ref) async {
   final backend = ref.watch(cyanBackendProvider);
   await backend.initialize();
   return backend.loadOpsRuns();
-});
-
-/// Ops console — cost meter (row 7).
-final costMeterProvider = FutureProvider<CostMeter>((ref) async {
-  final backend = ref.watch(cyanBackendProvider);
-  await backend.initialize();
-  return backend.loadCostMeter();
-});
-
-/// Ops console — efficiency report (row 8).
-final efficiencyProvider = FutureProvider<EfficiencyReport>((ref) async {
-  final backend = ref.watch(cyanBackendProvider);
-  await backend.initialize();
-  return backend.loadEfficiency();
 });
 
 /// Ops console — the per-step audit for ONE run (metering face). Null when the

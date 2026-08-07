@@ -5,14 +5,16 @@
 // retry-min · saved-min · runs), the internal-COGS footnote (GPU = COGS:
 // margin, not billed), and the per-workflow reconcile table.
 //
-// Driven ENTIRELY through the `CyanBackend` seam (via `costMeterProvider`).
-// This widget never touches `CyanFFI` directly — that is the parity rule.
+// Driven ENTIRELY through the `LensApi` seam (via `costMeterProvider`, which is
+// a §4 rollup over the ONE `/api/v1/runs` feed the Runs face already reads).
+// This widget never touches HTTP or `CyanFFI` directly — that is the parity
+// rule, and D4 keeps the two seams apart.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
-import '../../providers/cyan_backend_provider.dart';
+import '../../providers/lens_console_provider.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_ops_scaffold.dart';
 

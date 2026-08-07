@@ -1,8 +1,9 @@
 // test/support/parity_test_harness.dart
 //
 // Tier-1 test harness: pumps a parity widget wrapped in the Monokai theme with
-// the `CyanBackend` seam overridden to a `FakeCyanBackend`. NO native library,
-// NO real engine. Used by every widget + golden test.
+// BOTH seams overridden to their fakes — `CyanBackend` → `FakeCyanBackend`
+// (D4's FFI seam) and `LensApi` → `FakeLensApi` (D4's HTTP seam). NO native
+// library, NO real engine, NO network. Used by every widget + golden test.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -10,21 +11,29 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cyan_flutter/ffi/cyan_backend.dart';
 import 'package:cyan_flutter/ffi/fake_cyan_backend.dart';
+import 'package:cyan_flutter/lens/fake_lens_api.dart';
+import 'package:cyan_flutter/lens/lens_api.dart';
 import 'package:cyan_flutter/providers/cyan_backend_provider.dart';
+import 'package:cyan_flutter/providers/lens_console_provider.dart';
 import 'package:cyan_flutter/theme/monokai_theme.dart';
 
-/// Wrap [child] in a ProviderScope (fake backend), MaterialApp (Monokai theme)
-/// and a fixed-size surface so goldens are deterministic.
+/// Wrap [child] in a ProviderScope (both seams faked), MaterialApp (Monokai
+/// theme) and a fixed-size surface so goldens are deterministic.
 Widget parityHarness(
   Widget child, {
   CyanBackend? backend,
+  LensApi? lens,
   Size size = const Size(900, 700),
   List<Override> overrides = const [],
 }) {
   return ProviderScope(
     overrides: [
       cyanBackendProvider.overrideWithValue(backend ?? FakeCyanBackend()),
-      // Faces with a second seam beside the backend (e.g. the marketplace's
+      // The lens lane is defaulted, never left live: without this override a
+      // face on the D3 lane would try to reach `http://localhost:8080` from a
+      // unit test.
+      lensApiProvider.overrideWithValue(lens ?? FakeLensApi()),
+      // Faces with a further seam beside these two (e.g. the marketplace's
       // lens bundle download) pass it here.
       ...overrides,
     ],
@@ -50,6 +59,7 @@ Future<void> pumpParity(
   WidgetTester tester,
   Widget child, {
   CyanBackend? backend,
+  LensApi? lens,
   Size size = const Size(900, 700),
   List<Override> overrides = const [],
 }) async {
@@ -63,7 +73,7 @@ Future<void> pumpParity(
   addTearDown(tester.view.resetPhysicalSize);
 
   await tester.pumpWidget(parityHarness(child,
-      backend: backend, size: size, overrides: overrides));
+      backend: backend, lens: lens, size: size, overrides: overrides));
   // Resolve FutureProviders + animations.
   await tester.pumpAndSettle(const Duration(milliseconds: 500));
 }

@@ -12,8 +12,12 @@
 // (a local read) keeps working — graceful expiry, exactly as the shipping app
 // does it.
 //
-// Driven ENTIRELY through the `CyanBackend` seam (`opsRunsProvider`,
-// `runTraceProvider`, `entitlementProvider`).
+// Driven ENTIRELY through the `CyanBackend` seam (`engineOpsRunsProvider`,
+// `runTraceProvider`, `entitlementProvider`). Note the lane: this spine's list
+// and its drill-down are the SAME source — the engine — so a run in the list
+// always has an audit behind it. The Ops console's own Runs face is on the
+// lens lane (D3); the two are different questions and are not mixed. Row 26
+// moves this spine's audit to `GET /runs/{id}`, and the list moves with it.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -60,7 +64,7 @@ class _ParityOpsMeteringState extends ConsumerState<ParityOpsMetering> {
 
   @override
   Widget build(BuildContext context) {
-    final runsAsync = ref.watch(opsRunsProvider);
+    final runsAsync = ref.watch(engineOpsRunsProvider);
     final entitlementAsync = ref.watch(entitlementProvider);
 
     // The gate is receive-only: until the cached grant resolves, nothing is

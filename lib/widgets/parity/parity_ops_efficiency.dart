@@ -6,14 +6,16 @@
 // table (runs · gate-p95 · fail · top error · exec-p95 · cache · saved ·
 // retry).
 //
-// Driven ENTIRELY through the `CyanBackend` seam (via `efficiencyProvider`).
-// This widget never touches `CyanFFI` directly — that is the parity rule.
+// Driven ENTIRELY through the `LensApi` seam (via `efficiencyProvider`, a §5
+// rollup over the SAME `/api/v1/runs` feed the Runs and Cost faces read — one
+// fetch, three faces, and no way for them to disagree). This widget never
+// touches HTTP or `CyanFFI` directly — that is the parity rule.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
-import '../../providers/cyan_backend_provider.dart';
+import '../../providers/lens_console_provider.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_ops_scaffold.dart';
 
