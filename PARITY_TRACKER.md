@@ -58,6 +58,23 @@ proceed and Rick eyeballs the built app at the end.
 | 11 | Chat (polish to parity) | ci-green | ci-green | ParityChatView via boardChatProvider seam; SwiftUI ChatPanel/ChatMessageView "Claude-style" transcript — header (forum icon + board title + "Board chat" + green online pill), left-aligned messages with colored author (own cyan / other green) + faint timestamp + light inline-markdown body (**bold** + `code`), composer (Message… field + cyan Send); widget + golden |
 | 12 | Login / landing (front door) | ci-green | n/a | ParityLoginView — PRE-SESSION, so plain callbacks, NOT the seam (login happens before a backend session exists). Brand block (mark + "Cyan" + "Decentralized Collaboration"), two-mode segmented picker (Personal / Organization), personal = Create your identity (no account) + offline promise + Restore (Scan QR · Backup key), organization = optional tenant field + Sign in with your organization, red error notice box, loading overlay, durable-XaeroID footer; 8 widget tests (`test/login_view_test.dart`) |
 
+## Tier-2 — the REAL engine (Windows, cyan-win)  ← live section
+The 302 widget tests all drive `FakeCyanBackend`; they prove wiring and say nothing about
+whether the engine is reached. Tier-2 runs against the natively built
+`cyan-backend/target/release/cyan_backend.dll`, staged at `windows\Libraries\`.
+Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\flutter\bin`).
+
+| # | tier-2 target | status | notes |
+|---|---|---|---|
+| T1 | `integration_test/real_engine_test.dart` | **green (4/4, Windows)** | engine loads from `windows\Libraries`, `cyan_init` writes a real db, full 157-verb surface resolves. The reported ":66 stale symbols" was a misdiagnosis — dumpbin `/EXPORTS` confirms every listed verb exists; the failure was `tearDownAll` (no engine shutdown verb ⇒ SQLite stays open ⇒ Windows won't unlink). |
+| T2 | `integration_test/engine_roundtrip_test.dart` | todo | write through FFI, read back two ways |
+| T3+ | real FFI hydration per screen | todo | Boards/Explorer → Workflow → Dashboard → Notes → Ops trio → Marketplace → Lens → Chat |
+
+**Seam truth:** `CyanBackendFFI`'s loaders (`loadWorkflow`, `loadNotes`, `loadOpsRuns`,
+`loadCostMeter`, `loadEfficiency`, `loadMarketplace`, `loadLensIntelligence`, `loadChat`…)
+still return honest EMPTIES. That is the Tier-3 work: real hydration, one screen per commit,
+each proved by an integration test where a seeded engine yields non-empty truth.
+
 ## Guardrails
 Branch `feat/flutter-parity`; never main; commit per screen; UI-only; contract frozen
 (additive only, noted here); golden diffs are truth ("looks close" ≠ pass); macOS Flutter
