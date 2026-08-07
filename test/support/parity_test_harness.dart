@@ -33,6 +33,10 @@ Widget parityHarness(
       // face on the D3 lane would try to reach `http://localhost:8080` from a
       // unit test.
       lensApiProvider.overrideWithValue(lens ?? FakeLensApi()),
+      // The lens age labels ("2h ago") are rendered against an INJECTED clock,
+      // pinned here to the fake's own seed epoch. Without this a golden would
+      // race the wall clock and every seeded ask would age a day per day.
+      lensNowProvider.overrideWithValue(FakeLensApi.seedNow ~/ 1000),
       // Faces with a further seam beside these two (e.g. the marketplace's
       // lens bundle download) pass it here.
       ...overrides,

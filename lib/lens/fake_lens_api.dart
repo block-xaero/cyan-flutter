@@ -627,16 +627,29 @@ class FakeLensApi implements LensApi {
         ),
       ];
 
+  /// [seedNow] in unix SECONDS — every age below is an offset from it, so the
+  /// face's "1h ago" is deterministic under the injected clock.
+  static const int seedSecs = seedNow ~/ 1000;
+
+  /// The nudge report. NOTE the shape: a lens nudge has no free-form title —
+  /// the title is a function of `nudge_type`, and the DETAIL is the question /
+  /// decision / external id it points at. A face cannot invent a headline the
+  /// lens never sent.
   static LensNudgeReport seededNudges() => const LensNudgeReport(
         groupId: 'g-eng',
-        generatedAt: seedNow ~/ 1000,
+        generatedAt: seedSecs,
         nudges: [
+          // Resolving THIS one dismisses an ask…
           LensNudgeWire(
             nudgeType: 'stale_ask',
-            question: 'Which LUT ships with the festival master?',
-            ageHours: 30,
+            question:
+                'Which loudness target should the ad set use — -23 or -16 LUFS?',
+            ageHours: 1,
             askId: 'ask-1',
+            sourceNodeId: 'node-ask-1',
           ),
+          // …and resolving THIS one resolves a graph node. Same button, two
+          // different lens verbs.
           LensNudgeWire(
             nudgeType: 'stale_blocker',
             externalId: 'CYAN-441',
@@ -654,24 +667,25 @@ class FakeLensApi implements LensApi {
           id: 'ask-1',
           sourceNodeId: 'node-ask-1',
           groupId: 'g-eng',
-          content: 'Which LUT ships with the festival master?',
-          askerName: 'Dana',
-          assigneeName: 'Rick',
+          content:
+              'Which loudness target should the ad set use — -23 or -16 LUFS?',
+          askerName: 'Mara',
+          assigneeName: 'You',
           status: 'open',
-          createdAt: 1786104000 - 108000,
+          createdAt: seedSecs - 3600,
         ),
         LensAskRow(
           id: 'ask-2',
           sourceNodeId: 'node-ask-2',
           groupId: 'g-eng',
-          content: 'Do we re-conform ep-102 or patch the mix?',
-          askerName: 'Rick',
-          assigneeName: 'Dana',
+          content: 'Is the Q3 teaser locked for the goals board?',
+          askerName: 'Devon',
+          assigneeName: 'Priya',
           status: 'answered',
-          answerSummary: 'Patch the mix — the conform is fine.',
-          answeredByName: 'Dana',
-          answeredAt: 1786104000 - 3600,
-          createdAt: 1786104000 - 7200,
+          answerSummary: 'Yes — locked as of this morning, proxies regenerated.',
+          answeredByName: 'Priya',
+          answeredAt: seedSecs - 3600,
+          createdAt: seedSecs - 3 * 3600,
         ),
       ];
 
@@ -680,10 +694,18 @@ class FakeLensApi implements LensApi {
           id: 'dec-1',
           sourceNodeId: 'node-dec-1',
           groupId: 'g-eng',
-          content: 'Deliveries go out at 4K HDR only.',
-          deciderName: 'Rick',
-          rationale: 'The SDR pass cost more in retries than it earned.',
-          createdAt: 1786104000 - 172800,
+          content: 'Ship the review pipeline with the cloud color step.',
+          deciderName: 'Priya',
+          rationale: 'Device-only color was too slow on long masters.',
+          createdAt: seedSecs - 5 * 3600,
+        ),
+        LensDecisionRow(
+          id: 'dec-2',
+          sourceNodeId: 'node-dec-2',
+          groupId: 'g-eng',
+          content: 'Adopt Frame.io review as the external delivery surface.',
+          deciderName: 'Mara',
+          createdAt: seedSecs - 24 * 3600,
         ),
       ];
 

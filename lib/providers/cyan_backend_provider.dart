@@ -107,13 +107,11 @@ final entitlementProvider = FutureProvider<Entitlement>((ref) async {
 // engine's only plugin verbs are `cyan_plugin_catalog` (what is INSTALLED here,
 // still on this seam) and `cyan_install_plugin_bundle` (the land).
 
-/// Lens intelligence bundle (row 10).
-final lensIntelligenceProvider =
-    FutureProvider<LensIntelligence>((ref) async {
-  final backend = ref.watch(cyanBackendProvider);
-  await backend.initialize();
-  return backend.loadLensIntelligence();
-});
+// The Lens AI face (row 10 / 21) MOVED to
+// `providers/lens_console_provider.dart` under PHASE-2 D3. Nudges, asks and
+// decisions are lens routes; the engine's lens surface is
+// `cyan_parse_lens_command` + `cyan_poll_ai_insights` and reports none of them,
+// which is why `loadLensIntelligence` could only ever answer `connected:false`.
 
 /// Board chat transcript (row 11).
 final boardChatProvider =

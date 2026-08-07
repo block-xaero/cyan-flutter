@@ -13,14 +13,19 @@
 //                 agree/disagree/comment reaction counts).
 //   • Graph     — the knowledge-graph viz (a parity placeholder here).
 //
-// Driven ENTIRELY through the `CyanBackend` seam (via `lensProvider`). This
-// widget never touches `CyanFFI` directly — that is the parity rule.
+// Driven ENTIRELY through the `LensApi` seam (via `lensIntelligenceProvider`,
+// D3): `/health` + `/nudges/{group}` + `/asks/{group}` + `/decisions/{group}`.
+// This widget never touches HTTP or `CyanFFI` directly — that is the parity
+// rule.
+//
+// Resolve / Answer / React are REAL lens writes. The optional callbacks are an
+// OVERRIDE for a host that wants to intercept, not the wiring.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
-import '../../providers/cyan_backend_provider.dart';
+import '../../providers/lens_console_provider.dart';
 import '../../theme/monokai_theme.dart';
 
 enum LensTab { nudges, asks, decisions, graph }
@@ -49,20 +54,29 @@ extension LensTabX on LensTab {
 }
 
 class ParityLensView extends ConsumerStatefulWidget {
-  /// Resolve a nudge — UI-only here; the host wires the graph mutation.
+  /// Intercept Resolve. When null the view sends the lens write itself —
+  /// `dismiss` for a stale ask, `resolve-blocker` for anything else.
   final void Function(LensNudge)? onResolveNudge;
 
-  /// Answer / dismiss an ask — UI-only here.
+  /// Intercept Answer. When null the view POSTs the answer itself.
   final void Function(LensAsk)? onAnswerAsk;
 
-  /// React to a decision (agree/disagree) — UI-only here.
+  /// Intercept React. When null the view POSTs an `agree` itself.
   final void Function(LensDecision)? onReactDecision;
+
+  /// Who the writes are attributed to. The lens records the answerer/reactor by
+  /// name and id, so a face that sends a placeholder is putting the wrong
+  /// person's name on someone's answer.
+  final String actorId;
+  final String actorName;
 
   const ParityLensView({
     super.key,
     this.onResolveNudge,
     this.onAnswerAsk,
     this.onReactDecision,
+    this.actorId = '',
+    this.actorName = 'you',
   });
 
   @override
@@ -106,6 +120,45 @@ class _ParityLensViewState extends ConsumerState<ParityLensView> {
     );
   }
 
+  // The three writes. Each defers ENTIRELY to its callback when one is
+  // supplied — the command must not also fire underneath a host that
+  // intercepted it in order to confirm first.
+  LensIntelligenceCommands get _commands =>
+      ref.read(lensIntelligenceCommandsProvider);
+
+  void _resolve(LensNudge n) {
+    final override = widget.onResolveNudge;
+    if (override != null) {
+      override(n);
+      return;
+    }
+    _commands.resolve(n);
+  }
+
+  void _answer(LensAsk a) {
+    final override = widget.onAnswerAsk;
+    if (override != null) {
+      override(a);
+      return;
+    }
+    // The card's Answer button opens the host's composer on the Mac. With no
+    // composer wired here there is no answer TEXT to send, so the honest
+    // action is the one the lens can take without inventing words on the
+    // operator's behalf: dismiss the ask. Answering with a body arrives with
+    // the composer.
+    _commands.dismiss(a);
+  }
+
+  void _react(LensDecision d) {
+    final override = widget.onReactDecision;
+    if (override != null) {
+      override(d);
+      return;
+    }
+    _commands.react(d.id, 'agree',
+        nodeId: widget.actorId, displayName: widget.actorName);
+  }
+
   Widget _body(LensIntelligence lens) {
     switch (_tab) {
       case LensTab.nudges:
@@ -119,7 +172,7 @@ class _ParityLensViewState extends ConsumerState<ParityLensView> {
           padding: const EdgeInsets.all(16),
           children: [
             for (final n in lens.nudges)
-              _NudgeCard(nudge: n, onResolve: widget.onResolveNudge),
+              _NudgeCard(nudge: n, onResolve: _resolve),
           ],
         );
       case LensTab.asks:
@@ -132,8 +185,7 @@ class _ParityLensViewState extends ConsumerState<ParityLensView> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            for (final a in lens.asks)
-              _AskCard(ask: a, onAnswer: widget.onAnswerAsk),
+            for (final a in lens.asks) _AskCard(ask: a, onAnswer: _answer),
           ],
         );
       case LensTab.decisions:
@@ -147,7 +199,7 @@ class _ParityLensViewState extends ConsumerState<ParityLensView> {
           padding: const EdgeInsets.all(16),
           children: [
             for (final d in lens.decisions)
-              _DecisionCard(decision: d, onReact: widget.onReactDecision),
+              _DecisionCard(decision: d, onReact: _react),
           ],
         );
       case LensTab.graph:
@@ -366,15 +418,20 @@ class _NudgeCard extends StatelessWidget {
                 const SizedBox(height: 8),
                 Row(
                   children: [
-                    const Icon(Icons.dashboard_outlined,
-                        size: 11, color: MonokaiTheme.comment),
-                    const SizedBox(width: 4),
-                    Flexible(
-                      child: Text(nudge.boardLabel,
-                          style: MonokaiTheme.labelSmall,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis),
-                    ),
+                    // The graph reference the nudge hangs off. A nudge that
+                    // carries none draws NO chip — an empty label beside an
+                    // icon reads as a rendering bug, not as "unknown".
+                    if (nudge.boardLabel.isNotEmpty) ...[
+                      const Icon(Icons.dashboard_outlined,
+                          size: 11, color: MonokaiTheme.comment),
+                      const SizedBox(width: 4),
+                      Flexible(
+                        child: Text(nudge.boardLabel,
+                            style: MonokaiTheme.labelSmall,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis),
+                      ),
+                    ],
                     const Spacer(),
                     _ResolveButton(onTap: () => onResolve?.call(nudge)),
                   ],

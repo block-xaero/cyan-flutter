@@ -730,12 +730,20 @@ class LensNudge {
   final String ageLabel; // "2h ago"
   final String boardLabel; // owning workflow/board
 
+  /// The lens's own `nudge_type` (`stale_ask` · `stale_blocker` ·
+  /// `unimplemented_decision`). Carried because RESOLVING a nudge is two
+  /// different lens verbs depending on it — a stale ask is DISMISSED, a stale
+  /// blocker is RESOLVED on its graph node — and [id] alone cannot say which,
+  /// so a client that guessed would silently no-op half the time.
+  final String nudgeType;
+
   const LensNudge({
     required this.id,
     required this.title,
     required this.detail,
     required this.ageLabel,
     required this.boardLabel,
+    this.nudgeType = '',
   });
 }
 

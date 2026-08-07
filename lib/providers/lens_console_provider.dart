@@ -109,6 +109,158 @@ final marketplaceProvider = FutureProvider<List<PluginCard>>((ref) async {
 });
 
 // ---------------------------------------------------------------------------
+// Row 21 — the Lens AI face (nudges / asks / decisions), on the same lane
+// ---------------------------------------------------------------------------
+
+/// The clock the age labels are rendered against, in unix SECONDS.
+///
+/// Injected rather than read at the point of use so a golden and a widget test
+/// pin "1d ago" instead of racing the wall clock — the same discipline the
+/// Swift `LicenseViewModel` follows with its `now`.
+final lensNowProvider =
+    Provider<int>((ref) => DateTime.now().millisecondsSinceEpoch ~/ 1000);
+
+/// The Lens AI bundle: is the lens up, and what has it noticed.
+///
+/// FOUR reads, and the connection one is not optional. `loadLensIntelligence`
+/// on the FFI seam answered `connected: false` unconditionally, which was the
+/// honest reading of a build that binds no lens — but it is a claim, and the
+/// only thing entitled to make it is `/health`. A strict health decode is also
+/// what once showed "Disconnected" over a perfectly live lens (the live `data`
+/// dropped `iggy` and added `commit`), so the decode is tolerant and the
+/// statusText names the leg that is actually down.
+final lensIntelligenceProvider =
+    FutureProvider<LensIntelligence>((ref) async {
+  final lens = ref.watch(lensApiProvider);
+  final now = ref.watch(lensNowProvider);
+
+  // Health is asked FIRST and separately: if the lens is down, saying so is
+  // the answer, and three more failing reads add nothing.
+  LensHealth health;
+  try {
+    health = await lens.health();
+  } on LensApiException {
+    return const LensIntelligence(connected: false);
+  }
+
+  final report = await lens.nudges();
+  final asks = await lens.asks(limit: kLensRowLimit);
+  final decisions = await lens.decisions(limit: kLensRowLimit);
+
+  return LensIntelligence(
+    connected: health.isHealthy,
+    nudges: [for (final n in report.nudges) lensNudgeFrom(n)],
+    asks: [for (final a in asks) lensAskFrom(a, now)],
+    decisions: [for (final d in decisions) lensDecisionFrom(d, now)],
+  );
+});
+
+/// How many ask/decision rows the face asks for.
+const int kLensRowLimit = 50;
+
+LensNudge lensNudgeFrom(LensNudgeWire n) => LensNudge(
+      id: n.id,
+      title: n.title,
+      detail: n.detail,
+      ageLabel: n.ageText,
+      // The lens's nudge shape carries a GRAPH reference, not a board. The chip
+      // shows the NODE the nudge hangs off — never the external id, which is
+      // already the detail line for a blocker and would just print twice — and
+      // shows nothing at all when the nudge carries neither, rather than
+      // captioning it with a board it was never told about.
+      boardLabel: n.sourceNodeId ?? n.nodeId ?? '',
+      nudgeType: n.nudgeType,
+    );
+
+LensAsk lensAskFrom(LensAskRow a, int nowSeconds) {
+  // An ask with a recorded answer IS answered, whatever its status string says
+  // — the answer is the fact, the status is a label that can lag.
+  final answered = a.answerSummary != null && a.answerSummary!.isNotEmpty;
+  return LensAsk(
+    id: a.id,
+    question: a.content,
+    asker: a.askerName,
+    // The lens leaves an unassigned ask's assignee null. "Unassigned" is the
+    // honest word for that; an empty chip reads as a rendering bug.
+    assignee: a.assigneeName ?? 'Unassigned',
+    ageLabel: a.ageText(nowSeconds),
+    status: answered
+        ? AskStatus.answered
+        : (a.status == 'stale' ? AskStatus.stale : AskStatus.open),
+    answer: a.answerSummary,
+    answerer: a.answeredByName,
+  );
+}
+
+/// Reaction COUNTS are their own endpoint (`/decisions/{id}/reactions`), so the
+/// feed cannot supply them without an N+1 fetch. They stay zero here, and the
+/// face already draws the reaction row only when a count is positive — so a
+/// decision reads as "not asked" rather than as "nobody agreed".
+LensDecision lensDecisionFrom(LensDecisionRow d, int nowSeconds) =>
+    LensDecision(
+      id: d.id,
+      content: d.content,
+      rationale: d.rationale,
+      decider: d.deciderName,
+      ageLabel: d.ageText(nowSeconds),
+    );
+
+/// The three Lens AI writes, and the routing decision behind the first one.
+class LensIntelligenceCommands {
+  LensIntelligenceCommands(this._lens, this._onChanged);
+
+  final LensApi _lens;
+  final void Function() _onChanged;
+
+  /// Resolving a nudge is TWO different verbs depending on what the nudge is
+  /// about: a stale ASK is dismissed (`PATCH /asks/{id}/dismiss`), anything
+  /// else is resolved on its graph node (`PATCH /nodes/{id}/resolve-blocker`).
+  /// The nudge's id is already whichever one applies — [LensNudge.nudgeType] is
+  /// what says which verb it belongs to, and a client that guessed would
+  /// silently no-op half the time.
+  Future<void> resolve(LensNudge nudge) async {
+    if (nudge.id.isEmpty) return;
+    if (nudge.nudgeType == 'stale_ask') {
+      await _lens.dismissAsk(nudge.id);
+    } else {
+      await _lens.resolveBlocker(nudge.id);
+    }
+    _onChanged();
+  }
+
+  Future<void> answer(String askId, String answer,
+      {required String answererId, required String answererName}) async {
+    await _lens.answerAsk(askId,
+        answer: answer, answererId: answererId, answererName: answererName);
+    _onChanged();
+  }
+
+  /// Take an ask off the board without answering it. Distinct from [answer] on
+  /// purpose: the lens records these as different things, and a "dismiss"
+  /// dressed up as an empty answer would put words in someone's mouth.
+  Future<void> dismiss(LensAsk ask) async {
+    if (ask.id.isEmpty) return;
+    await _lens.dismissAsk(ask.id);
+    _onChanged();
+  }
+
+  Future<void> react(String decisionId, String reaction,
+      {required String nodeId, required String displayName}) async {
+    await _lens.reactToDecision(decisionId,
+        reaction: reaction, nodeId: nodeId, displayName: displayName);
+    _onChanged();
+  }
+}
+
+final lensIntelligenceCommandsProvider =
+    Provider<LensIntelligenceCommands>((ref) {
+  return LensIntelligenceCommands(
+    ref.watch(lensApiProvider),
+    () => ref.invalidate(lensIntelligenceProvider),
+  );
+});
+
+// ---------------------------------------------------------------------------
 // Wire → face mappings (pure; the contract test drives them directly)
 // ---------------------------------------------------------------------------
 
