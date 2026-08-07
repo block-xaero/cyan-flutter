@@ -210,10 +210,10 @@ class CyanBackendFFI implements CyanBackend {
 
   /// One `cyan_get_all_boards` row as a board.
   ///
-  /// The verb hardcodes `element_count` to 0 and carries no deploy flag, so
-  /// [CyanBoard.stepCount] and [CyanBoard.isDeployed] are the engine's own
-  /// silence rather than a read — the living-wall "running" pill is still
-  /// waiting on a verb that answers it per board.
+  /// The verb hardcodes `element_count` to 0, so [CyanBoard.stepCount] is the
+  /// engine's own silence rather than a read — no verb counts a board's cells
+  /// without loading all of them, and the wall will not load every cell of
+  /// every board to caption a card.
   CyanBoard _boardFromRow(Map<String, dynamic> item) {
     final boardId = _str(item['id']);
     return CyanBoard(
@@ -225,7 +225,7 @@ class CyanBackendFFI implements CyanBackend {
       rating: _int(item['rating']),
       labels: _labels(boardId),
       stepCount: _int(item['element_count']),
-      isDeployed: item['is_deployed'] == true,
+      isDeployed: _isDeployed(boardId),
       createdAt:
           DateTime.fromMillisecondsSinceEpoch(_int(item['created_at']) * 1000),
       lastModified: item['last_modified'] == null
@@ -234,6 +234,20 @@ class CyanBackendFFI implements CyanBackend {
               _int(item['last_modified']) * 1000),
     );
   }
+
+  /// Whether the board is DEPLOYED — the living wall's whole point, the
+  /// difference between a card and a card that is running.
+  ///
+  /// `cyan_get_all_boards` carries no deploy flag: deploy state is its own row,
+  /// and `cyan_board_workflow_state` is the read for it (cyan-backend's own seed
+  /// names that verb as what the board card reads). One point read per board,
+  /// beside the mode / pin / label reads the card already makes.
+  ///
+  /// A board the engine cannot answer for is NOT deployed here — an undeployed
+  /// card is the quiet failure, a running pill over a dead engine is the loud
+  /// lie.
+  bool _isDeployed(String boardId) =>
+      _decode(CyanFFI.boardWorkflowState(boardId))?['deployed'] == true;
 
   /// A board the tree named but the metadata verb did not return. Both read the
   /// same `objects` rows, so this is a race between two calls rather than a

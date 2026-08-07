@@ -165,6 +165,18 @@ void main() {
       expect(b.group.colorHex, seeded.color);
     }
 
+    // The seed marks every board deployed AND pinned (`mark_deployed` +
+    // `board_meta_set_pinned`), which is what the living wall's running pill
+    // and pin row are for. `cyan_get_all_boards` carries neither flag, so both
+    // are separate reads and both used to come back false for every card.
+    for (final b in boards) {
+      expect(b.board.isDeployed, isTrue,
+          reason: 'board "${b.board.name}" is deployed in the engine but the '
+              'wall says it is not — the living wall would show a dead grid');
+      expect(b.board.isPinned, isTrue,
+          reason: 'every seeded board is pinned');
+    }
+
     // The wall and the Explorer must agree about who owns what — they read the
     // board list and the tree through two different verbs, and a disagreement
     // means one of them is lying.

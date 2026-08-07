@@ -84,9 +84,13 @@ Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\
   only ("R10FB §D: demo seeding has been REMOVED"). The verb that really seeds is
   **`cyan_seed_demo`**: a fixed, idempotent 3-group / 10-board set, each group provisioned
   with a `General` and a system `Plugins` workspace.
-- `cyan_get_all_boards` hardcodes `element_count` to 0 and carries no deploy flag, so
-  `CyanBoard.stepCount`/`isDeployed` are the engine's silence, not a read. The living-wall
-  "running" pill still has nothing per-board to read — see the blocked note below.
+- `cyan_get_all_boards` carries no deploy flag — deploy state is its own row, read with
+  `cyan_board_workflow_state` (one point read per board; the wall does that now, so the
+  living-wall running pill is real).
+- `cyan_get_all_boards` hardcodes `element_count` to **0** and no verb counts a board's
+  cells without loading all of them, so `CyanBoard.stepCount` is the engine's silence.
+  The card's "N steps" reads 0 for every board until the engine grows a count verb —
+  **engine work, and engine work belongs to the Mac session.**
 
 **Seam truth:** `CyanBackendFFI`'s loaders (`loadWorkflow`, `loadNotes`, `loadOpsRuns`,
 `loadCostMeter`, `loadEfficiency`, `loadMarketplace`, `loadLensIntelligence`, `loadChat`…)
