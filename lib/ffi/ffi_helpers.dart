@@ -846,14 +846,19 @@ class CyanFFI {
   // CHAT
   // ==========================================================================
   
-  static void sendChat(String workspaceId, String message, {String? parentId}) {
-    final wPtr = workspaceId.toNativeUtf8();
+  /// Send a message to a BOARD's chat. The parameter used to be called
+  /// `workspaceId` — a leftover from before R11 §1 made chat board-scoped. The
+  /// engine's `cyan_send_chat` takes a board id and always has here; only the
+  /// name was stale, which is the kind of thing that gets a workspace id passed
+  /// in eventually.
+  static void sendChat(String boardId, String message, {String? parentId}) {
+    final bPtr = boardId.toNativeUtf8();
     final mPtr = message.toNativeUtf8();
     final pPtr = parentId?.toNativeUtf8() ?? nullptr;
     try {
-      _b.sendChat(wPtr, mPtr, pPtr);
+      _b.sendChat(bPtr, mPtr, pPtr);
     } finally {
-      calloc.free(wPtr);
+      calloc.free(bPtr);
       calloc.free(mPtr);
       if (pPtr != nullptr) calloc.free(pPtr);
     }

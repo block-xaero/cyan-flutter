@@ -700,8 +700,75 @@ class CyanBackendFFI implements CyanBackend {
   Future<bool> setBoardActiveFace(String boardId, String face) async =>
       CyanFFI.setBoardMode(boardId, face);
 
+  // The Ops Runs feed is tenant-wide, and the engine has no tenant-wide runs
+  // verb — a run lives on its board, read with `cyan_pipeline_status`. So the
+  // feed is ASSEMBLED here: every board the device can see, asked for its
+  // snapshot. That is one point read per board, the same order of cost the
+  // living wall already pays, and it is the only honest way to build this list
+  // without inventing a rollup the engine does not keep.
+
   @override
-  Future<List<OpsRun>> loadOpsRuns() async => const [];
+  Future<List<OpsRun>> loadOpsRuns() async {
+    final runs = <OpsRun>[];
+    for (final row in _boardRows()) {
+      final boardId = _str(row['id']);
+      if (boardId.isEmpty) continue;
+      final status = await pipelineStatus(boardId);
+      // A board with no compiled pipeline has no run. It is NOT a queued run
+      // with nothing in it — an empty card in the Queued lane would read as
+      // work waiting that nobody scheduled.
+      if (status.error != null || status.steps.isEmpty) continue;
+      runs.add(_opsRun(status, boardName: _str(row['name'])));
+    }
+    return runs;
+  }
+
+  /// One board's snapshot as a run card.
+  ///
+  /// The cost and cache fields stay at their defaults: the engine's per-step
+  /// billing lives behind the lens meter, which this build does not bind, and
+  /// `cyan_pipeline_status` carries only the run's total. Zeroes here are the
+  /// engine's silence, not a reading of zero — see the Ops Cost row in
+  /// PARITY_TRACKER.md, which is blocked for the same reason.
+  OpsRun _opsRun(PipelineStatus status, {required String boardName}) {
+    final done = status.steps
+        .where((s) =>
+            s.status == PipelineStepState.humanApproved ||
+            s.status == PipelineStepState.aiComplete)
+        .length;
+    return OpsRun(
+      // The engine mints a run id per run; a compiled board that has never run
+      // has none, and the board id is then the only stable handle the feed has.
+      runId: status.runId ?? status.boardId,
+      // There is no separate asset label on the snapshot — the board names the
+      // work, exactly as the run header does on the Dashboard.
+      asset: boardName.isEmpty ? status.boardId : boardName,
+      workflow: boardName.isEmpty ? status.boardId : boardName,
+      boardId: status.boardId,
+      status: _opsStatus(status),
+      currentStep: done,
+      stepCount: status.totalSteps,
+      costDollars: status.totalCostDollars,
+      // The stage strip shows the step actually holding the run up; a run with
+      // nothing parked has no stage to name.
+      stageLabel: status.awaitingStep,
+    );
+  }
+
+  /// The run-level lane. The engine derives its own run state (failed >
+  /// awaiting > running > done > in-progress > idle) and that derivation is
+  /// authoritative — this maps it, it does not re-derive it.
+  ///
+  /// `stuck` has no engine spelling, so no run is ever put in that lane: a
+  /// lane this side invented would be a diagnosis the engine never made.
+  static RunStatus _opsStatus(PipelineStatus s) => switch (s.status) {
+        PipelineRunState.failed => RunStatus.failed,
+        PipelineRunState.awaitingApproval => RunStatus.awaitingApproval,
+        PipelineRunState.running => RunStatus.running,
+        PipelineRunState.done => RunStatus.done,
+        PipelineRunState.inProgress => RunStatus.running,
+        PipelineRunState.idle => RunStatus.queued,
+      };
 
   @override
   Future<CostMeter> loadCostMeter() async => const CostMeter(
@@ -803,8 +870,114 @@ class CyanBackendFFI implements CyanBackend {
   Future<LensIntelligence> loadLensIntelligence() async =>
       const LensIntelligence(connected: false);
 
+  // The engine keeps no chat SNAPSHOT verb. `cyan_load_chat_history` REPLAYS a
+  // board's stored transcript — one `ChatSent` frame per message onto the
+  // `chat_panel` buffer — and then closes it with `ChatHistoryComplete`. So the
+  // "read" here is a replay drained back in.
+  //
+  // CONTENTION, said out loud because it is real and it is not fixable from
+  // this side: `ChatSent` is routed to `chat_panel` and NOWHERE ELSE
+  // (`route_event_to_buffers`), and `cyan_poll_events` pops. The tree read can
+  // sidestep the legacy pump because `TreeLoaded` is deliberately routed to two
+  // buffers; chat has no second buffer, so if the legacy `ChatBridge` is
+  // pumping `chat_panel` at the same time, the two drains SPLIT the transcript
+  // between them. One live chat consumer at a time, until the engine grows
+  // either a snapshot verb or a second route.
+
   @override
-  Future<List<ChatMessage>> loadChat(String boardId) async => const [];
+  Future<List<ChatMessage>> loadChat(String boardId) async {
+    CyanFFI.loadChatHistory(boardId);
+
+    final me = CyanFFI.getMyNodeId() ?? '';
+    final collected = <({int at, ChatMessage message})>[];
+
+    // NOT waiting on `ChatHistoryComplete`, deliberately: the engine routes it
+    // to `file_tree` + `board_grid`, and draining `board_grid` for it here
+    // would eat the `TreeLoaded` frames [_requestTree] is waiting on — one seam
+    // read stealing another's answer. Quiescence on the chat buffer is the
+    // signal that costs nobody else anything.
+    final deadline = DateTime.now().add(_snapshotTimeout);
+    var lastFrame = DateTime.now();
+    while (DateTime.now().isBefore(deadline)) {
+      var sawFrame = false;
+      for (var f = CyanFFI.pollEvents('chat_panel');
+          f != null;
+          f = CyanFFI.pollEvents('chat_panel')) {
+        sawFrame = true;
+        final row = _chatFrame(f, boardId, me);
+        if (row != null) collected.add(row);
+      }
+      if (sawFrame) {
+        lastFrame = DateTime.now();
+      } else if (DateTime.now().difference(lastFrame) > _replayQuiet) {
+        break;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+
+    // DEDUPE BY ID, and it is not defensive padding — it is required. A send
+    // emits a live `ChatSent` onto this same buffer at the moment it lands, and
+    // the replay then emits the stored row for it too. Both carry the id the
+    // engine minted, so without this every message the device sent since the
+    // last drain appears twice in its own transcript.
+    final seen = <String>{};
+    final unique = <({int at, ChatMessage message})>[];
+    for (final c in collected) {
+      // A frame with no id cannot be deduped and cannot be addressed; it is
+      // still a message somebody sent, so it is kept rather than dropped.
+      if (c.message.id.isNotEmpty && !seen.add(c.message.id)) continue;
+      unique.add(c);
+    }
+
+    // Oldest first, as a transcript reads. The replay is emitted in storage
+    // order, but the timestamp is the engine's own and is what to trust.
+    unique.sort((a, b) => a.at.compareTo(b.at));
+    return [for (final c in unique) c.message];
+  }
+
+  /// How long the chat buffer must stay silent before a replay counts as
+  /// finished. Long enough to cover the gap between two replayed frames,
+  /// short enough that an empty transcript is not a visible wait.
+  static const Duration _replayQuiet = Duration(milliseconds: 300);
+
+  /// One `chat_panel` frame, if it is a message on [boardId].
+  ///
+  /// `SwiftEvent::Network(NetworkEvent::ChatSent{…})` serialises as
+  /// `{"type":"Network","data":{"type":"ChatSent",…}}` — the outer enum is
+  /// tagged with a content field, the inner one internally. Frames for other
+  /// boards and other kinds are skipped, never rendered: the buffer is shared
+  /// across every board's chat.
+  ({int at, ChatMessage message})? _chatFrame(
+      String frame, String boardId, String me) {
+    final ev = _decode(frame);
+    if (ev == null || ev['type'] != 'Network') return null;
+    final data = ev['data'];
+    if (data is! Map<String, dynamic> || data['type'] != 'ChatSent') return null;
+    if (_str(data['board_id']) != boardId) return null;
+
+    final author = _str(data['author']);
+    final isOwn = author.isNotEmpty && author == me;
+    final at = _int(data['timestamp']);
+    return (
+      at: at,
+      message: ChatMessage(
+        id: _str(data['id']),
+        // The engine authors by NODE ID. Ask it for its own display fallback
+        // rather than abbreviating here, so one device's name for a peer
+        // matches another's.
+        author: isOwn ? 'You' : (_friendly(author) ?? author),
+        isOwn: isOwn,
+        body: _str(data['message']),
+        timeLabel: _clockLabel(
+            DateTime.fromMillisecondsSinceEpoch(at * 1000)),
+      ),
+    );
+  }
+
+  static String? _friendly(String nodeId) {
+    final name = CyanFFI.friendlyNodeId(nodeId);
+    return (name == null || name.isEmpty) ? null : name;
+  }
 
   @override
   Future<void> loadChatHistory(String boardId) async =>
