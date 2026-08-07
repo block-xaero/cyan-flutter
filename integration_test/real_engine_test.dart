@@ -32,6 +32,19 @@ typedef _Str1D = Pointer<Utf8> Function(Pointer<Utf8>);
 /// path that silently degrades to no-ops when the dylib is missing. Asserting
 /// against the real bundled artifact is the whole point of this tier.
 DynamicLibrary _engine() {
+  if (Platform.isWindows) {
+    // Windows: the runner ships the DLL beside the exe; in `flutter test -d
+    // windows` the staged copy under windows/Libraries is the build input.
+    final exeDir = File(Platform.resolvedExecutable).parent;
+    for (final candidate in [
+      File('${exeDir.path}/cyan_backend.dll'),
+      File('${Directory.current.path}/windows/Libraries/cyan_backend.dll'),
+    ]) {
+      if (candidate.existsSync()) return DynamicLibrary.open(candidate.path);
+    }
+    fail('no cyan_backend.dll beside the runner or under windows/Libraries — '
+        'the app would fall back to process symbols and silently no-op.');
+  }
   final exe = File(Platform.resolvedExecutable).parent; // …/Contents/MacOS
   final bundled =
       File('${exe.parent.path}/Frameworks/libcyan_core.dylib');

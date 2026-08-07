@@ -61,6 +61,17 @@ late DynamicLibrary _lib;
 /// convenient one. See real_engine_test.dart for why the process fallback is a
 /// hazard rather than a safety net.
 DynamicLibrary _engine() {
+  if (Platform.isWindows) {
+    final exeDir = File(Platform.resolvedExecutable).parent;
+    for (final candidate in [
+      File('${exeDir.path}/cyan_backend.dll'),
+      File('${Directory.current.path}/windows/Libraries/cyan_backend.dll'),
+    ]) {
+      if (candidate.existsSync()) return DynamicLibrary.open(candidate.path);
+    }
+    fail('no cyan_backend.dll beside the runner or under windows/Libraries — '
+        'the app would degrade to no-ops.');
+  }
   final exe = File(Platform.resolvedExecutable).parent; // …/Contents/MacOS
   final bundled = File('${exe.parent.path}/Frameworks/libcyan_core.dylib');
   if (bundled.existsSync()) return DynamicLibrary.open(bundled.path);
