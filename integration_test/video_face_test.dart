@@ -2,9 +2,11 @@
 // seam against a real engine.
 //
 // The face's Tier-1 suite drives `FakeCyanBackend`, which round-trips a note
-// perfectly. This file asks whether the ENGINE does — and the answer is: mostly,
-// with one field family that does not survive the trip. Finding that is what
-// this test is for.
+// perfectly. This file asks whether the ENGINE does. On 2026-08-07 the answer
+// was "mostly" — `reply_to`/`thread_count`/`created_at` were written by nobody
+// and read by `load_notes`, so every reply loaded as a root note. Finding that
+// is what this test was for; cyan-backend 92ec790 fixed it, and the threading
+// test below is now the round trip read the other way up.
 //
 // The lane is `cyan_save_timecode_note` / `cyan_load_timecode_notes` /
 // `cyan_export_notes_markdown` / `cyan_act_on_timecode_note`. A timecoded note
@@ -163,33 +165,27 @@ void main() {
     expect(ledger.any((n) => n.text.contains('Dialogue clips')), isTrue);
   });
 
-  // ── THE BLOCKER, pinned down with evidence rather than claimed ─────────────
+  // ── THREADING — the block this test was written to prove, now LIFTED ───────
   //
-  // `timecode_notes::save_note` builds the cell's `metadata_json` from a fixed
-  // set of keys — timecode_seconds, note_type, author, pipeline_step_id,
-  // pipeline_phase, ai_reviewed, human_approved, action_* and ai_flags_nearby.
-  // It does NOT write `reply_to`, `thread_count` or `created_at`.
+  // Until 2026-08-07 `timecode_notes::save_note` built the cell's
+  // `metadata_json` from a fixed key set that OMITTED `reply_to`,
+  // `thread_count` and `created_at` — while `load_notes` read all three back
+  // out of that same metadata. Every reply loaded as a ROOT note, every thread
+  // count was 0, and every note was stamped at the epoch. This test was the
+  // receipt: it sent the parent id, proved the port sent it, then proved the
+  // engine did not keep it.
   //
-  // `load_notes` reads all three back out of that same metadata. So every one
-  // of them comes back as its default: a REPLY loads as a ROOT note, the thread
-  // count is always 0, and every note is stamped at the epoch.
-  //
-  // The consequence for this face: threading is DEAD against the real engine.
-  // The reference draws replies under their parent with a connector and a
-  // reply count; through this engine every reply is a top-level note in the
-  // wrong section, at the wrong place in a rail that orders by timecode.
-  //
-  // This is engine work — one line of JSON in save_note — and engine work
-  // belongs to the Mac session. The face is written correctly and this test is
-  // the receipt. When the engine starts persisting reply_to, this test goes red
-  // and the block is liftable.
-  test('BLOCKED: the engine drops reply_to, thread_count and created_at, so a '
-      'reply loads as a root note', () async {
+  // cyan-backend 92ec790 writes all three. The assertions below are the SAME
+  // round trip read the other way up — a reply comes back a reply, the face
+  // threads it under its parent, and the ordering clock is real.
+  test('a reply survives the engine round trip and the face threads it under '
+      'its parent', () async {
     final face = VideoFaceController(backend: backend, boardId: board);
     await face.load();
     final parent = face.state.roots.single;
 
     face.replyTo(parent.id);
+    final before = DateTime.now().millisecondsSinceEpoch / 1000;
     final reply = await face.addNote(
       content: 'Agreed — flagging for the mixer, not a re-conform.',
       // Deliberately NOT the parent's timecode: the controller inherits it, so
@@ -208,19 +204,36 @@ void main() {
     expect(stored, hasLength(2));
     final readBack = stored.firstWhere((n) => n.id == reply.id);
 
-    expect(readBack.replyTo, isNull,
-        reason: 'the engine now persists reply_to — threading works, this '
-            'block is LIFTED and row 14 can be unblocked in PARITY_TRACKER.md');
-    expect(readBack.threadCount, 0);
-    expect(readBack.createdAt, 0,
-        reason: 'the engine now persists created_at — thread ordering is real');
+    expect(readBack.replyTo, parent.id,
+        reason: 'the engine dropped reply_to again — threading is dead and '
+            'row 14 is blocked once more');
+    expect(readBack.createdAt, greaterThanOrEqualTo(before),
+        reason: 'created_at came back as its default, so the thread has no '
+            'ordering clock — replies would sort arbitrarily');
 
-    // …and this is what the face is left holding: two roots where there should
-    // be a parent and its reply.
+    // `thread_count` is a CLIENT-cached count the engine stores verbatim and
+    // never maintains: nothing on either side increments the parent's when a
+    // reply lands. The face therefore counts replies from the rail it already
+    // holds (`repliesTo`) and never reads this field — pinned here so the
+    // round trip is understood rather than trusted.
+    expect(readBack.threadCount, 0,
+        reason: 'the engine started maintaining thread_count — the face may '
+            'now read it instead of counting the rail');
+
+    // The parent's own row is untouched by its reply.
+    final parentBack = stored.firstWhere((n) => n.id == parent.id);
+    expect(parentBack.replyTo, isNull);
+
+    // …and this is what the face is left holding: ONE root with its reply
+    // threaded underneath, which is the shape the reference draws.
     await face.load();
-    expect(face.state.roots, hasLength(2),
-        reason: 'the reply is being threaded, so the engine kept reply_to');
-    expect(face.state.repliesTo(parent.id), isEmpty);
+    expect(face.state.roots, hasLength(1),
+        reason: 'the reply is drawn as a second top-level note — the engine '
+            'did not keep reply_to');
+    expect(face.state.roots.single.id, parent.id);
+    expect(face.state.repliesTo(parent.id).map((n) => n.id), [reply.id]);
+    // The reply is NOT in either panel section — those are cut from the roots.
+    expect(face.state.humanComments.map((n) => n.id), [parent.id]);
   });
 
   test('the AI rail answers rather than crashing when no model is bound',
