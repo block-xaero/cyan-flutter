@@ -28,6 +28,7 @@ import '../ffi/parity_models.dart';
 import '../lens/lens_api.dart';
 import '../lens/lens_models.dart';
 import '../lens/lens_rollups.dart';
+import '../lens/marketplace_mapping.dart';
 import 'cyan_backend_provider.dart';
 
 // ---------------------------------------------------------------------------
@@ -90,6 +91,21 @@ final costMeterProvider = FutureProvider<CostMeter>((ref) async {
 final efficiencyProvider = FutureProvider<EfficiencyReport>((ref) async {
   final feed = await ref.watch(lensRunFeedProvider.future);
   return efficiencyReportFrom(EfficiencyRollup.fromRuns(feed.allRuns));
+});
+
+// ---------------------------------------------------------------------------
+// Row 20 — the Marketplace storefront, on the same lane
+// ---------------------------------------------------------------------------
+
+/// The storefront browse (`GET /marketplace/browse`), mapped and curated.
+///
+/// Install actions are NOT an open endpoint: they flow through the server's
+/// RBAC-gated install, which the UI only REFLECTS. What lands on the device is
+/// read back from the ENGINE's catalog, never claimed here.
+final marketplaceProvider = FutureProvider<List<PluginCard>>((ref) async {
+  final lens = ref.watch(lensApiProvider);
+  final wire = await lens.browseMarketplace(const StorefrontQuery());
+  return storefrontCardsFrom(wire);
 });
 
 // ---------------------------------------------------------------------------

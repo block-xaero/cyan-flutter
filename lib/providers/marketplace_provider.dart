@@ -19,8 +19,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ffi/cyan_backend.dart';
 import '../ffi/parity_models.dart';
+import '../lens/lens_api.dart';
+import '../lens/marketplace_mapping.dart';
 import '../services/plugin_bundle_fetcher.dart';
 import 'cyan_backend_provider.dart';
+import 'lens_console_provider.dart';
 
 /// The lens download leg. Overridden in tests with a fetcher that yields bundle
 /// bytes, so the install flow runs with no lens and no dylib.
@@ -233,6 +236,7 @@ final marketplaceControllerProvider = StateNotifierProvider.autoDispose
     .family<MarketplaceController, MarketplaceState, String?>((ref, groupId) {
   final controller = MarketplaceController(
     backend: ref.watch(cyanBackendProvider),
+    lens: ref.watch(lensApiProvider),
     fetcher: ref.watch(pluginBundleFetcherProvider),
     groupId: groupId,
   );
@@ -242,6 +246,10 @@ final marketplaceControllerProvider = StateNotifierProvider.autoDispose
 
 class MarketplaceController extends StateNotifier<MarketplaceState> {
   final CyanBackend _backend;
+
+  /// The BROWSE leg (row 20, D3). `GET /marketplace/browse` is a lens route —
+  /// the engine has no storefront verb and never will.
+  final LensApi _lens;
   final PluginBundleFetcher _fetcher;
 
   /// The group an install lands in. Null ⇒ the operator is standing nowhere;
@@ -251,30 +259,55 @@ class MarketplaceController extends StateNotifier<MarketplaceState> {
 
   MarketplaceController({
     required CyanBackend backend,
+    required LensApi lens,
     required PluginBundleFetcher fetcher,
     String? groupId,
   })  : _backend = backend,
+        _lens = lens,
         _fetcher = fetcher,
         _groupId = groupId,
         super(const MarketplaceState());
 
-  /// Browse the storefront and read the device catalog behind it.
+  /// Browse the storefront (LENS) and read the device catalog behind it
+  /// (ENGINE).
+  ///
+  /// The two legs fail INDEPENDENTLY, and that matters: a lens outage must not
+  /// blank the Installed state of plugins already on this device, and an engine
+  /// that cannot list its catalog must not hide the storefront. Whichever leg
+  /// answers is shown; whichever failed is named.
   Future<void> load() async {
     state = state.copyWith(loading: true, clearError: true);
+    await _backend.initialize();
+
+    List<PluginCard>? cards;
+    String? browseError;
     try {
-      await _backend.initialize();
-      final cards = await _backend.loadMarketplace();
-      final catalog = await _backend.pluginCatalog();
-      if (!mounted) return;
-      state = state.copyWith(
-        loading: false,
-        cards: cards,
-        installed: {for (final p in catalog) p.id: p},
-      );
+      cards = storefrontCardsFrom(
+          await _lens.browseMarketplace(const StorefrontQuery()));
     } catch (e) {
-      if (!mounted) return;
-      state = state.copyWith(loading: false, error: '$e');
+      browseError = 'The storefront is unavailable: $e';
     }
+
+    Map<String, InstalledPlugin>? installed;
+    String? catalogError;
+    try {
+      installed = {for (final p in await _backend.pluginCatalog()) p.id: p};
+    } catch (e) {
+      catalogError = 'The installed-plugin catalog could not be read: $e';
+    }
+
+    if (!mounted) return;
+    final error = [
+      if (browseError != null) browseError,
+      if (catalogError != null) catalogError,
+    ].join('\n');
+    state = state.copyWith(
+      loading: false,
+      cards: cards ?? state.cards,
+      installed: installed ?? state.installed,
+      error: error.isEmpty ? null : error,
+      clearError: error.isEmpty,
+    );
   }
 
   /// Re-filter for [text]. The catalogue is already in hand, so this is

@@ -102,12 +102,10 @@ final entitlementProvider = FutureProvider<Entitlement>((ref) async {
       'local', DateTime.now().millisecondsSinceEpoch ~/ 1000);
 });
 
-/// Marketplace plugin cards (row 9).
-final marketplaceProvider = FutureProvider<List<PluginCard>>((ref) async {
-  final backend = ref.watch(cyanBackendProvider);
-  await backend.initialize();
-  return backend.loadMarketplace();
-});
+// The Marketplace (row 9 / 20) MOVED to `providers/lens_console_provider.dart`
+// under PHASE-2 D3: `GET /api/v1/marketplace/browse` is a lens route, and the
+// engine's only plugin verbs are `cyan_plugin_catalog` (what is INSTALLED here,
+// still on this seam) and `cyan_install_plugin_bundle` (the land).
 
 /// Lens intelligence bundle (row 10).
 final lensIntelligenceProvider =

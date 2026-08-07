@@ -128,9 +128,20 @@ void main() {
     expect(find.text('Frame.io Review'), findsWidgets);
     expect(find.text('Spec Delivery'), findsWidgets);
 
-    // Trust + side-effect badges ride on the tiles.
+    // TRUST rides on the tile — the lens serves it, and it is the one safety
+    // signal a not-yet-installed listing can honestly carry.
     expect(find.text('untrusted'), findsWidgets); // Frame.io is untrusted
-    expect(find.text('sends out'), findsWidgets); // external_send side effect
+
+    // SIDE EFFECTS do NOT, and that is the finding of moving this face onto the
+    // live lane (row 20): the lens's browse shape carries plugin_id / name /
+    // description / tool_summary / trust / source / featured / stage and
+    // nothing else. It cannot say whether a plugin sends data out — only the
+    // ENGINE's catalog knows that, from the installed bundle's manifest, which
+    // is also the thing that actually gates a run. So no tile claims
+    // "sends out" off a listing, and the claim appears on the detail page for a
+    // bundle the device actually holds. A badge sourced from nowhere is worse
+    // than no badge on exactly the axis where being wrong is dangerous.
+    expect(find.text('sends out'), findsNothing);
 
     // Footer CTA.
     expect(find.text('Use in a workflow'), findsWidgets);
@@ -171,7 +182,7 @@ void main() {
     await pumpMarketplace(tester);
     // FFmpeg Transcode's bundle is already in the device catalog, so its Get
     // page can list the bundle's own tools.
-    await openDetail(tester, 'pl-ffmpeg');
+    await openDetail(tester, 'ffmpeg');
 
     final detail = find.byType(ParityMarketplaceDetail);
 
@@ -180,7 +191,7 @@ void main() {
         findsOneWidget);
     expect(
         find.descendant(
-            of: detail, matching: find.text('Publisher: cyan-core')),
+            of: detail, matching: find.text('Publisher: Curated')),
         findsOneWidget);
     expect(find.descendant(of: detail, matching: find.text('Tools')),
         findsOneWidget);
@@ -269,7 +280,7 @@ void main() {
     // holds — the tile is a marker, not an affordance. It is shelved twice
     // (Featured + Editorial), and BOTH tiles must say the same thing.
     final ffmpegTiles =
-        find.byKey(const ValueKey('marketplace.card.pl-ffmpeg'));
+        find.byKey(const ValueKey('marketplace.card.ffmpeg'));
     expect(ffmpegTiles, findsNWidgets(2));
     expect(find.descendant(of: ffmpegTiles, matching: find.text('Installed')),
         findsNWidgets(2));
@@ -285,7 +296,7 @@ void main() {
         findsNothing);
 
     // And the Get page agrees — no install control for the landed bundle.
-    await openDetail(tester, 'pl-ffmpeg');
+    await openDetail(tester, 'ffmpeg');
     final detail = find.byType(ParityMarketplaceDetail);
     expect(find.descendant(of: detail, matching: find.text('Installed')),
         findsOneWidget);

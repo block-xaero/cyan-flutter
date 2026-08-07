@@ -552,28 +552,74 @@ class FakeLensApi implements LensApi {
         ),
       ];
 
+  /// The storefront the lens serves. Deliberately the SAME five listings the
+  /// FFI fake used to seed — so the storefront's Tier-1 suite keeps testing the
+  /// face rather than the seam — but stated in the LENS WIRE SHAPE, which is
+  /// the point: it carries `plugin_id` / `name` / `description` /
+  /// `tool_summary` / `trust` / `source` / `featured` / `stage` and NOTHING
+  /// ELSE. No rating, no publisher, no side-effect, no separate bundle id.
+  /// Those fields were the old fake's invention; a card that claims them off a
+  /// live lens is claiming something the lens never said.
   static List<LensPluginCardWire> seededCards() => const [
+        // The listing id IS the bundle id on this lane (the download leg is
+        // `/marketplace/bundle/{plugin_id}`), and this one is ALREADY in the
+        // device catalog — so the storefront reads it back as Installed rather
+        // than offering it again.
         LensPluginCardWire(
-          pluginId: 'cyan.transcode',
-          name: 'Transcode',
-          description: 'Normalize any master to your delivery spec.',
-          toolSummary: ['transcode', 'probe'],
+          pluginId: 'ffmpeg',
+          name: 'FFmpeg Transcode',
+          description: 'Transcode + proxy generation for any master.',
+          toolSummary: ['probe', 'transcode'],
           trust: 'trusted',
           source: 'curated',
           featured: true,
-          stage: 'delivery',
+          stage: 'editorial',
         ),
         LensPluginCardWire(
-          pluginId: 'cyan.colorcheck',
-          name: 'Color Check',
-          description: 'Flag out-of-gamut shots before the grade session.',
-          toolSummary: ['analyze'],
+          pluginId: 'pl-resolve',
+          name: 'Resolve Color Match',
+          description: 'Auto color-match shots to a reference grade.',
+          toolSummary: ['match_grade'],
           trust: 'trusted',
           source: 'curated',
+          featured: true,
           stage: 'color',
         ),
-        // A PUBLIC-registry entry with no description — the raw repo id the
-        // contextualizer exists for.
+        LensPluginCardWire(
+          pluginId: 'pl-loudness',
+          name: 'Loudness Normalize',
+          description: 'EBU R128 loudness measurement + normalize.',
+          toolSummary: ['loudness_run'],
+          trust: 'trusted',
+          source: 'curated',
+          stage: 'sound',
+        ),
+        // UNTRUSTED but CURATED — the two are independent, and the reference
+        // makes a point of it: signing a wrapper gives provenance, not trust.
+        // It is also the card the contextualizer bug was found on: "frameio"
+        // contains "frame", so running the keyword hint over a curated card
+        // stamped it "Use in a workflow to transcode/render video" and forced
+        // its stage to Delivery. A curated card's own words win.
+        LensPluginCardWire(
+          pluginId: 'pl-frameio',
+          name: 'Frame.io Review',
+          description: 'Push a cut to Frame.io for client review.',
+          toolSummary: ['push_review'],
+          trust: 'untrusted',
+          source: 'curated',
+          stage: 'review',
+        ),
+        LensPluginCardWire(
+          pluginId: 'pl-deliver',
+          name: 'Spec Delivery',
+          description: 'Package + deliver to broadcast spec.',
+          toolSummary: ['deliver'],
+          trust: 'trusted',
+          source: 'curated',
+          stage: 'delivery',
+        ),
+        // A raw PUBLIC-registry id with no description — what the
+        // contextualizer exists for, and what the curation filter has to judge.
         LensPluginCardWire(
           pluginId: 'io.github.CSOAI-ORG/voice-audio-mcp',
           trust: 'untrusted',
