@@ -90,12 +90,12 @@ Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\
 | # | screen | why it is blocked | what would unblock it |
 |---|---|---|---|
 | 5 | Notes — **write** (read is green) | `cyan_save_notebook_cell` coerces EVERY authored kind to `step` (`workflow::coerce_authoring_cell_type`; `markdown` is on `LEGACY_AUTHORING_KINDS`). A saved notes document is stored as a workflow step and vanishes from the markdown filter the editor reads by — and a board authored through this engine has no markdown cells at all, so the reference's reader is a legacy reader. | **2026-08-07: the product call was taken (D2) and HALF of this is void.** The LEDGER (`cyan_note_*`) is the notes surface and its write lane is now PROVED real end to end — `integration_test/notes_ledger_face_test.dart`, including anchors and provenance. The DOCUMENT editor's own save is still coerced; it is tracked as row 16 above, and the face now reports it instead of hiding it. |
-| 7 | Ops console — Cost | **No verb.** The 157-verb export table has nothing for cost, metering or billing; per-step billing lives behind the lens meter, which this build does not bind. `cyan_pipeline_status` carries only a run total. | An engine verb exposing the asset-minute meter. Engine work ⇒ the Mac session. |
-| 8 | Ops console — Efficiency | **No verb.** Nothing in the export table reports gate-p95, failure rates, cache hits or retry burden. | Same as Cost. |
-| 9 | Marketplace | **No verb.** The engine exposes `cyan_plugin_catalog` (what is INSTALLED on this device — already wired through `pluginCatalog`) and `cyan_install_plugin_bundle`. There is no storefront/registry read at this baseline. | An engine catalog verb, or a decision that the Marketplace lists installed bundles only. |
-| 10 | Lens (nudges / asks / decisions) | **No verb.** The lens surface here is `cyan_parse_lens_command` + `cyan_poll_ai_insights`; nothing reports nudges, asks or decisions. `loadLensIntelligence` returns `connected: false`, which is the honest reading — this build binds no lens. | An engine lens-intelligence verb, plus a bound lens service. Under PHASE-2 **D3** this row reopens on the `LensApi` HTTP lane instead. |
+| ~~7~~ | ~~Ops console — Cost~~ **CLEARED 2026-08-07 (rows 19)** | "No verb" was true and beside the point — there was never going to BE one. | **Done, and it needed no endpoint at all.** Cost is a §4 *rollup* over the per-step records `/api/v1/runs` already nests in every run. Reads the `LensApi` seam; `lib/lens/lens_rollups.dart`. |
+| ~~8~~ | ~~Ops console — Efficiency~~ **CLEARED 2026-08-07 (row 19)** | Same. | **Done.** §5 rollup over the SAME feed — one fetch, three faces, and no way for them to disagree. |
+| ~~9~~ | ~~Marketplace~~ **CLEARED 2026-08-07 (row 20)** | The engine exposes `cyan_plugin_catalog` (what is INSTALLED here) and `cyan_install_plugin_bundle`; there is no storefront read and there is not meant to be. | **Done.** `GET /api/v1/marketplace/browse` on the `LensApi` seam, with the curation + contextualize rules ported. The install's LAND leg stays on the engine, and the two legs fail independently. |
+| ~~10~~ | ~~Lens (nudges / asks / decisions)~~ **CLEARED 2026-08-07 (row 21)** | `loadLensIntelligence` returned `connected: false` — the honest reading of a build that binds no lens, and still a claim. | **Done.** `/health` + `/nudges/{group}` + `/asks/{group}` + `/decisions/{group}`, with Resolve / Answer / React as real writes. |
 | ~~14~~ | ~~Video face — **threading**~~ **CLEARED 2026-08-07** | The engine dropped `reply_to`/`thread_count`/`created_at` on the floor: `timecode_notes::save_note` built `metadata_json` from a key set that omitted all three, while `load_notes` read all three back out of it. Every reply loaded as a ROOT note. | **Done.** cyan-backend `92ec790` writes them; the DLL was rebuilt and restaged on this box and `video_face_test.dart` now asserts the round trip the other way up (6/6). The one residue: nothing maintains `thread_count`, so the face counts replies off the rail rather than reading it. |
-| 15 | Notes — **structuring** (the ledger half is green) | **Wrong lane, not a missing verb.** `NotesStructuringView` is Lens HTTP (`POST /api/v1/notes/structure`), and so is the ledger's "Create workflow" action (`NotesIntentViewModel` → the transpile lane). Neither is an engine verb. Nothing is drawn for them — a button with no lane behind it is worse than no button. | The `LensApi` seam that D3/D4 call for (rows 19–21 build it). |
+| 15 | Notes — **structuring** (the ledger half is green) | **Wrong lane, not a missing verb.** `NotesStructuringView` is Lens HTTP (`POST /api/v1/notes/structure`), and so is the ledger's "Create workflow" action (`NotesIntentViewModel` → `POST /api/v1/transpile`). Neither is an engine verb. Nothing is drawn for them — a button with no lane behind it is worse than no button. | **Half unblocked 2026-08-07: the `LensApi` seam now EXISTS** (rows 19–21 built it, `lib/lens/lens_api.dart`). The two endpoints are not on it yet — the seam carries the run feed, the marketplace browse and the lens-intelligence reads. Adding `structure` + `transpile` is now an additive method on an existing seam with an existing Fake, not a new lane. |
 | 16 | Notes EDITOR — **write** (read is green) | Unchanged engine-side from the row-5 entry below: `cyan_save_notebook_cell` coerces every authored kind to `step`. What changed is the HONESTY — `saveNotes` now answers with a read-back beside the acknowledgement, and the toolbar shows **"Not saved — the engine stored this as a 'step' cell"** rather than a green dot over a document that will come back blank. | An engine notes-document kind. `integration_test/notes_editor_face_test.dart` pins `storedKind == 'step'`; that expectation is the tripwire. |
 
 Also unfixable from this repo, recorded so nobody re-derives it: **the board card's
@@ -142,13 +142,25 @@ the call is still wrong.
   The card's "N steps" reads 0 for every board until the engine grows a count verb —
   **engine work, and engine work belongs to the Mac session.**
 
-**Seam truth (updated 2026-08-07):** the FFI loaders that still return honest EMPTIES are now
-only the four with **no engine verb at all** — `loadCostMeter`, `loadEfficiency`,
-`loadMarketplace`, `loadLensIntelligence` — and under PHASE-2 **D3** those four reopen on the
-`LensApi` HTTP lane rather than waiting on the engine. Everything else the parity faces read
-(`loadWorkflow`, `loadNotes`, `loadOpsRuns`, `loadChat`, `loadTimecodeNotes`, `noteList`,
-`changelistCommand`, `ingestCommand`, `templateList`…) is hydrated and proved by a Tier-2
-suite above.
+**Seam truth (updated 2026-08-07, day shift 3): there are now TWO seams and no honest empties
+left.** Everything the parity faces read on the FFI seam (`loadWorkflow`, `loadNotes`,
+`loadOpsRuns`, `loadChat`, `loadTimecodeNotes`, `noteList`, `changelistCommand`,
+`ingestCommand`, `templateList`…) is hydrated and proved by a Tier-2 suite above. The four
+loaders that used to answer honest empties — `loadCostMeter`, `loadEfficiency`,
+`loadMarketplace`, `loadLensIntelligence` — were never engine work; under **D3** their faces
+now read the `LensApi` HTTP seam, and the four FFI methods are no longer what any face calls.
+
+**The `LensApi` seam (D3/D4), and where its proof stops.** `lib/lens/` is the port of
+`Models/LensConsole.swift` plus the lens-cloud reads Marketplace and Lens AI need. Prod is
+`LensApiHttp` (`dart:io`, bearer from `CYAN_LENS_URL` / `CYAN_LENS_TOKEN` / `CYAN_GROUP_ID`,
+falling back to the macOS defaults and the `seedtok` dev bearer); Tier-1 injects `FakeLensApi`,
+which the shared harness now defaults so no widget test can reach `localhost:8080`.
+`test/lens_contract_test.dart` (68) pins the recorded shapes, the status→lane contract guard,
+the tolerant decode and the §4/§5 rollups — and drives `LensApiHttp` against a **recording
+loopback `HttpServer`**, which proves the endpoints, the query params, the bearer, the path
+encoding and the error surfacing with no lens running. **What it does NOT prove is that
+cyan-lens serves those bytes.** There is no lens on this box; that is Tier-2 and belongs to
+the Mac session.
 
 ## Guardrails
 Branch `feat/flutter-parity`; never main; commit per screen; UI-only; contract frozen
@@ -157,6 +169,31 @@ build kept green as the cheap CI canary. Plugin-foundation work (Frame.io) lives
 repos on `main` against the frozen tag — these two streams never collide.
 
 ## Digest log (newest first)
+- **2026-08-07 (third shift, cyan-win) — the blocker list got shorter by five, and four of them were never engine work. Five commits, local only.**
+
+  **Green:** Tier-1 **406/406** (up from 336; 91 new assertions), `flutter analyze` **0 errors**, goldens platform-skipped. Tier-2: **14 suites, 55 assertions**, all green on Windows against the freshly rebuilt DLL — the full sweep was re-run because the engine binary changed, not just the one suite that needed it.
+
+  **Rung 1 — the threading block is gone, and the tripwire fired exactly where it was aimed.** Rebuilt `cyan_backend.dll` natively (the first attempt failed for an unrelated reason worth recording: passing `CARGO_HOME=C:\rust\cargo` through the bash tool ate the backslashes and cargo panicked on a non-absolute registry path — use PowerShell `$env:` for this). Restaged to `windows\Libraries`. `video_face_test.dart` went red at `expect(readBack.replyTo, isNull)` with `'tc-22ed1e8f'`, which is the whole reason that line was written that way. The test now reads the round trip the other way up: a reply comes back a reply, `created_at` is a real clock, the parent's row is untouched, and the face draws ONE root with its reply threaded under it rather than two roots in the wrong section of a timecode-ordered rail. **One residue, pinned rather than trusted:** `thread_count` round-trips but NOBODY maintains it — neither side increments the parent's when a reply lands. The face already counts replies off the rail it holds; the test expects the 0 and says why, so the day the engine starts counting it goes red and the face can be simplified.
+
+  **Rows 19–21 — and the finding that shaped all three: four "blocked: no verb" rows were never engine work.** Ops Cost, Ops Efficiency, Marketplace and Lens intelligence had sat in the blocked table since the night shift, waiting on verbs the engine was never going to grow. On the Mac all four read cyan-lens over HTTP and always have. Built the second seam (**D4**): `lib/lens/` — the port of `Models/LensConsole.swift` plus the lens-cloud reads, `LensApiHttp` on `dart:io` with the bearer from config, and `FakeLensApi`, which the shared Tier-1 harness now defaults so no widget test can accidentally reach `localhost:8080`.
+
+  **Cost and Efficiency needed no endpoint at all.** They are pure §4/§5 *reductions* over the per-step records the `/api/v1/runs` feed already nests in every run. All three console faces are now ONE fetch: flipping the segmented control costs nothing and they cannot disagree, because there is only one source. The fake seeds real §3 step records rather than pre-computed totals, precisely so the tests exercise the arithmetic instead of a handed-over number.
+
+  **The contract test found a real bug in my own transport, which is what it is for.** `_send` unwrapped the `{success, data, error}` envelope by sniffing for a `success` key — but `POST /runs/{id}/retry` answers `{success, run}` and `/approve` answers `{success, decision, step_id, step_status, run}`. Both look exactly like the envelope, both unwrapped into a null `data`, and **every command reply vanished**. The endpoint family is declared at the call site now and never sniffed; the shape that broke it is pinned as its own test. Found by driving `LensApiHttp` against a recording loopback `HttpServer` — which is also how the endpoints, query params (tenant-wide omits `board` ENTIRELY; an empty param is a different request), bearer, path encoding and error surfacing are proved with no lens running.
+
+  **Row 19 also made the console's buttons real.** Retry / Approve / Reject were `onRetry?.call` into an optional callback, and **Reject was wired to `null`** — a button that did nothing at all. They POST now, disable the card while the command round-trips, re-read the feed either way, and show the lens's own refusal ("CONFLICT only a Failed run can be retried") instead of swallowing it. The callbacks survive as an OVERRIDE for a host that wants to confirm first, and the test proves the command is not ALSO fired underneath one.
+
+  **Two lanes kept apart rather than blended.** `loadOpsRuns` stays on the FFI seam as `engineOpsRunsProvider` — it is what the ENGINE knows about runs on this device (T7), a different question from what the tenant's lens knows. Its two callers stay with it: the boards wall, and the metering spine, whose drill-down is `loadRunTrace`. A list from one lane and a drill-down from the other would let an operator tap a run that has no audit behind it.
+
+  **Row 20's finding is a LOSS, stated rather than papered over.** The lens's browse shape carries `plugin_id` / `name` / `description` / `tool_summary` / `trust` / `source` / `featured` / `stage` **and nothing else**. No publisher, no rating, no side-effect, no separate bundle id — the old FFI fake invented all four. So a storefront tile no longer shows a "sends out" badge: only the ENGINE's catalog knows a bundle's side effects, from the manifest, which is also the thing that actually gates a run. A badge sourced from nowhere is worse than no badge on exactly the axis where being wrong is dangerous. The test asserts the absence and says why. Ported with it: a CURATED card's name/description/stage are surfaced VERBATIM (the contextualizer used to run over every card, and "frameio" contains "frame", so Frame.io Review was stamped "Use in a workflow to transcode/render video" with a forced Delivery stage); only the literal `"trusted"` is trusted; trust and source are INDEPENDENT.
+
+  **Row 21 — the connection claim changed hands.** `loadLensIntelligence` answered `connected: false` unconditionally. Honest for a build that binds no lens, and still a claim: the only thing entitled to make it is `/health`, which is asked FIRST and alone, because if the lens is down three more failing reads add nothing. Its decode is tolerant on purpose — the live lens's health payload dropped `iggy` and added `commit`, and a strict decode once showed "Disconnected" over a perfectly live lens. **Resolve needed a routing decision the model could not express:** a stale ASK is dismissed, anything else is resolved on its graph node, and the nudge's id is already whichever one applies — so a client that guessed would silently no-op half the time while the operator watched the nudge stay put. `LensNudge` gains `nudgeType` (additive) and the test asserts each verb lands where it belongs and NOT on the other. Three shape truths recorded: a lens nudge has **no free-form title** (it is a function of `nudge_type`), it carries a **graph reference, not a board**, and **reaction counts are a separate endpoint** — so they stay zero and the row only draws when a count is positive, which reads as "not asked" rather than "nobody agreed".
+
+  **What is NOT proved, and it matters:** there is no lens on this box, so every one of rows 19–21 is Tier-1 plus a wire-level contract. Nothing here demonstrates that cyan-lens serves these bytes. **Live-lens Tier-2 belongs to the Mac session** — point a running lens at these routes and the seam is either right or it goes red in one place.
+
+  **For the Mac session — four goldens need re-baselining there, on top of the three the last shift left:** `golden/ops_runs.png`, `golden/ops_cost.png`, `golden/ops_efficiency.png` (all three now draw the lens seed) and `golden/lens_ai.png` (the nudge cards changed shape). Skipped loudly on Windows, so the suite is green here and would be red on macOS until regenerated with `--update-goldens`.
+
+  **What is next:** row 22 (Autopilot toggle + Auto-approved chip) — `cyan_autopilot_set`/`_get` are in the rebuilt DLL and were not reached this shift. Row 15's structuring half is now one additive method on an existing seam (`POST /api/v1/notes/structure` + `POST /api/v1/transpile`) rather than a missing lane.
 - **2026-08-07 (day shift, cyan-win) — PHASE 2 rows 13–18, the demo spine's visible surface. Six commits, local only. Every row proved against the real engine, and three of them found something the fake could never show.**
 
   **Green:** Tier-1 **336/336** (32 new), `flutter analyze` **0 errors**, goldens platform-skipped. Tier-2: **14 suites, 55 assertions**, all green on Windows — the night's eight (27) plus six new ones (28): `review_face_test` 3, `video_face_test` 6, `notes_ledger_face_test` 4, `notes_editor_face_test` 4, `sources_face_test` 6, `templates_face_test` 5. The drift + arity guards stay green; no test was weakened to pass.
@@ -246,10 +283,10 @@ repos on `main` against the frozen tag — these two streams never collide.
 | 16 | Notes editor (today's) | NotesEditorView | FFI | **green, one engine block** — editable + autosave + type detection + A2 review rail; `notes_editor_face_test.dart` 4/4. The SAVE is still coerced to `step`; the face now REPORTS that instead of a green dot |
 | 17 | Sources sheet | SourcesSheet | FFI | **green** — no production change needed; `sources_face_test.dart` 6/6 over all six ingest ops |
 | 18 | Template picker (clone + auto-install) | TemplatePickerSheet | FFI | **green** — Replace/Append/Cancel decision + a real step delete; `templates_face_test.dart` 5/5 |
-| 19 | Ops console — Runs/Cost/Efficiency vs LENS | OperationsConsoleView + LensConsole | LensApi |
-| 20 | Marketplace (live browse + detail) | MarketplaceView, MarketplaceDetailView | LensApi |
-| 21 | Lens AI face (nudges/asks/decisions live) | LensAIView | LensApi |
-| 22 | Autopilot control + policy chips | WorkflowView (workflow.autopilot), DashboardView (Auto-approved chip) | FFI |
+| 19 | Ops console — Runs/Cost/Efficiency vs LENS | OperationsConsoleView + LensConsole | LensApi | **green (Tier-1)** — `LensApi` seam + Fake + rollups; all three faces are ONE `/runs` fetch; Retry/Approve/Reject are real POSTs with the refusal shown. `lens_contract_test.dart` 68/68. **Live-lens Tier-2 ⇒ Mac.** |
+| 20 | Marketplace (live browse + detail) | MarketplaceView, MarketplaceDetailView | LensApi | **green (Tier-1)** — `/marketplace/browse` with curation + contextualize; browse (lens) and installed-state (engine) fail independently. `lens_marketplace_test.dart` 16/16. Finding: the browse shape carries no publisher/rating/side-effect/bundle-id — see the digest. **Live-lens Tier-2 ⇒ Mac.** |
+| 21 | Lens AI face (nudges/asks/decisions live) | LensAIView | LensApi | **green (Tier-1)** — `/health` owns the connection claim; Resolve routes to `dismiss` vs `resolve-blocker` by `nudge_type`. `lens_view_test.dart` 7/7. **Live-lens Tier-2 ⇒ Mac.** |
+| 22 | Autopilot control + policy chips | WorkflowView (workflow.autopilot), DashboardView (Auto-approved chip) | FFI | todo — `cyan_autopilot_set`/`_get` are in the rebuilt DLL |
 | 23 | Constitution editor | ConstitutionEditorView | FFI |
 | 24 | Board files | BoardFilesView | FFI |
 | 25 | Chat lane (anchors, board chat parity) | BoardChatLane, ChatPanel | FFI |
