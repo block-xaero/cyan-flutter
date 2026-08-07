@@ -165,3 +165,56 @@ repos on `main` against the frozen tag — these two streams never collide.
 - 2026-06-29 — Row 3 (Board: Workflow author): added `ParityWorkflowView` (lib/widgets/parity/parity_workflow_view.dart) — SwiftUI `WorkflowView` parity, driven only through the seam via `boardWorkflowProvider`. Toolbar (Review cyan / Run green / Deploy purple / Reset muted, disabled when no steps or locked), purple "Deployed & locked" banner for deployed boards, numbered-circle step cells with compiled inference chips (tool=cyan extension, bound inputs=green #, send-to=purple, gate chip yellow "Awaiting approval" / green "No approval needed"), orange ambiguity warning, empty state, and the @/#// composer with cyan "Add step". Extended `CyanBackend` seam (+`loadWorkflow`) — additive; prod FFI returns an honest empty `Workflow` (Tier-2 hydration deferred), Fake seeds a compiled+locked 4-step flow for b-eng-1, an uncompiled 3-step (one ambiguous) for b-eng-2. Added parity models `Workflow`/`WorkflowStep`/`StepGate`. Added `test/workflow_view_test.dart`: 4 widget tests (steps+chips render, Run fires, ambiguous warning, empty state) + golden `golden/workflow_author.png`. Commit 3848d43. NOTE: agent cannot run Flutter — CI is the first real signal. Human must push `feat/flutter-parity`.
 - 2026-06-29 — Row 2 (Explorer / group tree): added `ParityExplorerTree` (lib/widgets/parity/parity_explorer_tree.dart) — SwiftUI `FileTreeView` parity, driven only through the `CyanBackend` seam via `groupsProvider` (no direct FFI). Group→Workspace→Board tree with expand/collapse chevrons, type-colored Monokai icons (group=group color, workspace=green, board=face color), level*20+8 indentation, "Files" header + cyan (+) button, live search filter (matches + ancestors), row selection tint, empty/no-match states. Tree seeds fully-expanded once for deterministic goldens. Added `test/explorer_tree_test.dart`: 4 widget tests (hierarchy renders, collapse hides children, board tap → onOpenBoard, search filters) + golden `golden/explorer_tree.png` (tagged `golden`). NOTE: agent cannot run Flutter — CI is the first real signal; unverified that it compiles. Human must push `feat/flutter-parity`.
 - 2026-06-29 — P0 bootstrap: added the single `CyanBackend` seam (lib/ffi/cyan_backend.dart) with prod `CyanBackendFFI` (wraps existing CyanFFI, no FFI signature changes) + Tier-1 `FakeCyanBackend` (3 groups / 10 boards / 1 sample run); parity view models (parity_models.dart); Riverpod `cyanBackendProvider` + futures. Ported Boards living wall (row 1) as `ParityBoardsGrid` driven only through the seam (Monokai masonry cards + running pill). Added dev deps (golden_toolkit, integration_test); test harness + trivial gate test (replaced the stale counter `widget_test.dart`) + boards widget/golden tests; `dart_test.yaml` golden tag. Created `.github/workflows/flutter-parity.yml` (analyze + `flutter test --exclude-tags golden`, goldens baselined as artifact). NOTE: agent cannot run Flutter — CI is the first real signal; unverified that everything compiles. GIT BLOCKER: workspace FUSE mount forbids unlink, and a stale `.git/index.lock` + interrupted rebase on `main` could not be cleared from this environment, so the branch/commit/push could not be performed here — needs Rick to run the git steps on the host (see report).
+
+---
+
+# PHASE 2 — FULL PARITY vs the LIVING Mac app (Rick's mandate, 2026-08-07)
+
+**The mandate:** EVERYTHING the iOS/Mac app has, Flutter has — exactly. The
+2026-06-29 frozen baseline is RETIRED. The reference is `C:\cyan\cyan-iOS`
+(synced main), per-screen, re-synced as the Mac app evolves.
+
+## Decisions (taken 2026-08-07, so the port never stalls on them)
+
+- **D1 Baseline**: target = cyan-iOS main as synced on this box. Each new row
+  names its Swift reference file. When the Mac app changes, the row reopens.
+- **D2 Notes face**: the LEDGER system is the target (`BoardNotesLedgerView` +
+  `NotesStructuringView` + today's `NotesEditorView`) — the engine's
+  `cyan_note_*` verbs support it. The old markdown-cell-only reference is
+  retired; the "engine coerces authored cells to step" block is VOID.
+- **D3 Ops console / Marketplace / Lens faces**: these are LENS-HTTP-backed on
+  the Mac (`Models/LensConsole.swift` — GET /api/v1/runs etc.), NOT FFI. Port
+  = a Dart `LensApi` client seam (with fake) mirroring that file: same
+  endpoints, bearer token from config (CYAN_LENS_URL + token). No engine
+  verbs needed. The four "blocked: no verb" rows reopen under this lane.
+- **D4 Two seams stay two seams**: `CyanBackend` (FFI) + `LensApi` (HTTP),
+  each with a Fake. No view talks to either directly — providers only.
+- **D5 Process unchanged**: one screen per commit, integration test per
+  hydrated face, drift + arity guards are the gate, goldens platform-skipped.
+
+## Phase-2 screen backlog (vs today's 47 Swift views; value order)
+
+| # | screen | Swift reference | lane |
+|---|---|---|---|
+| 13 | Review player (+ scrubber, approve/comment) | ReviewPlayerView, ScrubberView | FFI |
+| 14 | Video face | VideoPlayerFace | FFI |
+| 15 | Notes ledger face (typed notes, structuring) | BoardNotesLedgerView, NotesStructuringView | FFI |
+| 16 | Notes editor (today's) | NotesEditorView | FFI |
+| 17 | Sources sheet | SourcesSheet | FFI |
+| 18 | Template picker (clone + auto-install) | TemplatePickerSheet | FFI |
+| 19 | Ops console — Runs/Cost/Efficiency vs LENS | OperationsConsoleView + LensConsole | LensApi |
+| 20 | Marketplace (live browse + detail) | MarketplaceView, MarketplaceDetailView | LensApi |
+| 21 | Lens AI face (nudges/asks/decisions live) | LensAIView | LensApi |
+| 22 | Autopilot control + policy chips | WorkflowView (workflow.autopilot), DashboardView (Auto-approved chip) | FFI |
+| 23 | Constitution editor | ConstitutionEditorView | FFI |
+| 24 | Board files | BoardFilesView | FFI |
+| 25 | Chat lane (anchors, board chat parity) | BoardChatLane, ChatPanel | FFI |
+| 26 | Review loop / run audit | ReviewLoopView, RunAuditView | FFI |
+| 27 | AE queue landing | AEQueueView | FFI |
+| 28 | Forge | ForgeView | LensApi |
+| 29 | Roster / group transfer / profile / settings / auth | RosterPanel, GroupTransferView, ProfileView, SettingsView, Auth/ | FFI |
+| 30 | Cloud operations | CloudOperationsView | LensApi |
+| 31 | Region composer / drawing overlay | RegionComposerView, RegionDrawingOverlay | FFI |
+| 32 | Status bar (lens dot, tenant, sync) | StatusBar | both |
+
+Rows 13–18 are the demo spine's visible surface — they go first.
