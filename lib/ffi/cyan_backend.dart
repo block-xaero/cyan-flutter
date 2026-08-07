@@ -132,6 +132,17 @@ abstract class CyanBackend {
   /// The notes document for a board's Notes face.
   Future<BoardNotes> loadNotes(String boardId);
 
+  /// Save the board's notes DOCUMENT (the reference's `NotesEditorViewModel
+  /// .save()`: one markdown cell, created or updated in place).
+  ///
+  /// The result carries a READ-BACK, not just an acknowledgement, because on
+  /// this engine baseline the two differ: `cyan_save_notebook_cell` runs every
+  /// authored kind through `workflow::coerce_authoring_cell_type` and `step` is
+  /// the only authorable one, so a notes document is accepted, stored, re-kinded
+  /// — and then invisible to the markdown filter the editor reads by. A face
+  /// that reported that as "Saved" would be lying to the operator every time.
+  Future<NotesSaveResult> saveNotes(String boardId, String content);
+
   /// The board's SAVED face, spelled as the engine stores it
   /// (`cyan_get_board_mode` — Swift `BoardFaceBridge.getActiveFace`). Null when
   /// nothing was ever saved for this board, or when nobody answered: the

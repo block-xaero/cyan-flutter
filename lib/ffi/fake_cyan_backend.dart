@@ -581,8 +581,29 @@ class FakeCyanBackend implements CyanBackend {
     return Workflow(boardId: boardId);
   }
 
+  /// Documents saved through [saveNotes], by board. The fake's engine does NOT
+  /// coerce the kind — a notes document written here reads back as the notes
+  /// document, which is what a working engine does and what the Tier-2 suite
+  /// checks the real one against.
+  final Map<String, String> _savedNotes = {};
+
+  @override
+  Future<NotesSaveResult> saveNotes(String boardId, String content) async {
+    _savedNotes[boardId] = content;
+    return const NotesSaveResult(
+        accepted: true, readBack: true, storedKind: 'markdown');
+  }
+
   @override
   Future<BoardNotes> loadNotes(String boardId) async {
+    final saved = _savedNotes[boardId];
+    if (saved != null) {
+      return BoardNotes(
+        boardId: boardId,
+        fileName: boardId == 'b-eng-4' ? 'deployment.md' : 'notes.md',
+        content: saved,
+      );
+    }
     if (boardId == 'b-eng-4') {
       return const BoardNotes(
         boardId: 'b-eng-4',

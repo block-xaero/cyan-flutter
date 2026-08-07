@@ -341,6 +341,46 @@ class BoardNotes {
   });
 }
 
+/// What a notes-document save actually did. Three separate facts, because on
+/// this engine baseline they come apart:
+///
+///   [accepted]  — the engine took the write;
+///   [readBack]  — the editor can read the document back out again;
+///   [storedKind]— the cell kind it ended up as ('step' when the engine coerced
+///                 an authored `markdown` cell, which is what makes [readBack]
+///                 false while [accepted] is true).
+///
+/// A face that collapses these into one boolean tells the operator their notes
+/// are safe when the next load will come up blank.
+@immutable
+class NotesSaveResult {
+  final bool accepted;
+  final bool readBack;
+  final String? storedKind;
+  final String? error;
+
+  const NotesSaveResult({
+    this.accepted = false,
+    this.readBack = false,
+    this.storedKind,
+    this.error,
+  });
+
+  /// The only state that may be shown as "Saved".
+  bool get durable => accepted && readBack;
+
+  /// The operator-facing reason a write did not stick. Null when it did.
+  String? get reason {
+    if (durable) return null;
+    if (error != null) return error;
+    if (!accepted) return 'the engine refused the write';
+    return storedKind == null
+        ? 'the engine took the write but the editor cannot read it back'
+        : 'the engine stored this as a "$storedKind" cell, which the notes '
+            'editor cannot read back';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Operations console — SwiftUI OperationsConsoleView parity
 // ---------------------------------------------------------------------------

@@ -689,6 +689,57 @@ class CyanBackendFFI implements CyanBackend {
     );
   }
 
+  @override
+  Future<NotesSaveResult> saveNotes(String boardId, String content) async {
+    // The reference's `save()`: one markdown cell, UPDATED in place when the
+    // board already has one, created at order 0 when it does not.
+    final cells = await notebookCells(boardId);
+    NotebookCell? existing;
+    for (final c in cells) {
+      if (c.kind == NotebookCellKind.markdown) {
+        existing = c;
+        break;
+      }
+    }
+    final id = existing?.id ??
+        'notes-$boardId-${DateTime.now().microsecondsSinceEpoch}';
+
+    final bool accepted;
+    try {
+      accepted = CyanFFI.saveNotebookCell(boardId, {
+        'id': id,
+        'board_id': boardId,
+        'cell_type': 'markdown',
+        'cell_order': existing?.order ?? 0,
+        'content': content,
+        'collapsed': false,
+      });
+    } catch (e) {
+      return NotesSaveResult(error: _describeFfi(e));
+    }
+    if (!accepted) return const NotesSaveResult();
+
+    // The READ-BACK. The engine coerces every authored kind to `step` at this
+    // baseline, so "the engine took it" and "the editor can find it again" are
+    // different questions and this asks the second one rather than assuming it.
+    final after = await notebookCells(boardId);
+    String? storedKind;
+    var readBack = false;
+    for (final c in after) {
+      if (c.id != id) continue;
+      storedKind = c.kind.name;
+      readBack = c.kind == NotebookCellKind.markdown && c.content == content;
+      break;
+    }
+    return NotesSaveResult(
+        accepted: true, readBack: readBack, storedKind: storedKind);
+  }
+
+  static String _describeFfi(Object e) {
+    final text = e.toString().trim();
+    return text.startsWith('Exception: ') ? text.substring(11) : text;
+  }
+
   // The board container's face, straight through to the engine's board-mode
   // pair — the two verbs Swift's `BoardFaceBridge` wraps.
 
