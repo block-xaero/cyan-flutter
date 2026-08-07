@@ -531,6 +531,104 @@ void main() {
         [PanelAction.approve, PanelAction.edit, PanelAction.reject]);
   });
 
+  // ── the graphics rail (AE-2: rendered graphics are first-class) ───────────
+
+  testWidgets('the board\'s registered graphics ride a rail, and a render '
+      'whose bytes are gone says OFFLINE instead of offering a dead click',
+      (tester) async {
+    final backend = FakeCyanBackend();
+    await pumpPlayer(tester, backend);
+
+    expect(find.byKey(const ValueKey('review.graphics.strip')), findsOneWidget);
+    // The count is the ENGINE's list length, not a hardcoded caption.
+    final rail = await backend
+        .changelistCommand({'op': 'board_graphics', 'board_id': _board});
+    final rows = rail.fields['graphics'] as List;
+    expect(rows, hasLength(2));
+    expect(
+        tester
+            .widget<Text>(find.descendant(
+                of: find.byKey(const ValueKey('review.graphics.count')),
+                matching: find.byType(Text)))
+            .data,
+        '${rows.length}');
+
+    // The registered render is on the rail by name…
+    expect(find.text('CYAN_ENDCARD_gfx2.mp4'), findsOneWidget);
+    // …and so is the one the engine could not find on disk — GRAYED, with the
+    // engine's own `on_disk: false` as the reason, never hidden.
+    expect(find.text('CYAN_LOWERTHIRD_gfx1.mov'), findsOneWidget);
+    expect(find.text('OFFLINE'), findsOneWidget);
+
+    final gone = rows[1] as Map<String, dynamic>;
+    expect(gone['on_disk'], isFalse);
+    final goneKey = (gone['hash'] as String).substring(0, 8);
+    await tester.tap(find.byKey(ValueKey('review.graphic.$goneKey')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('review.graphic.preview')), findsNothing,
+        reason: 'a card whose bytes the engine could not find must not open a '
+            'preview over media that is not there');
+  });
+
+  testWidgets('opening a graphic previews it on its OWN surface and leaves the '
+      'hero exactly as it was', (tester) async {
+    final backend = FakeCyanBackend();
+    final hero = FakeReviewVideoSurface();
+    final graphics = FakeReviewVideoSurface();
+    await pumpParity(
+      tester,
+      ParityReviewPlayerView(
+          boardId: _board, surface: hero, graphicSurface: graphics),
+      backend: backend,
+      size: _face,
+    );
+    hero.play();
+    await tester.pumpAndSettle();
+    final heroMountCount = hero.mounted.length;
+    final heroPath = hero.mountedPath;
+
+    final rail = await backend
+        .changelistCommand({'op': 'board_graphics', 'board_id': _board});
+    final live = (rail.fields['graphics'] as List).first as Map<String, dynamic>;
+    final key = (live['hash'] as String).substring(0, 8);
+
+    await tester.tap(find.byKey(ValueKey('review.graphic.$key')));
+    await tester.pumpAndSettle();
+
+    // The render plays on the SECOND surface…
+    expect(find.byKey(const ValueKey('review.graphic.preview')), findsOneWidget);
+    expect(graphics.mountedPath, live['path']);
+    expect(find.text('AE RENDER'), findsOneWidget);
+    expect(find.byKey(const ValueKey('review.graphic.preview.bytes')),
+        findsOneWidget);
+    // …the hero keeps its media and its version, and is PAUSED under the scrim
+    // rather than playing behind it.
+    expect(hero.mountedPath, heroPath);
+    expect(hero.mounted, hasLength(heroMountCount));
+    expect(hero.isPlaying, isFalse);
+
+    await tester
+        .tap(find.byKey(const ValueKey('review.graphic.preview.close')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('review.graphic.preview')), findsNothing);
+    expect(hero.mountedPath, heroPath,
+        reason: 'closing the preview must not remount the hero');
+  });
+
+  testWidgets('a board with no registered render has no graphics rail at all',
+      (tester) async {
+    final backend = FakeCyanBackend();
+    await pumpPlayer(tester, backend, board: _bareBoard);
+
+    final rail = await backend
+        .changelistCommand({'op': 'board_graphics', 'board_id': _bareBoard});
+    expect(rail.ok, isTrue, reason: 'no graphics is an ANSWER, not an error');
+    expect(rail.fields['graphics'], isEmpty);
+    expect(find.byKey(const ValueKey('review.graphics.strip')), findsNothing,
+        reason: 'an empty rail is fake chrome — the strip simply does not '
+            'exist before a render lands');
+  });
+
   testWidgets('golden: review player', (tester) async {
     final backend = FakeCyanBackend();
     await pumpPlayer(tester, backend);

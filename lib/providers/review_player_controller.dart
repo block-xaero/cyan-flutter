@@ -113,6 +113,62 @@ class ConformFrameMap {
   }
 }
 
+/// One registered GRAPHIC asset on the board — the AE render lane's output,
+/// read through the engine's `board_graphics` op. [onDisk] is the ENGINE's own
+/// filesystem read-back: a vanished file grays its card in the strip instead of
+/// offering a dead click.
+class BoardGraphic {
+  final String name;
+  final String? path;
+  final String hash;
+  final int bytes;
+  final int createdAt;
+  final bool onDisk;
+
+  const BoardGraphic({
+    required this.name,
+    required this.hash,
+    this.path,
+    this.bytes = 0,
+    this.createdAt = 0,
+    this.onDisk = false,
+  });
+
+  /// Playable = the engine proved the bytes exist AND we have a path to them.
+  bool get playable => onDisk && (path?.isNotEmpty ?? false);
+
+  static BoardGraphic? fromJson(Map<String, dynamic> j) {
+    final hash = j['hash'] as String? ?? '';
+    // A row with no hash has no identity — the strip would key two cards the
+    // same and the preview could not tell them apart. Dropped, not guessed.
+    if (hash.isEmpty) return null;
+    final path = j['path'] as String?;
+    return BoardGraphic(
+      name: (j['name'] as String?)?.isNotEmpty == true
+          ? j['name'] as String
+          : 'graphic',
+      path: (path?.isEmpty ?? true) ? null : path,
+      hash: hash,
+      bytes: (j['bytes'] as num?)?.toInt() ?? 0,
+      createdAt: (j['created_at'] as num?)?.toInt() ?? 0,
+      onDisk: j['on_disk'] as bool? ?? false,
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is BoardGraphic &&
+      other.hash == hash &&
+      other.name == name &&
+      other.path == path &&
+      other.bytes == bytes &&
+      other.createdAt == createdAt &&
+      other.onDisk == onDisk;
+
+  @override
+  int get hashCode => Object.hash(hash, name, path, bytes, createdAt, onDisk);
+}
+
 /// Everything the review player renders. A plain value, so every state the
 /// engine can put the face in is a state — never a special code path.
 class ReviewPlayerState {
@@ -156,6 +212,10 @@ class ReviewPlayerState {
   final String? lastDeliveryPath;
   final String? lastError;
 
+  /// The board's registered graphics, newest first. EMPTY until a render is
+  /// registered — the strip simply does not exist before then (no fake chrome).
+  final List<BoardGraphic> graphics;
+
   /// The rate labels and seconds conversion use. Frames stay the truth.
   final double fps;
 
@@ -178,6 +238,7 @@ class ReviewPlayerState {
     this.produceStatus = '',
     this.lastDeliveryPath,
     this.lastError,
+    this.graphics = const [],
     this.fps = kReviewFallbackFps,
   });
 
@@ -206,6 +267,7 @@ class ReviewPlayerState {
     String? lastDeliveryPath,
     String? lastError,
     bool clearError = false,
+    List<BoardGraphic>? graphics,
     double? fps,
   }) =>
       ReviewPlayerState(
@@ -232,6 +294,7 @@ class ReviewPlayerState {
         produceStatus: produceStatus ?? this.produceStatus,
         lastDeliveryPath: lastDeliveryPath ?? this.lastDeliveryPath,
         lastError: clearError ? null : (lastError ?? this.lastError),
+        graphics: graphics ?? this.graphics,
         fps: fps ?? this.fps,
       );
 
@@ -330,6 +393,10 @@ class ReviewPlayerController extends StateNotifier<ReviewPlayerState> {
         produceStatus: state.produceStatus,
         lastDeliveryPath: state.lastDeliveryPath,
         lastError: reply.error,
+        // The graphics rail is its OWN read (`board_graphics`) and answers for
+        // boards with no review lane at all. A calm ledger must not empty a
+        // strip the engine already answered for.
+        graphics: state.graphics,
       );
       _conformMap = null;
       _pinnedVersionNumber = null;
@@ -391,6 +458,35 @@ class ReviewPlayerController extends StateNotifier<ReviewPlayerState> {
     // Re-derive the playhead card against the fresh entry set.
     _setCurrentEntry();
     return true;
+  }
+
+  // ---- the graphics rail (AE-2: rendered graphics are first-class) ---------
+
+  /// Pull the board's registered graphic assets through the seam
+  /// (`board_graphics` on the change-list command). The strip exists only when
+  /// the board holds at least one, so an empty answer is a REAL answer — the
+  /// rail is absent, not broken. An unusable reply leaves the strip exactly as
+  /// it was rather than blanking a rail the engine has already answered for.
+  Future<void> loadGraphics() async {
+    ChangelistCommandResult reply;
+    try {
+      reply = await backend
+          .changelistCommand({'op': 'board_graphics', 'board_id': boardId});
+    } catch (e) {
+      state = state.copyWith(lastError: _describe(e));
+      return;
+    }
+    final rows = reply.fields['graphics'];
+    // No `graphics` key at all is "nobody answered" — an engine that has the op
+    // always sends the array, empty or not. Distinguishing the two is the whole
+    // point of not defaulting to `const []` here.
+    if (rows is! List) return;
+    final parsed = <BoardGraphic>[
+      for (final r in rows)
+        if (r is Map<String, dynamic>)
+          if (BoardGraphic.fromJson(r) case final g?) g,
+    ];
+    state = state.copyWith(graphics: parsed);
   }
 
   // ---- versions ------------------------------------------------------------

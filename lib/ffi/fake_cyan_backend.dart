@@ -4081,6 +4081,38 @@ class FakeCyanBackend implements CyanBackend {
     'b-eng-1': '$_mediaRoot/derived/reel-01_r1_proxy.mp4',
   };
 
+  /// The board's registered GRAPHIC assets — what the AE render lane produced,
+  /// newest first, exactly as the engine's `board_graphics` join answers them.
+  ///
+  /// The flagship board holds two, and the second one's file is GONE: the
+  /// engine reports `on_disk` from its own filesystem read-back, so the strip
+  /// has to be able to draw a render whose bytes have vanished. A card that
+  /// offers a click into nothing is the bug this fixture exists to catch.
+  static final Map<String, List<Map<String, dynamic>>> _boardGraphics = {
+    'b-eng-1': [
+      {
+        'name': 'CYAN_ENDCARD_gfx2.mp4',
+        'path': '$_mediaRoot/graphics/b-eng-1/CYAN_ENDCARD_gfx2.mp4',
+        'hash': _graphicHash('b-eng-1|CYAN_ENDCARD_gfx2'),
+        'bytes': 2411008,
+        'created_at': 1751328000,
+        'on_disk': true,
+      },
+      {
+        'name': 'CYAN_LOWERTHIRD_gfx1.mov',
+        'path': '$_mediaRoot/graphics/b-eng-1/CYAN_LOWERTHIRD_gfx1.mov',
+        'hash': _graphicHash('b-eng-1|CYAN_LOWERTHIRD_gfx1'),
+        'bytes': 884736,
+        'created_at': 1751241600,
+        'on_disk': false,
+      },
+    ],
+  };
+
+  /// A 64-hex content hash, the width the engine's blake3 answers in — the
+  /// card's key takes its first 8, so a short digest would collide the two.
+  static String _graphicHash(String seed) => _digest(seed) * 4;
+
   @override
   Future<BoardVideoMedia> boardVideoMedia(String boardId) async {
     final master = _boardMasters[boardId];
@@ -5336,6 +5368,15 @@ class FakeCyanBackend implements CyanBackend {
       case 'look_corpus':
         return const ChangelistCommandResult(
             op: 'look_corpus', fields: {'looks': _lookCorpus});
+
+      // The graphics rail's read (AE-2): the board's registered graphic assets,
+      // newest first. A board with no render answers an EMPTY list — an answer,
+      // never an error, because the strip's absence IS the honest state.
+      case 'board_graphics':
+        final gap = missing('board_id');
+        if (gap != null) return ChangelistCommandResult(op: op, error: gap);
+        return ChangelistCommandResult(
+            op: op, fields: {'graphics': _boardGraphics[boardId] ?? const []});
 
       case 'conform_map':
         // The fake's published proxy carries no structural op, so proxy tc IS

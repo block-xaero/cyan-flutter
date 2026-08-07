@@ -59,11 +59,17 @@ class ParityReviewPlayerView extends StatelessWidget {
   /// An explicit surface. Null mounts the app's own (AVFoundation).
   final ReviewVideoSurface? surface;
 
+  /// The surface the GRAPHICS preview mounts on. It is a second surface on
+  /// purpose: previewing a render must not disturb the hero's media, playhead
+  /// or version — closing the preview returns the player exactly as it was.
+  final ReviewVideoSurface? graphicSurface;
+
   const ParityReviewPlayerView({
     super.key,
     required this.boardId,
     this.controller,
     this.surface,
+    this.graphicSurface,
   });
 
   @override
@@ -76,6 +82,7 @@ class ParityReviewPlayerView extends StatelessWidget {
       boardId: boardId,
       controller: controller,
       surface: surface,
+      graphicSurface: graphicSurface,
     );
   }
 }
@@ -86,12 +93,14 @@ class _ReviewPlayerSurface extends ConsumerStatefulWidget {
   final String boardId;
   final ReviewPlayerController? controller;
   final ReviewVideoSurface? surface;
+  final ReviewVideoSurface? graphicSurface;
 
   const _ReviewPlayerSurface({
     super.key,
     required this.boardId,
     this.controller,
     this.surface,
+    this.graphicSurface,
   });
 
   @override
@@ -113,6 +122,12 @@ class _ParityReviewPlayerViewState
 
   bool _ownsPlayer = false;
   bool _ownsSurface = false;
+
+  /// The graphics preview's own surface, and the card it is showing. Both are
+  /// lazy: a board with no registered render never mounts a second decoder.
+  ReviewVideoSurface? _graphicSurface;
+  bool _ownsGraphicSurface = false;
+  BoardGraphic? _previewGraphic;
 
   ReviewPlayerState _state = const ReviewPlayerState();
   RegionComposerState _composerState = const RegionComposerState();
@@ -173,8 +188,28 @@ class _ParityReviewPlayerViewState
     _surface.addListener(_onSurface);
     _mountedOnce = true;
 
-    // The ledger, then the media it names.
+    // The ledger, then the media it names. The graphics rail is its OWN read:
+    // it answers for boards with no review lane at all, so it never waits on
+    // one.
     _player.load();
+    _player.loadGraphics();
+  }
+
+  /// The preview's surface, mounted on first use. An injected one is used as
+  /// given (tests drive the same seam the app mounts AVFoundation on).
+  ReviewVideoSurface get _graphics {
+    final existing = _graphicSurface;
+    if (existing != null) return existing;
+    final injected = widget.graphicSurface;
+    final surface = injected ?? ref.read(reviewVideoSurfaceFactoryProvider)();
+    _ownsGraphicSurface = injected == null;
+    _graphicSurface = surface;
+    surface.addListener(_onGraphicSurface);
+    return surface;
+  }
+
+  void _onGraphicSurface() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -183,6 +218,8 @@ class _ParityReviewPlayerViewState
     _unsubscribeComposer();
     _surface.removeListener(_onSurface);
     _composer.dispose();
+    _graphicSurface?.removeListener(_onGraphicSurface);
+    if (_ownsGraphicSurface) _graphicSurface?.dispose();
     if (_ownsPlayer) _player.dispose();
     if (_ownsSurface) _surface.dispose();
     _ask.dispose();
@@ -258,27 +295,39 @@ class _ParityReviewPlayerViewState
   Widget build(BuildContext context) {
     return Material(
       color: MonokaiTheme.background,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: Stack(
         children: [
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.all(14),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  // The hero takes the room it can: a review player that
-                  // shows the picture small is not a review player.
-                  Expanded(child: Center(child: _hero())),
-                  const SizedBox(height: 10),
-                  _strip(),
-                  const SizedBox(height: 8),
-                  _transport(),
-                ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.all(14),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // The hero takes the room it can: a review player that
+                      // shows the picture small is not a review player.
+                      Expanded(child: Center(child: _hero())),
+                      const SizedBox(height: 10),
+                      _strip(),
+                      const SizedBox(height: 8),
+                      _transport(),
+                      // The graphics rail exists ONLY when the board holds
+                      // registered graphics — an empty board shows nothing
+                      // rather than an affordance with nothing behind it.
+                      if (_state.graphics.isNotEmpty) ...[
+                        const SizedBox(height: 10),
+                        _graphicsStrip(),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-            ),
+              if (_railVisible) _rail(),
+            ],
           ),
-          if (_railVisible) _rail(),
+          if (_previewGraphic != null) Positioned.fill(child: _graphicPreview()),
         ],
       ),
     );
@@ -825,6 +874,226 @@ class _ParityReviewPlayerViewState
         },
       ),
     );
+  }
+
+  // ---- the graphics rail (AE-2: rendered graphics are first-class) ---------
+
+  /// A horizontal strip of the board's registered graphic assets — what the
+  /// workflow's render steps produced, previewable in place. The caller guards
+  /// on non-empty, so this never draws an empty rail.
+  Widget _graphicsStrip() {
+    return Column(
+      key: const ValueKey('review.graphics.strip'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            const Icon(Icons.auto_awesome_motion,
+                size: 12, color: MonokaiTheme.purple),
+            const SizedBox(width: 6),
+            Text('Graphics',
+                style: MonokaiTheme.labelSmall
+                    .copyWith(color: MonokaiTheme.textSecondary)),
+            const SizedBox(width: 6),
+            Container(
+              key: const ValueKey('review.graphics.count'),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+              decoration: BoxDecoration(
+                color: MonokaiTheme.surface,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: Text('${_state.graphics.length}',
+                  style: MonokaiTheme.labelSmall
+                      .copyWith(color: MonokaiTheme.textMuted)),
+            ),
+            const Spacer(),
+            Text("from the workflow's render steps",
+                style: MonokaiTheme.labelSmall
+                    .copyWith(color: MonokaiTheme.comment)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 96,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _state.graphics.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 10),
+            itemBuilder: (_, i) => _graphicCard(_state.graphics[i]),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// One graphic card. A file the ENGINE could not find on disk is grayed and
+  /// carries an OFFLINE badge — an honest state, never a dead click.
+  Widget _graphicCard(BoardGraphic g) {
+    final playable = g.playable;
+    return Tooltip(
+      message: playable ? g.name : '${g.name} — the file is missing on disk',
+      child: GestureDetector(
+        key: ValueKey('review.graphic.${g.hash.substring(0, 8)}'),
+        onTap: playable ? () => _openGraphic(g) : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 128,
+              height: 72,
+              decoration: BoxDecoration(
+                color: MonokaiTheme.surfaceLighter,
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: MonokaiTheme.border),
+              ),
+              child: Center(
+                child: playable
+                    ? Container(
+                        padding: const EdgeInsets.all(7),
+                        decoration: const BoxDecoration(
+                          color: Colors.black38,
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.play_arrow,
+                            size: 14, color: Colors.white),
+                      )
+                    : _badge('OFFLINE', MonokaiTheme.textMuted,
+                        key: ValueKey(
+                            'review.graphic.offline.${g.hash.substring(0, 8)}')),
+              ),
+            ),
+            const SizedBox(height: 4),
+            SizedBox(
+              width: 128,
+              child: Text(g.name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: MonokaiTheme.labelSmall.copyWith(
+                      color: playable
+                          ? MonokaiTheme.textSecondary
+                          : MonokaiTheme.textDisabled)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// Open a render in the in-place preview. The hero and the before/after pair
+  /// are PAUSED, not unmounted: closing returns the player exactly as it was.
+  Future<void> _openGraphic(BoardGraphic g) async {
+    final path = g.path;
+    if (path == null) return;
+    _surface.pause();
+    setState(() => _previewGraphic = g);
+    await _graphics.load(path, fps: _state.fps);
+  }
+
+  void _closeGraphicPreview() {
+    _graphicSurface?.pause();
+    setState(() => _previewGraphic = null);
+  }
+
+  /// The in-place preview: a scrimmed panel with its OWN surface over the
+  /// player. The hero's mounted media, playhead and version are untouched
+  /// underneath.
+  Widget _graphicPreview() {
+    final g = _previewGraphic!;
+    final surface = _graphics;
+    return Stack(
+      key: const ValueKey('review.graphic.preview'),
+      children: [
+        GestureDetector(
+          key: const ValueKey('review.graphic.preview.scrim'),
+          onTap: _closeGraphicPreview,
+          child: Container(color: Colors.black.withValues(alpha: 0.85)),
+        ),
+        Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 640),
+            margin: const EdgeInsets.all(30),
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: MonokaiTheme.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: MonokaiTheme.border),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.auto_awesome_motion,
+                        size: 14, color: MonokaiTheme.purple),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(g.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: MonokaiTheme.labelSmall
+                              .copyWith(color: MonokaiTheme.foreground)),
+                    ),
+                    const SizedBox(width: 8),
+                    _badge('AE RENDER', MonokaiTheme.purple),
+                    const Spacer(),
+                    _iconButton(
+                      key: const ValueKey('review.graphic.preview.close'),
+                      icon: Icons.cancel,
+                      tooltip: 'Close',
+                      color: MonokaiTheme.textMuted,
+                      onTap: _closeGraphicPreview,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                AspectRatio(
+                  aspectRatio: kHeroAspect,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: ColoredBox(
+                      color: MonokaiTheme.surfaceLighter,
+                      child: surface.buildPicture(context),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    _iconButton(
+                      key: const ValueKey('review.graphic.preview.toggle'),
+                      icon: surface.isPlaying ? Icons.pause : Icons.play_arrow,
+                      tooltip: surface.isPlaying ? 'Pause' : 'Play',
+                      onTap: () =>
+                          surface.isPlaying ? surface.pause() : surface.play(),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(_byteLabel(g.bytes),
+                        key: const ValueKey('review.graphic.preview.bytes'),
+                        style: MonokaiTheme.labelSmall
+                            .copyWith(color: MonokaiTheme.textMuted)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  /// File-style byte label (1000-based, the same units the Swift card shows).
+  static String _byteLabel(int bytes) {
+    if (bytes < 1000) return '$bytes bytes';
+    const units = ['kB', 'MB', 'GB', 'TB'];
+    var value = bytes / 1000;
+    var unit = 0;
+    while (value >= 1000 && unit < units.length - 1) {
+      value /= 1000;
+      unit++;
+    }
+    return '${value.toStringAsFixed(1)} ${units[unit]}';
   }
 
   /// A bed for a surface that has not reported a duration: the ledger's own
