@@ -31,18 +31,57 @@ class CyanBackendFFI implements CyanBackend {
   @override
   bool get isReady => _ready || CyanFFI.isReady();
 
+  // ---- the tree (Group -> Workspace -> Board) --------------------------------
+  //
+  // Group and workspace NAMES live in exactly one place on the wire. There is
+  // no `cyan_get_groups` verb at all; `cyan_get_all_boards` answers ids plus
+  // board metadata, and `cyan_get_workspaces_for_group` answers a list of bare
+  // ids. The names are in the engine's own tree dump, which it emits as a
+  // `TreeLoaded` event in answer to the `Snapshot` command — the same single
+  // source SwiftUI's `FileTreeViewModel.loadFromSnapshot` reads.
+  //
+  // Until now `loadGroups` DERIVED the tree from the flat board list, so
+  // against a real engine every board sat under a group literally named
+  // "Group", every group's `workspaces` was empty, and the Explorer (and the
+  // `workspacesProvider` built on it) rendered nothing at all over a database
+  // that had the data. Both reads go through the snapshot now.
+
   @override
   Future<List<CyanGroup>> loadGroups() async {
-    // The legacy tree is assembled by file_tree_provider from several FFI
-    // calls. For the seam we read the flat board list and group it; full tree
-    // hydration (workspaces with no boards) is added when the Explorer screen
-    // lands. For now derive groups from the boards we can see.
-    final boards = await loadAllBoards();
-    final byGroup = <String, CyanGroup>{};
-    for (final b in boards) {
-      byGroup.putIfAbsent(b.group.id, () => b.group);
+    final tree = await _treeSnapshot();
+    // No snapshot is NOT the same as no groups, and this seam has no error
+    // channel to tell the caller which it got — so it says nothing rather than
+    // inventing a tree. The Explorer shows its empty state, exactly as iOS does
+    // when its own load bound expires.
+    if (tree == null) return const [];
+
+    final metadata = _boardsById();
+    final boardsByWorkspace = <String, List<CyanBoard>>{};
+    for (final row in tree.boards) {
+      (boardsByWorkspace[row.parentId] ??= <CyanBoard>[])
+          .add(metadata[row.id] ?? _boardFromTree(row));
     }
-    return byGroup.values.toList();
+
+    final workspacesByGroup = <String, List<CyanWorkspace>>{};
+    for (final row in tree.workspaces) {
+      (workspacesByGroup[row.parentId] ??= <CyanWorkspace>[]).add(CyanWorkspace(
+        id: row.id,
+        groupId: row.parentId,
+        name: row.name,
+        boards: boardsByWorkspace[row.id] ?? const [],
+      ));
+    }
+
+    return [
+      for (final g in tree.groups)
+        CyanGroup(
+          id: g.id,
+          name: g.name,
+          colorHex: g.color.isEmpty ? _defaultGroupColor : g.color,
+          peerCount: CyanFFI.getGroupPeerCount(g.id),
+          workspaces: workspacesByGroup[g.id] ?? const [],
+        ),
+    ];
   }
 
   // ---- tree mutation --------------------------------------------------------
@@ -90,55 +129,222 @@ class CyanBackendFFI implements CyanBackend {
 
   @override
   Future<List<BoardWithContext>> loadAllBoards() async {
-    final json = CyanFFI.getAllBoards();
-    if (json == null || json.isEmpty) return const [];
-    final List<dynamic> raw;
-    try {
-      raw = jsonDecode(json) as List<dynamic>;
-    } catch (_) {
-      return const [];
-    }
+    // The board ORDER and the board METADATA are `cyan_get_all_boards`'s —
+    // pinned first, then newest, which is the living wall's contract, and the
+    // tree dump carries neither. The tree supplies only what that verb does not
+    // have: the group and workspace NAMES.
+    final tree = await _treeSnapshot();
+    final groups = {for (final g in tree?.groups ?? const <_TreeRow>[]) g.id: g};
+    final workspaces = {
+      for (final w in tree?.workspaces ?? const <_TreeRow>[]) w.id: w
+    };
 
     final out = <BoardWithContext>[];
-    for (final item in raw) {
-      if (item is! Map<String, dynamic>) continue;
-      final boardId = item['id'] as String? ?? '';
-      final wsId = item['workspace_id'] as String? ?? '';
-      final groupId = item['group_id'] as String? ?? '';
-      final groupName = item['group_name'] as String? ?? 'Group';
-      final groupColor = item['group_color'] as String? ?? '#66D9EF';
-      final wsName = item['workspace_name'] as String? ?? 'Workspace';
+    for (final item in _boardRows()) {
+      final board = _boardFromRow(item);
+      final ws = workspaces[board.workspaceId];
+      // The verb joins the group id in itself; the tree's parent link is the
+      // fallback for a row whose workspace join came back null.
+      final groupId = _str(item['group_id']).isNotEmpty
+          ? _str(item['group_id'])
+          : (ws?.parentId ?? '');
+      final group = groups[groupId];
 
-      final faceStr = CyanFFI.getBoardMode(boardId);
-      final labels = _labels(boardId);
-
-      final board = CyanBoard(
-        id: boardId,
-        workspaceId: wsId,
-        name: item['name'] as String? ?? 'Untitled',
-        activeFace: BoardFaceKindX.fromString(faceStr),
-        isPinned: CyanFFI.isBoardPinned(boardId),
-        rating: item['rating'] as int? ?? 0,
-        labels: labels,
-        stepCount: item['element_count'] as int? ?? 0,
-        isDeployed: item['is_deployed'] as bool? ?? false,
-        createdAt: DateTime.fromMillisecondsSinceEpoch(
-            ((item['created_at'] as int?) ?? 0) * 1000),
-        lastModified: item['last_modified'] != null
-            ? DateTime.fromMillisecondsSinceEpoch(
-                (item['last_modified'] as int) * 1000)
-            : null,
-      );
-
-      final group = CyanGroup(
-          id: groupId, name: groupName, colorHex: groupColor);
-      final workspace =
-          CyanWorkspace(id: wsId, groupId: groupId, name: wsName);
-      out.add(
-          BoardWithContext(board: board, group: group, workspace: workspace));
+      out.add(BoardWithContext(
+        board: board,
+        group: CyanGroup(
+          id: groupId,
+          name: group?.name ?? _unnamedGroup,
+          colorHex: (group == null || group.color.isEmpty)
+              ? _defaultGroupColor
+              : group.color,
+        ),
+        workspace: CyanWorkspace(
+          id: board.workspaceId,
+          groupId: groupId,
+          name: ws?.name ?? _unnamedWorkspace,
+        ),
+      ));
     }
     return out;
   }
+
+  /// What the tree could not name. Deliberately NOT "Group" / "Workspace": a
+  /// placeholder that reads like a real name is indistinguishable from data on
+  /// screen, and this one is the absence of data.
+  static const String _unnamedGroup = 'Unknown group';
+  static const String _unnamedWorkspace = 'Unknown workspace';
+
+  /// The colour the ENGINE itself stamps on a group it creates
+  /// (`cyan_create_group`'s own default), for a row whose colour did not come
+  /// through — so an unnamed group still looks like the group it is.
+  static const String _defaultGroupColor = '#00AEEF';
+
+  /// `cyan_get_all_boards`, decoded. Engine order is preserved.
+  List<Map<String, dynamic>> _boardRows() {
+    final json = CyanFFI.getAllBoards();
+    if (json == null || json.isEmpty) return const [];
+    try {
+      final decoded = jsonDecode(json);
+      if (decoded is! List) return const [];
+      return [
+        for (final row in decoded)
+          if (row is Map<String, dynamic>) row,
+      ];
+    } catch (_) {
+      return const [];
+    }
+  }
+
+  /// Every board the metadata verb knows, keyed by id — what the Explorer hangs
+  /// off the tree so a board's pin, rating and labels read the same there as on
+  /// the wall.
+  Map<String, CyanBoard> _boardsById() {
+    final out = <String, CyanBoard>{};
+    for (final row in _boardRows()) {
+      final board = _boardFromRow(row);
+      if (board.id.isNotEmpty) out[board.id] = board;
+    }
+    return out;
+  }
+
+  /// One `cyan_get_all_boards` row as a board.
+  ///
+  /// The verb hardcodes `element_count` to 0 and carries no deploy flag, so
+  /// [CyanBoard.stepCount] and [CyanBoard.isDeployed] are the engine's own
+  /// silence rather than a read — the living-wall "running" pill is still
+  /// waiting on a verb that answers it per board.
+  CyanBoard _boardFromRow(Map<String, dynamic> item) {
+    final boardId = _str(item['id']);
+    return CyanBoard(
+      id: boardId,
+      workspaceId: _str(item['workspace_id']),
+      name: _str(item['name']).isEmpty ? 'Untitled' : _str(item['name']),
+      activeFace: BoardFaceKindX.fromString(CyanFFI.getBoardMode(boardId)),
+      isPinned: CyanFFI.isBoardPinned(boardId),
+      rating: _int(item['rating']),
+      labels: _labels(boardId),
+      stepCount: _int(item['element_count']),
+      isDeployed: item['is_deployed'] == true,
+      createdAt:
+          DateTime.fromMillisecondsSinceEpoch(_int(item['created_at']) * 1000),
+      lastModified: item['last_modified'] == null
+          ? null
+          : DateTime.fromMillisecondsSinceEpoch(
+              _int(item['last_modified']) * 1000),
+    );
+  }
+
+  /// A board the tree named but the metadata verb did not return. Both read the
+  /// same `objects` rows, so this is a race between two calls rather than a
+  /// shape difference — carry the tree's truth instead of dropping the board.
+  CyanBoard _boardFromTree(_TreeRow row) => CyanBoard(
+        id: row.id,
+        workspaceId: row.parentId,
+        name: row.name,
+        createdAt: DateTime.fromMillisecondsSinceEpoch(row.createdAt * 1000),
+      );
+
+  // ---- the tree snapshot ------------------------------------------------------
+
+  /// How long to wait for the dump before answering "nothing arrived".
+  ///
+  /// Bounded for the reason `FileTreeViewModel.scheduleLoadTimeout` is bounded:
+  /// an engine that never answers must not park a provider forever, and a fresh
+  /// identity's EMPTY tree is a real answer that may simply be slow.
+  static const Duration _snapshotTimeout = Duration(seconds: 2);
+
+  Future<_Tree?>? _treeInFlight;
+
+  /// The engine's tree dump, or null when none arrived.
+  Future<_Tree?> _treeSnapshot() {
+    // The wall and the Explorer hydrate at the same time. `cyan_poll_events`
+    // POPS, so two concurrent drains would race for one frame and whichever
+    // lost would time out holding nothing. They share one request instead.
+    return _treeInFlight ??=
+        _requestTree().whenComplete(() => _treeInFlight = null);
+  }
+
+  /// Ask for a dump and drain until it shows up.
+  ///
+  /// WHICH BUFFER, and why this is not a trick: the engine routes `TreeLoaded`
+  /// to BOTH the `file_tree` and the `board_grid` buffers
+  /// (`route_event_to_buffers`, cyan-backend/src/lib.rs) exactly so the boards
+  /// surface can hydrate without the Explorer's pump. Since the buffers pop,
+  /// two pumps on one buffer steal each other's frames — the legacy
+  /// `FileTreeNotifier` owns `file_tree`, so the seam reads `board_grid`, which
+  /// nothing else in this app pumps, and neither loses a frame.
+  Future<_Tree?> _requestTree() async {
+    // `cyan_send_command` ignores its component argument outright — the command
+    // rides the one command channel — so this names the buffer the ANSWER comes
+    // back on, not where the request goes.
+    if (!CyanFFI.sendCommand('board_grid', '{"type":"Snapshot"}')) return null;
+    final deadline = DateTime.now().add(_snapshotTimeout);
+    while (DateTime.now().isBefore(deadline)) {
+      for (var frame = CyanFFI.pollEvents('board_grid');
+          frame != null;
+          frame = CyanFFI.pollEvents('board_grid')) {
+        final tree = _treeFromFrame(frame);
+        if (tree != null) return tree;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+    return null;
+  }
+
+  /// One `board_grid` frame, if it is the tree dump.
+  ///
+  /// `SwiftEvent::TreeLoaded` serialises as
+  /// `{"type":"TreeLoaded","data":"<the tree, itself JSON>"}` — the payload is
+  /// a STRING holding JSON, because the variant carries one. Any other frame,
+  /// and any malformed one, is null: a drain that threw would take the whole
+  /// surface down over an event it did not need.
+  _Tree? _treeFromFrame(String frame) {
+    final ev = _decode(frame);
+    if (ev == null || ev['type'] != 'TreeLoaded') return null;
+    final payload = ev['data'];
+    final tree = payload is String ? _decode(payload) : null;
+    if (tree == null) return null;
+    return _Tree(
+      groups: [
+        for (final r in _rows(tree['groups']))
+          _TreeRow(
+            id: _str(r['id']),
+            name: _str(r['name']),
+            color: _str(r['color']),
+            createdAt: _int(r['created_at']),
+          ),
+      ],
+      workspaces: [
+        for (final r in _rows(tree['workspaces']))
+          _TreeRow(
+            id: _str(r['id']),
+            name: _str(r['name']),
+            parentId: _str(r['group_id']),
+            createdAt: _int(r['created_at']),
+          ),
+      ],
+      // The dump still calls boards `whiteboards` — the engine's `objects` rows
+      // carry `type='whiteboard'`, which is what the table was called first.
+      boards: [
+        for (final r in _rows(tree['whiteboards']))
+          _TreeRow(
+            id: _str(r['id']),
+            name: _str(r['name']),
+            parentId: _str(r['workspace_id']),
+            createdAt: _int(r['created_at']),
+          ),
+      ],
+    );
+  }
+
+  static List<Map<String, dynamic>> _rows(dynamic value) => [
+        if (value is List)
+          for (final row in value)
+            if (row is Map<String, dynamic>) row,
+      ];
+
+  static String _str(dynamic v) => v is String ? v : '';
 
   @override
   Future<WorkflowRun?> loadRun(String boardId) async {
@@ -1323,4 +1529,44 @@ class CyanBackendFFI implements CyanBackend {
   @override
   Future<String?> pollEvents(String component) async =>
       CyanFFI.pollEvents(component);
+}
+
+/// The engine's `dump_tree_json` payload, reduced to the three levels the
+/// Explorer draws. The dump also carries `files` and `chats`; those have their
+/// own verbs on this seam and are not read here.
+class _Tree {
+  const _Tree({
+    required this.groups,
+    required this.workspaces,
+    required this.boards,
+  });
+
+  final List<_TreeRow> groups;
+  final List<_TreeRow> workspaces;
+  final List<_TreeRow> boards;
+}
+
+/// One row of the dump. The three levels differ only in what their parent is,
+/// so they share a shape rather than three near-identical classes.
+class _TreeRow {
+  const _TreeRow({
+    required this.id,
+    required this.name,
+    this.parentId = '',
+    this.color = '',
+    this.createdAt = 0,
+  });
+
+  final String id;
+  final String name;
+
+  /// The group id for a workspace, the workspace id for a board, `''` for a
+  /// group.
+  final String parentId;
+
+  /// Groups only — the `#RRGGBB` the group was created with.
+  final String color;
+
+  /// Engine seconds since the epoch.
+  final int createdAt;
 }

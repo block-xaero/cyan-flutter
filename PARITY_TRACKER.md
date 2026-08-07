@@ -68,7 +68,25 @@ Run with `flutter test integration_test/<file> -d windows` (Flutter 3.38.6, `C:\
 |---|---|---|---|
 | T1 | `integration_test/real_engine_test.dart` | **green (4/4, Windows)** | engine loads from `windows\Libraries`, `cyan_init` writes a real db, full 157-verb surface resolves. The reported ":66 stale symbols" was a misdiagnosis — dumpbin `/EXPORTS` confirms every listed verb exists; the failure was `tearDownAll` (no engine shutdown verb ⇒ SQLite stays open ⇒ Windows won't unlink). |
 | T2 | `integration_test/engine_roundtrip_test.dart` | **green (2/2, Windows)** | passed on Windows unmodified: `cyan_init_with_identity` boots, `cyan_create_group`/`cyan_create_workspace` write, and the event bus + `cyan_get_workspaces_for_group` agree on the full set. The Windows write path is real. |
-| T3+ | real FFI hydration per screen | todo | Boards/Explorer → Workflow → Dashboard → Notes → Ops trio → Marketplace → Lens → Chat |
+| T3 | Boards wall + Explorer tree (`integration_test/tree_hydration_test.dart`) | **green (3/3, Windows)** | `loadGroups`/`loadAllBoards` now read the engine's tree dump. Seeded engine ⇒ real group names + colours, both workspaces per group (incl. the empty **Plugins** one), 10 boards, and the wall and the tree agree on who owns what. Negative control run: disabling the snapshot turns all 3 red and the wall falls back to "Unknown group". |
+| T4+ | real FFI hydration, remaining screens | todo | Workflow (already real) → Dashboard → Notes → Ops trio → Marketplace → Lens → Chat |
+
+**Engine facts this port had to learn the hard way (do NOT relearn):**
+- There is **no `cyan_get_groups` verb**. Group and workspace NAMES exist on the wire in
+  exactly one place: the engine's tree dump, emitted as a `TreeLoaded` event in answer to
+  the `Snapshot` command. `cyan_get_all_boards` gives ids + board metadata only;
+  `cyan_get_workspaces_for_group` gives bare ids. Same single source SwiftUI's
+  `FileTreeViewModel.loadFromSnapshot` reads.
+- `TreeLoaded` is routed to BOTH the `file_tree` and `board_grid` buffers. `cyan_poll_events`
+  **pops**, so two pumps on one buffer steal each other's frames. The legacy
+  `FileTreeNotifier` owns `file_tree`; the seam reads `board_grid` (nothing else pumps it).
+- **`cyan_seed_demo_if_empty` is an INERT no-op** in this engine — kept for ABI stability
+  only ("R10FB §D: demo seeding has been REMOVED"). The verb that really seeds is
+  **`cyan_seed_demo`**: a fixed, idempotent 3-group / 10-board set, each group provisioned
+  with a `General` and a system `Plugins` workspace.
+- `cyan_get_all_boards` hardcodes `element_count` to 0 and carries no deploy flag, so
+  `CyanBoard.stepCount`/`isDeployed` are the engine's silence, not a read. The living-wall
+  "running" pill still has nothing per-board to read — see the blocked note below.
 
 **Seam truth:** `CyanBackendFFI`'s loaders (`loadWorkflow`, `loadNotes`, `loadOpsRuns`,
 `loadCostMeter`, `loadEfficiency`, `loadMarketplace`, `loadLensIntelligence`, `loadChat`…)
