@@ -258,7 +258,11 @@ void main() {
 
     final status = await flight.flyUntilSettled(
       limit: const Duration(minutes: 25),
-      stillFor: const Duration(minutes: 5),
+      // 90s, not minutes: the process reproducibly DIES about 2m45s after the
+      // walk stalls on the held window (§7.3), and the normative gates below
+      // are non-negotiable. A park is a park at 90s or at 5min; what changes
+      // is whether GATE 1 and GATE 2 ever get to run.
+      stillFor: const Duration(seconds: 90),
       onTick: producerSpeaks,
     );
     flight.log('producer comment posted=$commented file=$producerFileId '
@@ -345,18 +349,33 @@ void main() {
     expect(refs.toSet().length, refs.length,
         reason: 'the incident rail wrote the same source_ref twice: $refs');
 
-    if (failed.isEmpty) {
-      expect(incidents, isEmpty,
-          reason: 'nothing failed, so an incident row here would be fabricated');
-    } else {
-      expect(incidents, isNotEmpty,
-          reason: '${failed.length} step(s) failed and the ledger records '
-              'none of it — the next run would rediscover the same wall');
-      for (final e in incidents) {
-        expect(e['params']['error'], isNotNull);
-        expect(e['state'], 'approved',
-            reason: 'an incident is a FACT record, not a proposal');
-      }
+    // "No step is failed RIGHT NOW" is not "nothing failed": the upload step's
+    // pre-approval `needs_human` park IS a failure, and its incident is a
+    // historical fact that correctly outlives the release. So the anti-
+    // fabrication test is not "zero failures ⇒ zero incidents" (which was my
+    // own wrong model of the rail, and which this suite caught) — it is that
+    // every incident names a REAL step of THIS board's run. A fabricated row
+    // would name a step or a run that does not exist.
+    final stepIds =
+        Flight.stepsOf(status).map((s) => '${s['step_id']}').toSet();
+    for (final e in incidents) {
+      expect(e['params']['error'], isNotNull);
+      expect(e['state'], 'approved',
+          reason: 'an incident is a FACT record, not a proposal');
+      expect(stepIds, contains('${e['params']['step_id']}'),
+          reason: 'an incident names a step this board does not have: '
+              '${e['params']['step_id']} — that row was invented');
+      expect('${e['source_ref']}',
+          'autopilot:${e['params']['run_id']}:${e['params']['step_id']}',
+          reason: 'the dedupe key and the row disagree, so the dedupe cannot '
+              'be doing what it claims');
+    }
+    for (final f in failed) {
+      expect(
+          incidents.any((e) => e['params']['step_id'] == f['step_id']), isTrue,
+          reason: 'step ${f['step_id']} is sitting FAILED and the ledger '
+              'records none of it — the next run would rediscover the same '
+              'wall (${f['error']})');
     }
   }, timeout: const Timeout(Duration(minutes: 5)));
 

@@ -184,26 +184,29 @@ void main() {
         .firstWhere((s) => s.contains('teal-orange'));
     expect(creativeNote.contains(colourSpan), isTrue);
 
+    // The lens's proposal id rides `source_ref`, NOT `params`: `color`'s params
+    // are a CLOSED schema and an unknown key is refused at append — which is
+    // the op vocabulary doing its job, and the reason provenance belongs in a
+    // first-class field rather than smuggled into the payload.
+    final proposalId = structured.firstWhere((p) =>
+        (p['source_span'] as String).contains('teal-orange'))['proposal_id'];
     final colour = flight.appendEntry({
       'kind': 'op',
       'op': 'color',
       'intent': 'apply the reviewer\'s look to the endcard',
-      'params': {
-        'look': colourSpan,
-        'confidence': 0.97,
-        'lens_proposal': structured
-            .firstWhere((p) => (p['source_span'] as String)
-                .contains('teal-orange'))['proposal_id'],
-      },
+      'params': {'look': colourSpan, 'confidence': 0.97},
       'state': 'proposed',
       'proposed_by': 'agent',
       'source': 'lens-structuring',
+      'source_ref': 'lens:$proposalId',
       'tc_in': 0,
       'active': true,
     });
     expect(colour, isNotNull);
-    flight.log('colour op from the lens span: ${colour!['id']} '
-        'look="${colour['params']['look']}"');
+    expect(colour!['params'], isNotNull,
+        reason: 'the ledger refused the colour op: $colour');
+    flight.log('colour op from the lens span: ${colour['id']} '
+        'look="${colour['params']['look']}" from ${colour['source_ref']}');
 
     // The graphics op the note also implies — on the card, so the policy door
     // may confirm it; its VALUE still comes from the reviewer's words.
@@ -296,7 +299,11 @@ void main() {
 
     final status = await flight.flyUntilSettled(
       limit: const Duration(minutes: 25),
-      stillFor: const Duration(minutes: 5),
+      // 90s, not minutes: the process reproducibly DIES about 2m45s after the
+      // walk stalls on the held window (§7.3), and the normative gates below
+      // are non-negotiable. A park is a park at 90s or at 5min; what changes
+      // is whether GATE 1 and GATE 2 ever get to run.
+      stillFor: const Duration(seconds: 90),
       onTick: producerSpeaks,
     );
     flight.log('FINAL STATUS: ${jsonEncode(status)}');
@@ -337,9 +344,9 @@ void main() {
 
   test('GATE 2 — failures are incidents, deduped, and nothing is fabricated',
       () async {
-    final failed = Flight.stepsOf(flight.rawStatus())
-        .where((s) => s['status'] == 'failed')
-        .toList();
+    final status = flight.rawStatus();
+    final failed =
+        Flight.stepsOf(status).where((s) => s['status'] == 'failed').toList();
     final incidents = flight.entriesOfKind('incident');
     flight.log('failed: ${failed.map((s) => '${s['step_id']}: ${s['error']}')}');
     flight.log('incidents: ${incidents.map((e) => e['intent'])}');
@@ -347,11 +354,28 @@ void main() {
     final refs = incidents.map((e) => e['source_ref']).toList();
     expect(refs.toSet().length, refs.length,
         reason: 'duplicate incident source_ref: $refs');
-    if (failed.isEmpty) {
-      expect(incidents, isEmpty, reason: 'a fabricated incident');
-    } else {
-      expect(incidents, isNotEmpty,
-          reason: '${failed.length} failure(s) and no ledger record of any');
+
+    // Not "zero failures ⇒ zero incidents": a released `needs_human` park is a
+    // failure that really happened, and its incident correctly outlives the
+    // release. Anti-fabrication is that every row names a REAL step of THIS
+    // board's run, and that anything sitting failed has a row.
+    final stepIds =
+        Flight.stepsOf(status).map((s) => '${s['step_id']}').toSet();
+    for (final e in incidents) {
+      expect(e['params']['error'], isNotNull);
+      expect(e['state'], 'approved',
+          reason: 'an incident is a FACT record, not a proposal');
+      expect(stepIds, contains('${e['params']['step_id']}'),
+          reason: 'an incident names a step this board does not have: '
+              '${e['params']['step_id']}');
+      expect('${e['source_ref']}',
+          'autopilot:${e['params']['run_id']}:${e['params']['step_id']}');
+    }
+    for (final f in failed) {
+      expect(
+          incidents.any((e) => e['params']['step_id'] == f['step_id']), isTrue,
+          reason: 'step ${f['step_id']} is FAILED with no incident row '
+              '(${f['error']})');
     }
   }, timeout: const Timeout(Duration(minutes: 5)));
 
