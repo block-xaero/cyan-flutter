@@ -38,8 +38,7 @@ enum ShellDoor {
 
 /// Which door is open. The shell swaps its home surface off this alone, so a
 /// test (or a keyboard shortcut) drives navigation exactly like a rail click.
-final shellDoorProvider =
-    StateProvider<ShellDoor>((ref) => ShellDoor.explorer);
+final shellDoorProvider = StateProvider<ShellDoor>((ref) => ShellDoor.explorer);
 
 /// The board the operator has OPENED, or null when the shell is showing the
 /// open door's own surface.
@@ -54,6 +53,17 @@ final shellDoorProvider =
 /// It holds an id, not a board: the cube re-reads the board through the seam,
 /// so a board renamed or re-faced elsewhere is not stale here.
 final selectedBoardProvider = StateProvider<String?>((ref) => null);
+
+/// The GROUP the operator is currently standing in.
+///
+/// Set by the Explorer's selection and by opening a board from the wall, so it
+/// tracks wherever the operator actually is rather than a remembered default.
+///
+/// It matters because a plugin install LANDS in a group's Plugins workspace:
+/// `ParityMarketplace` refuses the install when this is null rather than
+/// guessing a group the engine would foreign-key-reject. Guessing here would
+/// install a tool into someone else's tenant.
+final selectedGroupProvider = StateProvider<String?>((ref) => null);
 
 /// The signed-in identity the status bar's profile chip shows. Null renders as
 /// signed-out, never as a blank profile.

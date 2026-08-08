@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
+import '../../providers/onboarding_session_provider.dart';
 import '../../providers/shell_provider.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_board_container.dart';
@@ -35,6 +36,14 @@ class ParityHomeShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final door = ref.watch(shellDoorProvider);
+
+    // Choosing a rail door LEAVES the open board. Without this the cube keeps
+    // the surface no matter which door is lit, so the rail goes decorative the
+    // moment a board is open — the opposite of the "one click away" property
+    // keeping the chrome around the container is supposed to buy.
+    ref.listen<ShellDoor>(shellDoorProvider, (_, __) {
+      ref.read(selectedBoardProvider.notifier).state = null;
+    });
 
     final openBoard = ref.watch(selectedBoardProvider);
 
@@ -86,16 +95,40 @@ class ParityHomeShell extends ConsumerWidget {
   Widget _surfaceFor(ShellDoor door, WidgetRef ref) {
     void open(String boardId) =>
         ref.read(selectedBoardProvider.notifier).state = boardId;
+    void standIn(String? groupId) =>
+        ref.read(selectedGroupProvider.notifier).state = groupId;
 
     return switch (door) {
-      ShellDoor.explorer =>
-        ParityExplorerTree(onOpenBoard: (board) => open(board.id)),
-      ShellDoor.boards =>
-        ParityBoardsGrid(onOpenBoard: (entry) => open(entry.board.id)),
+      ShellDoor.explorer => ParityExplorerTree(
+          onOpenBoard: (board) => open(board.id),
+          // Where the operator is standing follows the tree's selection, which
+          // is what decides the group an install would land in.
+          onSelectionChanged: (selection) => standIn(selection?.groupId),
+        ),
+      ShellDoor.boards => ParityBoardsGrid(onOpenBoard: (entry) {
+          standIn(entry.group.id);
+          open(entry.board.id);
+        }),
       ShellDoor.chat => const ParityChatView(),
       ShellDoor.lens => const ParityLensView(),
-      ShellDoor.market => const ParityMarketplace(),
+      // The storefront needs BOTH: the group an install lands in, and the role
+      // that decides whether the forge entry is offered. Constructed bare, it
+      // evaluated `forgeEntryGate(null)` and hard-locked "Build a custom tool"
+      // for EVERYONE — owners included — while Install could never run at all
+      // for want of a group.
+      ShellDoor.market => ParityMarketplace(
+          groupId: ref.watch(selectedGroupProvider),
+          sessionRole: _sessionRole(ref),
+        ),
     };
+  }
+
+  /// The membership role of the verified session, or null when there is no
+  /// session at all. Null and empty are the same fact here — no session means
+  /// no role — and the gate locks on both, which is the honest reading.
+  static String? _sessionRole(WidgetRef ref) {
+    final role = ref.watch(onboardingSessionProvider).role;
+    return role.isEmpty ? null : role;
   }
 }
 
@@ -142,7 +175,8 @@ class _SignedInChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Signed in as ${profile.displayName.isEmpty ? profile.nodeId : profile.displayName}',
+      message:
+          'Signed in as ${profile.displayName.isEmpty ? profile.nodeId : profile.displayName}',
       child: Row(
         key: const ValueKey('shell-identity'),
         mainAxisSize: MainAxisSize.min,
