@@ -41,6 +41,20 @@ enum ShellDoor {
 final shellDoorProvider =
     StateProvider<ShellDoor>((ref) => ShellDoor.explorer);
 
+/// The board the operator has OPENED, or null when the shell is showing the
+/// open door's own surface.
+///
+/// This is what makes the rail's surfaces navigable rather than terminal: the
+/// Explorer tree and the Boards wall both answer a tap by setting it, and the
+/// shell swaps in the board CUBE (`ParityBoardContainer`) over the door's
+/// surface — the same move `WorkspaceViewNew` makes when it mounts
+/// `BoardContainerViewNew` beside the rail. Going back clears it, which returns
+/// the operator to the door they were on rather than to a default one.
+///
+/// It holds an id, not a board: the cube re-reads the board through the seam,
+/// so a board renamed or re-faced elsewhere is not stale here.
+final selectedBoardProvider = StateProvider<String?>((ref) => null);
+
 /// The signed-in identity the status bar's profile chip shows. Null renders as
 /// signed-out, never as a blank profile.
 final shellIdentityProvider = FutureProvider<DeviceProfile?>((ref) async {

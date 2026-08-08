@@ -6,8 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'theme/monokai_theme.dart';
 import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
-import 'screens/workspace_screen.dart';
 import 'screens/profile_screen.dart';
+import 'widgets/parity/parity_home_shell.dart';
 import 'providers/auth_provider.dart';
 import 'providers/cyan_backend_provider.dart';
 import 'ffi/cyan_backend.dart';
@@ -88,7 +88,7 @@ class CyanApp extends ConsumerWidget {
       home: const _AppRoot(),
       routes: {
         '/login': (context) => const LoginScreen(),
-        '/workspace': (context) => const WorkspaceScreen(),
+        '/workspace': (context) => const CyanWorkspace(),
         '/profile': (context) => const ProfileScreen(),
       },
     );
@@ -113,6 +113,29 @@ class _AppRoot extends ConsumerWidget {
     }
     
     // Show main workspace
-    return const WorkspaceScreen();
+    return const CyanWorkspace();
   }
+}
+
+/// The signed-in workspace: the parity shell, and nothing else.
+///
+/// This is the ONE mount edge that decides which app ships. Every parity face —
+/// Workflow, Dashboard, the board cube, the Ops console, Marketplace, Lens —
+/// is reachable only through `ParityHomeShell`, so until this pointed at it the
+/// whole `lib/widgets/parity/` tree was dead code at runtime: 34 faces with
+/// green widget tests that mounted them directly, and no route by which an
+/// operator could open one. The legacy `WorkspaceScreen` it replaced mounted
+/// the pre-parity canvas/notebook/notes cell editor, which is the surface the
+/// SwiftUI `WorkflowView` was written to REPLACE.
+///
+/// The Scaffold is here rather than inside the shell so the shell stays a bare
+/// `Column` its own widget tests can pump directly.
+class CyanWorkspace extends StatelessWidget {
+  const CyanWorkspace({super.key});
+
+  @override
+  Widget build(BuildContext context) => const Scaffold(
+        backgroundColor: MonokaiTheme.background,
+        body: ParityHomeShell(),
+      );
 }

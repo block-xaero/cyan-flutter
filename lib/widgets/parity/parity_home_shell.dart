@@ -20,6 +20,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../ffi/parity_models.dart';
 import '../../providers/shell_provider.dart';
 import '../../theme/monokai_theme.dart';
+import 'parity_board_container.dart';
 import 'parity_boards_grid.dart';
 import 'parity_chat_view.dart';
 import 'parity_explorer_tree.dart';
@@ -35,6 +36,8 @@ class ParityHomeShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final door = ref.watch(shellDoorProvider);
 
+    final openBoard = ref.watch(selectedBoardProvider);
+
     return Column(
       children: [
         Expanded(
@@ -42,7 +45,23 @@ class ParityHomeShell extends ConsumerWidget {
             children: [
               const ParityIconRail(),
               Container(width: 1, color: MonokaiTheme.divider),
-              Expanded(child: _surfaceFor(door)),
+              Expanded(
+                child: openBoard == null
+                    ? _surfaceFor(door, ref)
+                    // The board CUBE replaces the door's surface but NOT the
+                    // rail — Swift keeps the workspace chrome around
+                    // `BoardContainerViewNew`, so switching doors is still one
+                    // click away from inside a board. Keying on the board id
+                    // makes opening a second board a fresh cube rather than the
+                    // previous board's state re-pointed.
+                    : ParityBoardContainer(
+                        key: ValueKey(openBoard),
+                        boardId: openBoard,
+                        onBack: () => ref
+                            .read(selectedBoardProvider.notifier)
+                            .state = null,
+                      ),
+              ),
             ],
           ),
         ),
@@ -58,13 +77,26 @@ class ParityHomeShell extends ConsumerWidget {
   }
 
   /// The surface behind each door — every one a real face, never a stub.
-  Widget _surfaceFor(ShellDoor door) => switch (door) {
-        ShellDoor.explorer => const ParityExplorerTree(),
-        ShellDoor.boards => const ParityBoardsGrid(),
-        ShellDoor.chat => const ParityChatView(),
-        ShellDoor.lens => const ParityLensView(),
-        ShellDoor.market => const ParityMarketplace(),
-      };
+  ///
+  /// The two surfaces that LIST boards are handed `onOpenBoard`, because a
+  /// board row that does nothing when tapped is the difference between a face
+  /// that renders and a shell an operator can work in. Both list the same
+  /// boards through the same seam and differ only in shape, so both open the
+  /// cube the same way.
+  Widget _surfaceFor(ShellDoor door, WidgetRef ref) {
+    void open(String boardId) =>
+        ref.read(selectedBoardProvider.notifier).state = boardId;
+
+    return switch (door) {
+      ShellDoor.explorer =>
+        ParityExplorerTree(onOpenBoard: (board) => open(board.id)),
+      ShellDoor.boards =>
+        ParityBoardsGrid(onOpenBoard: (entry) => open(entry.board.id)),
+      ShellDoor.chat => const ParityChatView(),
+      ShellDoor.lens => const ParityLensView(),
+      ShellDoor.market => const ParityMarketplace(),
+    };
+  }
 }
 
 /// The signed-in identity at the gutter's far right — the SwiftUI status bar's
