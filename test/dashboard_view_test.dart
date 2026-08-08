@@ -83,6 +83,19 @@ Future<FakeCyanBackend> parked() async {
   return backend;
 }
 
+/// Records which step id a resume actually asked the engine to retry. The
+/// routing rule picks between the parked step and the one upstream, and the
+/// only way to prove which it chose is to watch the seam.
+class _RecordingBackend extends FakeCyanBackend {
+  final List<String> retried = [];
+
+  @override
+  Future<bool> pipelineRetry(String boardId, String stepId) {
+    retried.add(stepId);
+    return super.pipelineRetry(boardId, stepId);
+  }
+}
+
 /// The ENGINE's own state for a step — the assertions that matter are made
 /// against this, never against what the face decided to draw.
 PipelineStepState _stateOf(PipelineStatus status, String stepId) =>
@@ -113,7 +126,8 @@ void main() {
       'Migrate the users table',
       'Backfill from the export',
     ]) {
-      expect(find.text(title), findsNWidgets(2), reason: '$title is in the DAG');
+      expect(find.text(title), findsNWidgets(2),
+          reason: '$title is in the DAG');
     }
 
     // The EDGES: a three-step chain has two dependency arrows.
@@ -164,7 +178,8 @@ void main() {
     expect(find.text('Publish the cut, send to /review'), findsNWidgets(2));
   });
 
-  testWidgets('live frames move a step state without a re-read', (tester) async {
+  testWidgets('live frames move a step state without a re-read',
+      (tester) async {
     // The persisted read establishes state; events REFINE it. A `StepProgress`
     // frame carries per-item counters that no status read has, so the row shows
     // work advancing inside a step, not just between steps.
@@ -442,7 +457,8 @@ void main() {
 
     expect(find.text('not_locally_bound'), findsOneWidget);
     expect(_stateOf(await backend.pipelineStatus(_flagship), 'ws4'),
-        PipelineStepState.pending, reason: 'nothing moved');
+        PipelineStepState.pending,
+        reason: 'nothing moved');
     expect(find.text('Queued'), findsOneWidget);
   });
 
@@ -466,7 +482,8 @@ void main() {
     expect(_stateOf(await backend.pipelineStatus(_schema), _lensStep),
         PipelineStepState.needsLens);
     expect(find.text('needs_lens: no model is bound to run this step'),
-        findsOneWidget, reason: 'the engine said why, verbatim');
+        findsOneWidget,
+        reason: 'the engine said why, verbatim');
 
     // It is on the action list — a card of its own, beside any real gate.
     expect(find.text('Needs Lens'), findsOneWidget);
@@ -528,7 +545,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Blocked by Grade the cut to the creative look'),
-        findsNothing, reason: 'the park passed its dependencies through');
+        findsNothing,
+        reason: 'the park passed its dependencies through');
     expect(find.textContaining('Blocked by'), findsNothing);
     expect(find.text('Ready'), findsOneWidget,
         reason: 'the delivery step, now unblocked by the park in front of it');
@@ -540,6 +558,90 @@ void main() {
     expect(_stateOf(status, _deliverStep), PipelineStepState.aiComplete);
     expect(_stateOf(status, _lensStep), PipelineStepState.needsLens,
         reason: 'the park is still parked — it was stepped over, not settled');
+  });
+
+  // ---- PARKED (awaiting input) --------------------------------------------
+  //
+  // A park is not a gate. `isGateOpen` covers approve-or-reject, so an
+  // `awaiting_input` step drew a yellow dot, the words "Awaiting input" and NO
+  // affordance whatsoever: the operator went and did the thing the ask named —
+  // confirmed the edit in the NLE — came back, and had no button. The run
+  // wedged, in both gate modes, in the middle of the spine.
+
+  testWidgets('a parked step offers Re-run', (tester) async {
+    final backend = await engine();
+    final vm = await mount(tester, backend: backend, boardId: _flagship);
+    final runId = vm.current.runId;
+
+    backend.scriptEvents([
+      '{"type":"StepStateChanged","run_id":"$runId","step_id":"ws4",'
+          '"state":"awaiting_input","actor":"human"}',
+    ]);
+    await vm.tick();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Awaiting input'), findsWidgets,
+        reason: 'the park must be named');
+    expect(find.byKey(const ValueKey('dashboard.rerun.ws4')), findsOneWidget,
+        reason: 'a parked step must carry the control that resumes it — '
+            'without it the operator does the work and the run stays wedged');
+  });
+
+  test('Re-run resumes from the comment/sense step UPSTREAM when there is one',
+      () async {
+    // D/P-4, and the whole reason rerunParked exists. Re-running the parked
+    // step alone could never see the input the operator had just supplied — it
+    // re-ran the same step and parked again, a same-step no-op loop. Resuming
+    // from the sense step upstream re-READS the source (the comment the
+    // reviewer just left) before the parked step re-dispatches.
+    final backend = _RecordingBackend();
+    await backend.initialize();
+    await backend.addWorkflowStep(_schema, 'Sense the reviewer comments');
+    await backend.addWorkflowStep(_schema, 'Conform the edit');
+    await backend.pipelineCompile(_schema);
+
+    final vm = DashboardController(backend: backend, boardId: _schema);
+    addTearDown(vm.dispose);
+    await vm.hydrate();
+
+    final ids = vm.current.steps.map((s) => s.id).toList();
+    final parkedId = ids.last;
+    final upstreamId = ids[ids.length - 2];
+    expect(vm.current.steps[ids.length - 2].title, contains('comments'),
+        reason: 'the fixture must put the sense step directly upstream');
+
+    await vm.rerunParked(parkedId);
+
+    expect(backend.retried, [upstreamId],
+        reason: 'the resume must start at the sense step, not at the parked '
+            'step — otherwise the new comment is never read');
+  });
+
+  test(
+      'Re-run resumes from the parked step itself when nothing upstream '
+      'senses', () async {
+    // The other half of the rule: an ordinary upstream step is not a source to
+    // re-read, so the resume stays where the park is.
+    final backend = _RecordingBackend();
+    await backend.initialize();
+
+    final vm = DashboardController(backend: backend, boardId: _flagship);
+    addTearDown(vm.dispose);
+    await vm.hydrate();
+
+    final ids = vm.current.steps.map((s) => s.id).toList();
+    final index = ids.indexOf('ws4');
+    expect(index, greaterThan(0));
+    final upstream = vm.current.steps[index - 1];
+    expect(
+        '${upstream.id} ${upstream.title}'.toLowerCase(),
+        isNot(
+            anyOf(contains('comment'), contains('sense'), contains('review'))),
+        reason: 'this fixture must NOT trip the upstream hop');
+
+    await vm.rerunParked('ws4');
+
+    expect(backend.retried, ['ws4']);
   });
 
   testWidgets('golden: dashboard DAG + gated run', (tester) async {

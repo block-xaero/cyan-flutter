@@ -165,7 +165,8 @@ class _Body extends StatelessWidget {
               ],
             ),
           ),
-          const _StatusPill(label: 'Not started', color: MonokaiTheme.textMuted),
+          const _StatusPill(
+              label: 'Not started', color: MonokaiTheme.textMuted),
         ],
       ),
       const SizedBox(height: 16),
@@ -200,6 +201,15 @@ class _Body extends StatelessWidget {
             onReject: () => controller.reject(gate.id),
           ),
       ],
+      if (state.parked.isNotEmpty) ...[
+        const SizedBox(height: 12),
+        for (final step in state.parked)
+          _ParkedCard(
+            step: step,
+            busy: state.busy,
+            onRerun: () => controller.rerunParked(step.id),
+          ),
+      ],
       // The engine's refusal, verbatim ("review gate is waiting on
       // 'producer@studio'"). Loud, never silent — a gate that fails quietly is
       // a gate the operator believes they cleared.
@@ -222,9 +232,8 @@ class _Body extends StatelessWidget {
         _StepRow(
           step: s,
           // What the step is really waiting for, with parks resolved through.
-          blockedBy: s.state == DashboardStepState.pending
-              ? state.blockedBy(s)
-              : null,
+          blockedBy:
+              s.state == DashboardStepState.pending ? state.blockedBy(s) : null,
           // Nothing to show a wait for unless the step is queued.
           showReadiness: s.state == DashboardStepState.pending,
           onRetry: s.state == DashboardStepState.failed
@@ -428,7 +437,11 @@ class _AiSignal extends StatelessWidget {
           'AI running',
           MonokaiTheme.cyan
         ),
-      DashboardStepState.failed => (Icons.cancel, 'AI failed', MonokaiTheme.red),
+      DashboardStepState.failed => (
+          Icons.cancel,
+          'AI failed',
+          MonokaiTheme.red
+        ),
       DashboardStepState.needsLens => (
           Icons.pause_circle_outline,
           'AI parked',
@@ -467,10 +480,11 @@ class _HumanSignal extends StatelessWidget {
       // POLICY cleared gets its own chip — a different word, a different
       // colour, and the evidence-stamped card id on hover — never a generic
       // "Approved", which reads as a person having looked at it.
-      DashboardStepState.approved || DashboardStepState.done => step
-              .isPolicyCleared
-          ? (Icons.airplanemode_active, 'Auto-approved', MonokaiTheme.purple)
-          : (Icons.verified, 'Approved', MonokaiTheme.green),
+      DashboardStepState.approved ||
+      DashboardStepState.done =>
+        step.isPolicyCleared
+            ? (Icons.airplanemode_active, 'Auto-approved', MonokaiTheme.purple)
+            : (Icons.verified, 'Approved', MonokaiTheme.green),
       DashboardStepState.failed => (
           Icons.gpp_bad,
           'Rejected',
@@ -619,6 +633,77 @@ class _GateCard extends StatelessWidget {
   }
 }
 
+/// A step the ENGINE parked because a required input is not there yet — conform
+/// with no confirmed edits is the canonical case, and it sits in the middle of
+/// the spine.
+///
+/// The operator goes and does the thing the ask names (confirms the proposed
+/// edit, leaves the comment), then presses Re-run. Before this card existed a
+/// parked step drew a yellow dot, the words "Awaiting input" and NO affordance
+/// at all: the operator did the work in the NLE and then had no button, so the
+/// run simply wedged — in both gate modes.
+///
+/// Swift reference: `DashboardView.parkedSteps`.
+class _ParkedCard extends StatelessWidget {
+  final DagStep step;
+  final bool busy;
+  final VoidCallback? onRerun;
+
+  const _ParkedCard({
+    required this.step,
+    required this.busy,
+    this.onRerun,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    // What the ask NAMES, when the engine said it — the operator needs to know
+    // which input is missing, not merely that one is.
+    final detail = step.error ?? step.waitingOn;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: MonokaiTheme.yellow.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.hourglass_empty,
+              size: 16, color: MonokaiTheme.yellow),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Awaiting input',
+                    style: MonokaiTheme.labelMedium
+                        .copyWith(color: MonokaiTheme.yellow)),
+                const SizedBox(height: 2),
+                Text(step.title,
+                    style: MonokaiTheme.bodyMedium
+                        .copyWith(color: MonokaiTheme.foreground)),
+                if (detail != null) ...[
+                  const SizedBox(height: 2),
+                  Text(detail, style: MonokaiTheme.labelSmall),
+                ],
+              ],
+            ),
+          ),
+          _GateButton(
+            key: ValueKey('dashboard.rerun.${step.id}'),
+            label: 'Re-run',
+            color: MonokaiTheme.yellow,
+            filled: true,
+            onTap: busy ? null : onRerun,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _GateButton extends StatelessWidget {
   final String label;
   final Color color;
@@ -648,8 +733,8 @@ class _GateButton extends StatelessWidget {
             border: Border.all(color: color),
           ),
           child: Text(label,
-              style: MonokaiTheme.labelMedium.copyWith(
-                  color: filled ? MonokaiTheme.background : color)),
+              style: MonokaiTheme.labelMedium
+                  .copyWith(color: filled ? MonokaiTheme.background : color)),
         ),
       ),
     );
@@ -780,8 +865,7 @@ class _StepRow extends StatelessWidget {
               color: MonokaiTheme.surface,
               borderRadius: BorderRadius.circular(4),
             ),
-            child: Text(
-                step.actor == DashboardStepActor.human ? 'Human' : 'AI',
+            child: Text(step.actor == DashboardStepActor.human ? 'Human' : 'AI',
                 style: MonokaiTheme.labelSmall),
           ),
         ],
@@ -855,13 +939,11 @@ class _Totals extends StatelessWidget {
           Row(
             children: [
               _Meter(
-                  label: 'Wall',
-                  value: '${t.wallMinutes.toStringAsFixed(1)}m'),
+                  label: 'Wall', value: '${t.wallMinutes.toStringAsFixed(1)}m'),
               _Meter(
                   label: 'Human',
                   value: '${t.humanMinutes.toStringAsFixed(1)}m'),
-              _Meter(
-                  label: 'AI', value: '${t.aiMinutes.toStringAsFixed(1)}m'),
+              _Meter(label: 'AI', value: '${t.aiMinutes.toStringAsFixed(1)}m'),
               _Meter(label: 'Files', value: '${t.filesProcessed}'),
               _Meter(
                   label: 'Est. cost',

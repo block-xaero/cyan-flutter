@@ -132,9 +132,10 @@ class DagStep {
       state == DashboardStepState.needsLens;
 
   /// "3 / 10" once the engine reports counts, else null.
-  String? get progressLabel => (processed != null && total != null && total! > 0)
-      ? '$processed / $total'
-      : null;
+  String? get progressLabel =>
+      (processed != null && total != null && total! > 0)
+          ? '$processed / $total'
+          : null;
 
   /// How the step list spells this state (Swift's per-state chip).
   String get stateLabel => switch (state) {
@@ -266,7 +267,8 @@ class DashboardState {
         currentStage: currentStage ?? this.currentStage,
         itemsProcessed: itemsProcessed ?? this.itemsProcessed,
         itemsTotal: itemsTotal ?? this.itemsTotal,
-        gateMessage: clearGateMessage ? null : (gateMessage ?? this.gateMessage),
+        gateMessage:
+            clearGateMessage ? null : (gateMessage ?? this.gateMessage),
         error: clearError ? null : (error ?? this.error),
         busy: busy ?? this.busy,
         droppedFrames: droppedFrames ?? this.droppedFrames,
@@ -277,7 +279,20 @@ class DashboardState {
   /// on this list too (`isGateOpen`): the KEYSTONE finding was a lens-parked
   /// editorial step with no human override anywhere, which wedged the whole
   /// chain behind it. It is an action item, so it joins the action list.
-  List<DagStep> get gates => [for (final s in steps) if (s.isGateOpen) s];
+  List<DagStep> get gates => [
+        for (final s in steps)
+          if (s.isGateOpen) s
+      ];
+
+  /// The steps the ENGINE parked for want of an input — conform with no
+  /// confirmed edits is the canonical one, and it sits in the middle of the
+  /// spine. Deliberately NOT folded into [gates]: a gate is approve-or-reject,
+  /// while a park is "go and do the thing, then resume", so it needs its own
+  /// affordance rather than an Approve button that would decide nothing.
+  List<DagStep> get parked => [
+        for (final s in steps)
+          if (s.state == DashboardStepState.awaitingInput) s
+      ];
 
   DagStep? stepById(String id) {
     for (final s in steps) {
@@ -581,6 +596,32 @@ class DashboardController extends StateNotifier<DashboardState> {
       final ok = await backend.pipelineRetry(boardId, stepId);
       return ok ? null : 'the engine refused to retry this step';
     });
+  }
+
+  /// Re-run a PARKED (awaiting-input) step.
+  ///
+  /// When the step directly upstream is the comment/sense step, the run resumes
+  /// from THERE, so a comment the reviewer just left is re-read fresh before the
+  /// parked step re-dispatches. Anything else resumes from the parked step
+  /// itself. Without the hop, Re-run only re-ran the current step and could
+  /// never see the new input the operator had just supplied — a same-step no-op
+  /// loop, and the reason this exists at all.
+  ///
+  /// Port of `DashboardViewModel.rerunParked` (D/P-4), matched keyword for
+  /// keyword so the two apps resume from the same place.
+  Future<void> rerunParked(String stepId) async {
+    final index = state.steps.indexWhere((s) => s.id == stepId);
+    var target = stepId;
+    if (index > 0) {
+      final upstream = state.steps[index - 1];
+      final hay = '${upstream.id} ${upstream.title}'.toLowerCase();
+      if (hay.contains('comment') ||
+          hay.contains('sense') ||
+          hay.contains('review')) {
+        target = upstream.id;
+      }
+    }
+    await retry(target);
   }
 
   /// The shared gate-write body: guard, write, surface a refusal, else resume
