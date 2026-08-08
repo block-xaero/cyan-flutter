@@ -130,13 +130,17 @@ class ParityHomeShell extends ConsumerWidget {
     };
   }
 
-  /// The membership role of the verified session, or null when there is no
-  /// session at all. Null and empty are the same fact here — no session means
-  /// no role — and the gate locks on both, which is the honest reading.
-  static String? _sessionRole(WidgetRef ref) {
-    final role = ref.watch(onboardingSessionProvider).role;
-    return role.isEmpty ? null : role;
-  }
+  /// The membership role of the verified session, spelled the way the gates
+  /// expect, or null when there is no session.
+  ///
+  /// Routed through the TYPED role rather than handing the raw session string
+  /// on, so a backend that answers "Owner" and one that answers "owner" reach
+  /// the gate identically, and a spelling outside the fixed vocabulary denies
+  /// instead of being compared as text. No session still means no role, and the
+  /// gate still locks — that was always honest. What was wrong was locking an
+  /// owner too.
+  static String? _sessionRole(WidgetRef ref) =>
+      ref.watch(sessionRoleProvider)?.wireValue;
 }
 
 /// The signed-in identity at the gutter's far right — the SwiftUI status bar's

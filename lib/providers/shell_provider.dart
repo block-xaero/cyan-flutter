@@ -16,7 +16,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ffi/parity_models.dart';
+import '../models/identity_role.dart';
 import 'cyan_backend_provider.dart';
+import 'onboarding_session_provider.dart';
 
 /// The five doors the rail advertises — the surfaces behind the SwiftUI
 /// workspace's navigation modes.
@@ -53,6 +55,20 @@ final shellDoorProvider = StateProvider<ShellDoor>((ref) => ShellDoor.explorer);
 /// It holds an id, not a board: the cube re-reads the board through the seam,
 /// so a board renamed or re-faced elsewhere is not stale here.
 final selectedBoardProvider = StateProvider<String?>((ref) => null);
+
+/// The signed-in session's RBAC role, typed, or null when there is no session.
+///
+/// One source, so every gate in the app answers the same question the same way
+/// — `authorize(action, role)` — instead of each surface re-deriving authority
+/// from a raw string. The engine and the lens re-check at every door, so this
+/// decides what the UI SHOWS and never what the server allows.
+///
+/// The decode is deliberately strict: a spelling outside the fixed vocabulary
+/// resolves to null, which denies. Guessing would be how a viewer silently
+/// becomes an admin.
+final sessionRoleProvider = Provider<Role?>((ref) {
+  return roleFromWire(ref.watch(onboardingSessionProvider).role);
+});
 
 /// The GROUP the operator is currently standing in.
 ///
