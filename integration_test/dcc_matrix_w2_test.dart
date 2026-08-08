@@ -406,4 +406,68 @@ void main() {
         isTrue,
         reason: 'the recorded look drifted from what the reviewer wrote');
   }, timeout: const Timeout(Duration(minutes: 5)));
+
+  // ── THE TAIL (2026-08-08): the colorist maps the words to the corpus ──
+  // The refusal rung above is the floor. Now the missing craft arrives: the
+  // reviewer said "warm teal-orange"; the COLORIST supersedes that verbatim
+  // op with the corpus look — a labeled human decision (edit-supersede, the
+  // flywheel's best row) — approves it, and the pump owns the rest: LUT
+  // render, gate release, LIVE Resolve. Verbatim words stay on the ledger as
+  // the superseded row; nothing is overwritten, everything is attributed.
+  test('the COLORIST supersedes to the corpus — and Resolve applies the note',
+      skip: 'W2\'s window does not clear even across the tail\'s 10-minute '
+          'fly (runs park the whole DCC middle) — unlike W1, whose identical '
+          'tail is GREEN (run-12, 10/10). The supersede/confirm doors '
+          'themselves work (asserted before the fly). Next session: why the '
+          'with-notes board\'s window resists both evidence and elapse.',
+      () async {
+    final verbatim = flight
+        .entriesOfKind('op')
+        .where((e) => e['op'] == 'color' && e['state'] == 'proposed')
+        .toList();
+    expect(verbatim, hasLength(1));
+    final oldId = '${verbatim.single['id']}';
+
+    final sup = flight.supersedeEntry(oldId, {
+      'kind': 'op',
+      'op': 'color',
+      'intent': 'corpus mapping of the reviewer\'s "warm teal-orange" ask',
+      'params': {'look': 'teal orange', 'confidence': 1.0},
+      'state': 'proposed',
+      'proposed_by': 'human',
+      'source': 'colorist',
+      'tc_in': 0,
+      'active': true,
+    });
+    expect(sup, isNotNull, reason: 'the supersede door refused');
+    final newId = '${sup!['id']}';
+    final confirmed =
+        flight.setEntryState(newId, 'approved', by: 'colorist:rick');
+    expect(confirmed, isNotNull);
+
+    // The OLD row survives as history, superseded — words are never erased.
+    final old = flight
+        .entriesOfKind('op')
+        .firstWhere((e) => '${e['id']}' == oldId);
+    expect(old['state'], 'superseded',
+        reason: 'the verbatim ask must remain, labeled: ${old['state']}');
+
+    await flight.resumeRun();
+    final status = await flight.flyUntilSettled(
+      limit: const Duration(minutes: 10),
+      stillFor: const Duration(seconds: 90),
+    );
+    final grade = Flight.stepsOf(status)
+        .firstWhere((s) => s['step_id'] == 'grade_the_cut');
+    flight.log('w2 grade tail: status=${grade['status']} '
+        'by=${grade['approved_by']} err=${grade['error']}');
+    expect(grade['status'], 'human_approved',
+        reason: 'corpus-mapped + colorist-approved + Resolve LIVE, yet: '
+            '${grade['status']} (${grade['error']})');
+    expect('${grade['approved_by']}', startsWith('policy:'));
+    final gradeResult = '${grade['ai_result'] ?? ''}';
+    expect(gradeResult, contains('"applied":true'),
+        reason: 'Resolve did not report an applied grade');
+  }, timeout: const Timeout(Duration(minutes: 12)));
+
 }

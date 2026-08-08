@@ -451,6 +451,36 @@ class Flight {
     return decoded is Map<String, dynamic> ? decoded : null;
   }
 
+  /// The EDIT-SUPERSEDE door: the colorist maps a reviewer's verbatim words
+  /// onto the closed corpus — a labeled human decision, the flywheel's best
+  /// training row. Rides the shipping `supersede` dispatch: the old entry's
+  /// lifecycle flips to superseded, the new one lands with its own identity.
+  Map<String, dynamic>? supersedeEntry(
+      String oldEntryId, Map<String, dynamic> entry) {
+    final env = reviewEnvelope();
+    if (env == null) return null;
+    final full = <String, dynamic>{
+      'id': '',
+      'entry_hash': '',
+      'created_at': 0,
+      'seq': 0,
+      'asset_hash': env['asset_hash'],
+      'tenant_id': groupId,
+      'branch': env['branch'] ?? 'main',
+      ...entry,
+    };
+    final raw = CyanFFI.changelistCommand(jsonEncode({
+      'op': 'supersede',
+      'tenant_id': groupId,
+      'old_entry_id': oldEntryId,
+      'entry': full,
+    }));
+    log('ledger supersede $oldEntryId: $raw');
+    if (raw == null) return null;
+    final decoded = jsonDecode(raw);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  }
+
   /// The HUMAN confirm door on one ledger entry (`set_state` with `by:`) —
   /// how a colorist approves the colour op the policy card refuses to touch
   /// (AUTO-1). The state change rides the SAME shipping verb the player's
