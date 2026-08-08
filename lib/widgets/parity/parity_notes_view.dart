@@ -16,9 +16,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../models/notes_face_mode.dart';
 import '../../providers/cyan_backend_provider.dart';
 import '../../providers/notes_editor_controller.dart';
 import '../../theme/monokai_theme.dart';
+import 'parity_constitution_editor.dart';
 import 'parity_notes_ledger.dart';
 
 /// The ledger column's width — Swift pins its panel to a fixed 260pt beside the
@@ -65,6 +67,10 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
   bool _ownsEditor = false;
   bool _mountedOnce = false;
   NotesEditorState _state = const NotesEditorState();
+
+  /// Which mode the face is in. Opens on the document, like Swift's
+  /// `@State private var notesMode: NotesFaceMode = .editor`.
+  NotesFaceMode _mode = NotesFaceMode.editor;
 
   @override
   void initState() {
@@ -126,7 +132,8 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
     if (!_state.hydrated) {
       return const Material(
         color: MonokaiTheme.background,
-        child: Center(child: CircularProgressIndicator(color: MonokaiTheme.cyan)),
+        child:
+            Center(child: CircularProgressIndicator(color: MonokaiTheme.cyan)),
       );
     }
     return Material(
@@ -145,31 +152,42 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
                       .copyWith(color: MonokaiTheme.red)),
             ),
           Expanded(
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Expanded(
-                  child: Column(
+            // The CONSTITUTION replaces the editor body, exactly as Swift's
+            // `notesMode == .constitution` branch does — the house rules are a
+            // mode of the notes face, not a separate screen, because they are
+            // the other half of the same question: where does this board get
+            // its arguments when the reviewer left nothing?
+            child: _mode == NotesFaceMode.constitution
+                ? ParityConstitutionEditor(boardId: widget.boardId)
+                : Row(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // A2: the review conversation the board already has,
-                      // above the document. It exists only when a reviewer has
-                      // actually left something.
-                      if (_state.reviewNotes.isNotEmpty) _reviewRail(),
-                      Expanded(child: _editorBody()),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            // A2: the review conversation the board already
+                            // has, above the document. It exists only when a
+                            // reviewer has actually left something.
+                            if (_state.reviewNotes.isNotEmpty) _reviewRail(),
+                            Expanded(child: _editorBody()),
+                          ],
+                        ),
+                      ),
+                      const VerticalDivider(
+                          width: 1, color: MonokaiTheme.divider),
+                      SizedBox(
+                        width: _ledgerWidth,
+                        child: ParityNotesLedger(boardId: widget.boardId),
+                      ),
                     ],
                   ),
-                ),
-                const VerticalDivider(width: 1, color: MonokaiTheme.divider),
-                SizedBox(
-                  width: _ledgerWidth,
-                  child: ParityNotesLedger(boardId: widget.boardId),
-                ),
-              ],
-            ),
           ),
           const Divider(height: 1, color: MonokaiTheme.divider),
-          _statusBar(),
+          // The status bar reports the DOCUMENT (line, column, word count), so
+          // it belongs to the editor mode and would be meaningless over the
+          // constitution.
+          if (_mode != NotesFaceMode.constitution) _statusBar(),
         ],
       ),
     );
@@ -188,6 +206,13 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
       color: MonokaiTheme.surface,
       child: Row(
         children: [
+          // The mode picker — Swift's `notes.mode.picker`. Every route to the
+          // house rules goes through it.
+          _ModePicker(
+            mode: _mode,
+            onSelect: (m) => setState(() => _mode = m),
+          ),
+          const SizedBox(width: 12),
           const Icon(Icons.description, size: 13, color: MonokaiTheme.green),
           const SizedBox(width: 8),
           Text(_state.fileName,
@@ -239,9 +264,8 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
               onTap: _state.dirty ? _editor.save : null,
               child: Icon(Icons.save_alt,
                   size: 14,
-                  color: _state.dirty
-                      ? MonokaiTheme.cyan
-                      : MonokaiTheme.comment),
+                  color:
+                      _state.dirty ? MonokaiTheme.cyan : MonokaiTheme.comment),
             ),
           ),
         ],
@@ -339,7 +363,8 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
             const VerticalDivider(width: 1, color: MonokaiTheme.divider),
             Expanded(
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                 child: TextField(
                   key: const ValueKey('notes-editor'),
                   controller: _text,
@@ -388,6 +413,64 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
           Text('UTF-8',
               style:
                   MonokaiTheme.codeSmall.copyWith(color: MonokaiTheme.comment)),
+        ],
+      ),
+    );
+  }
+}
+
+/// The Notes face's mode picker — Swift's segmented `notes.mode.picker`.
+///
+/// Only the modes that have a lane behind them are offered. `Structure` is a
+/// real Swift segment but its surface is lens HTTP (`POST /api/v1/notes/
+/// structure`) and the `LensApi` seam carries no such method yet, so drawing it
+/// would be a control that does nothing — which this port has already decided
+/// in writing is worse than no control.
+class _ModePicker extends StatelessWidget {
+  final NotesFaceMode mode;
+  final ValueChanged<NotesFaceMode> onSelect;
+
+  const _ModePicker({required this.mode, required this.onSelect});
+
+  static const List<NotesFaceMode> _offered = [
+    NotesFaceMode.editor,
+    NotesFaceMode.constitution,
+  ];
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      key: const ValueKey('notes.mode.picker'),
+      decoration: BoxDecoration(
+        color: MonokaiTheme.background,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: MonokaiTheme.divider),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          for (final m in _offered)
+            GestureDetector(
+              key: ValueKey(m.segmentKey),
+              onTap: () => onSelect(m),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: m == mode
+                      ? MonokaiTheme.cyan.withValues(alpha: 0.16)
+                      : Colors.transparent,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: Text(
+                  m.label,
+                  style: MonokaiTheme.labelSmall.copyWith(
+                    color:
+                        m == mode ? MonokaiTheme.cyan : MonokaiTheme.textMuted,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
