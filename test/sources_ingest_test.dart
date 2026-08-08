@@ -19,6 +19,7 @@ import 'package:cyan_flutter/ffi/fake_cyan_backend.dart';
 import 'package:cyan_flutter/ffi/parity_models.dart';
 import 'package:cyan_flutter/providers/ingest_sources_controller.dart';
 import 'package:cyan_flutter/widgets/parity/parity_sources_sheet.dart';
+import 'package:cyan_flutter/widgets/parity/parity_workflow_view.dart';
 
 import 'support/parity_test_harness.dart';
 
@@ -65,8 +66,7 @@ void main() {
     expect(find.text('No sources yet'), findsOneWidget);
 
     // Point it at a watched folder, on a 15-minute cadence.
-    await tester.enterText(
-        find.byKey(const Key('sources.add.uri')), _watched);
+    await tester.enterText(find.byKey(const Key('sources.add.uri')), _watched);
     await tester.pump();
     await tester.tap(find.text('Every 15 minutes'));
     await tester.pump();
@@ -81,9 +81,11 @@ void main() {
         findsOneWidget);
 
     // The form resets, so the next add starts clean rather than re-submitting.
-    expect(tester.widget<TextField>(find.byKey(const Key('sources.add.uri')))
-        .controller!
-        .text,
+    expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('sources.add.uri')))
+            .controller!
+            .text,
         isEmpty);
 
     // The ENGINE holds it, attached to THIS board inside THIS tenant — the row
@@ -187,11 +189,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('never scanned'), findsNothing);
-    expect(find.textContaining('frameio_c2c · manual · scanned'),
-        findsOneWidget);
+    expect(
+        find.textContaining('frameio_c2c · manual · scanned'), findsOneWidget);
   });
 
-  testWidgets('a scan that finds nothing reports that rather than failing '
+  testWidgets(
+      'a scan that finds nothing reports that rather than failing '
       'silently', (tester) async {
     final backend = FakeCyanBackend();
     final sourceId = await _seedSource(backend);
@@ -240,8 +243,8 @@ void main() {
     final container = ProviderScope.containerOf(
         tester.element(find.byType(ParitySourcesSheet)));
     await container
-        .read(ingestSourcesProvider(
-                (boardId: 'b-eng-1', tenantId: 'g-eng')).notifier)
+        .read(ingestSourcesProvider((boardId: 'b-eng-1', tenantId: 'g-eng'))
+            .notifier)
         .tick();
     await tester.pumpAndSettle();
 
@@ -295,11 +298,11 @@ void main() {
 
     final banner = find.byKey(const Key('sources.error.banner'));
     expect(banner, findsOneWidget);
-    expect(find.textContaining("no ingest_source 'src-eng-c2c'"),
-        findsOneWidget);
+    expect(
+        find.textContaining("no ingest_source 'src-eng-c2c'"), findsOneWidget);
 
-    await tester.tap(
-        find.descendant(of: banner, matching: find.byIcon(Icons.close)));
+    await tester
+        .tap(find.descendant(of: banner, matching: find.byIcon(Icons.close)));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('sources.error.banner')), findsNothing);
   });
@@ -337,11 +340,65 @@ void main() {
     expect(
         ingestLastScanLabel(now.subtract(const Duration(minutes: 7)), now: now),
         'scanned 7m ago');
-    expect(ingestLastScanLabel(now.subtract(const Duration(hours: 5)), now: now),
+    expect(
+        ingestLastScanLabel(now.subtract(const Duration(hours: 5)), now: now),
         'scanned 5h ago');
     expect(ingestLastScanLabel(now.subtract(const Duration(days: 3)), now: now),
         'scanned 3d ago');
     expect(ingestLastScanLabel(DateTime.utc(2026, 1, 9), now: now),
         'scanned on 2026-01-09');
+  });
+
+  // ---- REACHABILITY --------------------------------------------------------
+  //
+  // Everything above proves the sheet WORKS. None of it proved an operator
+  // could open it: `ParitySourcesSheet` had no construction site anywhere in
+  // lib/, so ingest — the spine's first station — had no door, and the whole
+  // sheet was as unreachable as it was correct. Swift puts that door on the
+  // Workflow toolbar (`WorkflowView.swift:378-389`), and so does this.
+
+  testWidgets('the Workflow face has a Sources door that opens the sheet',
+      (tester) async {
+    await pumpParity(
+      tester,
+      const ParityWorkflowView(boardId: 'b-eng-1'),
+      size: const Size(1280, 800),
+    );
+
+    final door = find.byKey(const ValueKey('workflow.sources'));
+    expect(door, findsOneWidget,
+        reason: 'the Workflow toolbar must carry the Sources door — without '
+            'it no master is ever addressable and the spine cannot start');
+    expect(find.byType(ParitySourcesSheet), findsNothing);
+
+    await tester.tap(door);
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ParitySourcesSheet), findsOneWidget,
+        reason: 'tapping Sources must present the ingest sheet');
+  });
+
+  testWidgets('the Sources door carries the board\'s OWN tenant, not a default',
+      (tester) async {
+    await pumpParity(
+      tester,
+      const ParityWorkflowView(boardId: 'b-eng-1'),
+      size: const Size(1280, 800),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('workflow.sources')));
+    await tester.pumpAndSettle();
+
+    final sheet =
+        tester.widget<ParitySourcesSheet>(find.byType(ParitySourcesSheet));
+    expect(sheet.boardId, 'b-eng-1');
+
+    // The tenant is resolved from the board's group through the seam. Every
+    // ingest verb carries the tenant boundary, so a defaulted one would point a
+    // sensor at the wrong group — the one failure this door must not have.
+    final boards = await FakeCyanBackend().loadAllBoards();
+    final expected = boards.firstWhere((b) => b.board.id == 'b-eng-1').group.id;
+    expect(sheet.tenantId, expected,
+        reason: 'the sheet must be handed the board\'s real group id');
   });
 }

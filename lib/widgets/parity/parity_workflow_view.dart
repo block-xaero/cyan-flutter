@@ -32,6 +32,7 @@ import '../../ffi/parity_models.dart';
 import '../../providers/cyan_backend_provider.dart';
 import '../../providers/workflow_authoring_provider.dart';
 import '../../theme/monokai_theme.dart';
+import 'parity_sources_sheet.dart';
 import 'parity_template_picker.dart';
 
 /// The composer's own picker. Step rows key theirs by step id, so one field can
@@ -203,9 +204,7 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
       _status = ack.accepted
           ? 'Compiled — the plan below is what a run would walk.'
           : null;
-      _error = ack.accepted
-          ? null
-          : (ack.error ?? 'The compile was refused.');
+      _error = ack.accepted ? null : (ack.error ?? 'The compile was refused.');
     });
   }
 
@@ -256,6 +255,52 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
     );
     if (!mounted) return;
     ref.invalidate(boardWorkflowProvider(widget.boardId));
+  }
+
+  // ---- sources (ingest) ----------------------------------------------------
+
+  /// The watched-folder / S3 / Frame.io C2C sensors, presented the way Swift
+  /// presents `SourcesSheet` — from the Workflow face, over the board whose
+  /// template every ingested asset materializes a run of.
+  ///
+  /// This is the FIRST station of the spine: until a source is pointed at and
+  /// scanned, no master is addressable and conform / colour / delivery have
+  /// nothing to work on.
+  ///
+  /// The tenant is RESOLVED, never assumed. Every ingest verb carries the group
+  /// boundary, so a board whose group cannot be read gets an error rather than
+  /// a default tenant — pointing a sensor at the wrong group is worse than not
+  /// opening the sheet.
+  Future<void> _openSources() async {
+    final boards = await ref.read(allBoardsProvider.future);
+    if (!mounted) return;
+
+    final entry = boards.where((b) => b.board.id == widget.boardId).firstOrNull;
+    if (entry == null) {
+      setState(() {
+        _error = 'Cannot open Sources: this board has no group on the seam, '
+            'and every ingest verb carries the tenant boundary.';
+        _status = null;
+      });
+      return;
+    }
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: MonokaiTheme.background,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+        child: SizedBox(
+          width: 620,
+          height: 560,
+          child: ParitySourcesSheet(
+            boardId: widget.boardId,
+            tenantId: entry.group.id,
+            onClose: () => Navigator.of(dialogContext).pop(),
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _reset() async {
@@ -374,8 +419,7 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
         ),
         error: (e, _) => Center(
           child: Text('Failed to load workflow: $e',
-              style:
-                  MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
+              style: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
         ),
         data: (wf) => Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -386,6 +430,7 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
               onReview: _review,
               onReset: _reset,
               onTemplates: _openTemplates,
+              onSources: _openSources,
               autopilotMode: _autopilot,
               onSetAutopilot: _setAutopilot,
             ),
@@ -409,8 +454,7 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
                         return _StepRow(
                           index: i + 1,
                           step: step,
-                          picker:
-                              _picker?.field == step.id ? _picker : null,
+                          picker: _picker?.field == step.id ? _picker : null,
                           onPickPlugin: () => _pickPluginFor(step),
                           onAccept: (entry) => _bindStep(step, entry),
                         );
@@ -442,8 +486,8 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
         ),
         error: (e, _) => Center(
           child: Text('Failed to read the plan: $e',
-              style: MonokaiTheme.labelMedium
-                  .copyWith(color: MonokaiTheme.red)),
+              style:
+                  MonokaiTheme.labelMedium.copyWith(color: MonokaiTheme.red)),
         ),
         data: (plan) => _PlanPreview(
           plan: plan,
@@ -469,8 +513,8 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
               children: [
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
-                  child:
-                      Icon(Icons.add_circle, size: 18, color: MonokaiTheme.cyan),
+                  child: Icon(Icons.add_circle,
+                      size: 18, color: MonokaiTheme.cyan),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -597,8 +641,8 @@ class _AutocompletePanel extends StatelessWidget {
               onTap: () => onAccept(entry),
               behavior: HitTestBehavior.opaque,
               child: Padding(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 7),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 7),
                 child: Row(
                   children: [
                     Text(entry.trigger,
@@ -693,12 +737,16 @@ class _Toolbar extends StatelessWidget {
   final String autopilotMode;
   final void Function(String mode)? onSetAutopilot;
 
+  /// Opening the ingest sensors — the spine's first station.
+  final VoidCallback? onSources;
+
   const _Toolbar({
     required this.workflow,
     this.onRun,
     this.onReview,
     this.onReset,
     this.onTemplates,
+    this.onSources,
     this.autopilotMode = 'off',
     this.onSetAutopilot,
   });
@@ -714,48 +762,74 @@ class _Toolbar extends StatelessWidget {
           const Icon(Icons.account_tree, size: 18, color: MonokaiTheme.cyan),
           const SizedBox(width: 10),
           Text('Workflow', style: MonokaiTheme.titleSmall),
-          const Spacer(),
-          _ToolButton(
-            key: const ValueKey('workflow.templates'),
-            icon: Icons.grid_view,
-            label: 'Templates',
-            tint: MonokaiTheme.purple,
-            enabled: !locked,
-            onTap: onTemplates,
-          ),
-          const SizedBox(width: 8),
-          _ToolButton(
-            icon: Icons.auto_fix_high,
-            label: 'Review',
-            tint: MonokaiTheme.cyan,
-            enabled: hasSteps && !locked,
-            onTap: onReview,
-          ),
-          const SizedBox(width: 8),
-          _ToolButton(
-            icon: Icons.play_arrow,
-            label: 'Run',
-            tint: MonokaiTheme.green,
-            enabled: hasSteps,
-            onTap: onRun,
-          ),
-          const SizedBox(width: 8),
-          _AutopilotControl(mode: autopilotMode, onSet: onSetAutopilot),
-          const SizedBox(width: 8),
-          _ToolButton(
-            icon: locked ? Icons.lock_open : Icons.lock,
-            label: locked ? 'Unlock' : 'Deploy',
-            tint: MonokaiTheme.purple,
-            enabled: hasSteps,
-            onTap: null,
-          ),
-          const SizedBox(width: 8),
-          _ToolButton(
-            icon: Icons.refresh,
-            label: 'Reset',
-            tint: MonokaiTheme.textMuted,
-            enabled: hasSteps && !locked,
-            onTap: onReset,
+          const SizedBox(width: 16),
+          // The action cluster SCROLLS rather than clips. Seven controls do not
+          // fit a narrow window, and a toolbar that throws a RenderFlex — or
+          // silently hides Deploy behind the edge — is worse than one the
+          // operator can nudge. `reverse` keeps it right-aligned like the
+          // Spacer it replaced, so the rightmost actions are the ones always in
+          // view.
+          Expanded(
+            child: SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              reverse: true,
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                _ToolButton(
+                  key: const ValueKey('workflow.sources'),
+                  icon: Icons.sensors,
+                  label: 'Sources',
+                  tint: MonokaiTheme.orange,
+                  // Ingest is how work ARRIVES, so it stays reachable on a board with
+                  // no steps yet — and on a deployed one, where new media still has
+                  // to materialize runs.
+                  enabled: true,
+                  onTap: onSources,
+                ),
+                const SizedBox(width: 8),
+                _ToolButton(
+                  key: const ValueKey('workflow.templates'),
+                  icon: Icons.grid_view,
+                  label: 'Templates',
+                  tint: MonokaiTheme.purple,
+                  enabled: !locked,
+                  onTap: onTemplates,
+                ),
+                const SizedBox(width: 8),
+                _ToolButton(
+                  icon: Icons.auto_fix_high,
+                  label: 'Review',
+                  tint: MonokaiTheme.cyan,
+                  enabled: hasSteps && !locked,
+                  onTap: onReview,
+                ),
+                const SizedBox(width: 8),
+                _ToolButton(
+                  icon: Icons.play_arrow,
+                  label: 'Run',
+                  tint: MonokaiTheme.green,
+                  enabled: hasSteps,
+                  onTap: onRun,
+                ),
+                const SizedBox(width: 8),
+                _AutopilotControl(mode: autopilotMode, onSet: onSetAutopilot),
+                const SizedBox(width: 8),
+                _ToolButton(
+                  icon: locked ? Icons.lock_open : Icons.lock,
+                  label: locked ? 'Unlock' : 'Deploy',
+                  tint: MonokaiTheme.purple,
+                  enabled: hasSteps,
+                  onTap: null,
+                ),
+                const SizedBox(width: 8),
+                _ToolButton(
+                  icon: Icons.refresh,
+                  label: 'Reset',
+                  tint: MonokaiTheme.textMuted,
+                  enabled: hasSteps && !locked,
+                  onTap: onReset,
+                ),
+              ]),
+            ),
           ),
         ],
       ),
@@ -1004,11 +1078,13 @@ class _StepRow extends StatelessWidget {
       out.add(_chip(Icons.tag, b, MonokaiTheme.green));
     }
     if (s.destination != null) {
-      out.add(_chip(Icons.send, 'send to ${s.destination}', MonokaiTheme.purple));
+      out.add(
+          _chip(Icons.send, 'send to ${s.destination}', MonokaiTheme.purple));
     }
     switch (s.gate) {
       case StepGate.needsApproval:
-        out.add(_chip(Icons.pan_tool, 'Awaiting approval', MonokaiTheme.yellow));
+        out.add(
+            _chip(Icons.pan_tool, 'Awaiting approval', MonokaiTheme.yellow));
       case StepGate.noApproval:
         out.add(_chip(Icons.bolt, 'No approval needed', MonokaiTheme.green));
       case null:
@@ -1081,8 +1157,7 @@ class _AmbiguityPrompt extends StatelessWidget {
             key: ValueKey('workflow.step.pickPlugin.${step.id}'),
             onTap: onPickPlugin,
             child: Container(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
               decoration: BoxDecoration(
                 color: MonokaiTheme.orange.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(6),
@@ -1131,8 +1206,7 @@ class _PlanPreview extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Padding(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
             child: Row(
               children: [
                 const Icon(Icons.hub, size: 14, color: MonokaiTheme.cyan),
@@ -1197,7 +1271,10 @@ class _PlanPreview extends StatelessWidget {
   static List<List<PipelineStep>> _layers(List<PipelineStep> steps) {
     final layers = <List<PipelineStep>>[];
     final assigned = <String>{};
-    var current = [for (final s in steps) if (s.dependsOn.isEmpty) s];
+    var current = [
+      for (final s in steps)
+        if (s.dependsOn.isEmpty) s
+    ];
 
     while (current.isNotEmpty) {
       layers.add(current);
@@ -1326,8 +1403,7 @@ class _ConnectorPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ConnectorPainter old) =>
-      old.from != from || old.to != to;
+  bool shouldRepaint(_ConnectorPainter old) => old.from != from || old.to != to;
 }
 
 class _EmptyState extends StatelessWidget {
