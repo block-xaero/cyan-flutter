@@ -186,7 +186,7 @@ void main() {
       'op': 'color',
       'intent': 'warm the endcard toward the house look',
       'params': {
-        'look': 'warm-teal-orange',
+        'look': 'teal orange',
         // Deliberately ABOVE the batch floor: the refusal must come from the
         // op-class not being on the card, not from a low number. A card that
         // cleared this because the confidence was high would be the §8 color
@@ -265,7 +265,7 @@ void main() {
       // walk stalls on the held window (§7.3), and the normative gates below
       // are non-negotiable. A park is a park at 90s or at 5min; what changes
       // is whether GATE 1 and GATE 2 ever get to run.
-      stillFor: const Duration(seconds: 90),
+      stillFor: const Duration(seconds: 150),
       onTick: producerSpeaks,
     );
     flight.log('producer comment posted=$commented file=$producerFileId '
@@ -418,4 +418,74 @@ void main() {
       }
     }
   }, timeout: const Timeout(Duration(minutes: 5)));
+
+  // ── THE TAIL (2026-08-08, Rick's mandate: the full colour back-and-forth) ──
+  // AUTO-1 held above: the colour op sat PROPOSED and no cube was invented.
+  // Now the missing actor arrives — a COLORIST. The human confirm rides the
+  // same shipping set_state door the player rides; the pump then owns the
+  // rest: the LUT renders from the CONFIRMED op, the grade gate releases
+  // once (mention on the card), and LIVE DaVinci Resolve applies the cube.
+  // The invariant under test: the HUMAN approves the colour; the POLICY
+  // clears the gate — two different doors, two different stamps, and the
+  // ledger keeps them apart.
+  test('the COLORIST confirms — the LUT renders and LIVE Resolve applies it',
+      () async {
+    final color = flight
+        .entriesOfKind('op')
+        .where((e) => e['op'] == 'color')
+        .toList();
+    expect(color, hasLength(1), reason: 'the AUTO-1 rung pinned exactly one');
+    final entryId = '${color.single['id']}';
+
+    final confirmed =
+        flight.setEntryState(entryId, 'approved', by: 'colorist:rick');
+    expect(confirmed, isNotNull, reason: 'the set_state door refused');
+    final after = flight
+        .entriesOfKind('op')
+        .firstWhere((e) => '${e['id']}' == entryId);
+    expect(after['state'], 'approved');
+    expect('${after['approved_by']}', contains('colorist'),
+        reason: 'a HUMAN approved the colour — the ledger must name them, '
+            'never a policy card (AUTO-1 is about who may not, not who may)');
+
+    await flight.resumeRun();
+    final status = await flight.flyUntilSettled(
+      limit: const Duration(minutes: 10),
+      stillFor: const Duration(seconds: 90),
+    );
+    final steps = Flight.stepsOf(status);
+    final grade =
+        steps.firstWhere((s) => s['step_id'] == 'grade_the_cut');
+    flight.log('grade tail: status=${grade['status']} '
+        'by=${grade['approved_by']} err=${grade['error']}');
+
+    // The gate clearance is the POLICY's (mention on the card) — the human
+    // stamp stays on the ledger op, the policy stamp on the step.
+    expect(grade['status'], 'human_approved',
+        reason: 'with the colour op confirmed and Resolve LIVE, the grade '
+            'step must walk: not ${grade['status']} (${grade['error']})');
+    expect('${grade['approved_by']}', startsWith('policy:'),
+        reason: 'the step gate is the policy door\'s clearance');
+
+    // And the cube is REAL: the fill composes at DISPATCH (the compile-time
+    // bind stamp never learns it — run-11 taught that), so the proof surface
+    // is the step's own dispatch result: Resolve's structured reply carries
+    // applied:true and the lut it mounted.
+    final gradeResult = '${grade['ai_result'] ?? ''}';
+    expect(gradeResult, contains('"applied":true'),
+        reason: 'Resolve did not report an applied grade: '
+            '${gradeResult.substring(0, gradeResult.length.clamp(0, 300))}');
+    final lutMatch =
+        RegExp(r'"lut"\s*:\s*"([^"]+)"').firstMatch(gradeResult);
+    expect(lutMatch, isNotNull,
+        reason: 'no lut named in the apply_look result');
+
+    // The artifact row itself: a color-lane entry now carries lut_ref — the
+    // content-addressed render the conform lane will reuse.
+    final lutRows = flight.entriesOfKind('op').where((e) =>
+        e['op'] == 'color' &&
+        (e['params']?['lut_ref'] ?? '') != '');
+    expect(lutRows, isNotEmpty,
+        reason: 'the confirmed look rendered no lut_ref artifact row');
+  }, timeout: const Timeout(Duration(minutes: 12)));
 }

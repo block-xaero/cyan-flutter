@@ -451,12 +451,55 @@ class Flight {
     return decoded is Map<String, dynamic> ? decoded : null;
   }
 
+  /// The HUMAN confirm door on one ledger entry (`set_state` with `by:`) —
+  /// how a colorist approves the colour op the policy card refuses to touch
+  /// (AUTO-1). The state change rides the SAME shipping verb the player's
+  /// confirm rides; nothing test-only.
+  Map<String, dynamic>? setEntryState(String entryId, String state,
+      {required String by}) {
+    final raw = CyanFFI.changelistCommand(jsonEncode({
+      'op': 'set_state',
+      'tenant_id': groupId,
+      'entry_id': entryId,
+      'state': state,
+      'by': by,
+    }));
+    log('ledger set_state $entryId -> $state by=$by: $raw');
+    if (raw == null) return null;
+    final decoded = jsonDecode(raw);
+    return decoded is Map<String, dynamic> ? decoded : null;
+  }
+
+  /// Resume the walk after an out-of-band ledger change (the colour confirm):
+  /// re-engage the pump's own resume lane by running the pipeline again — the
+  /// engine walks only the still-unresolved steps.
+  Future<Map<String, dynamic>?> resumeRun() async {
+    final raw = CyanFFI.runPipeline(boardId);
+    log('resume run: $raw');
+    return rawStatus();
+  }
+
   /// Call one plugin tool DIRECTLY, outside the walk — how a human on the far
   /// side of the loop acts. Used to post the PRODUCER's Frame.io comment while
   /// the review window is open, so the sense leg has something real to read
   /// back instead of an empty comment list.
   Future<String> callPluginTool(
       String plugin, String tool, Map<String, dynamic> args) async {
+    // Credentials are read FRESH per call: the engine's frameio_refresh
+    // rewrites ~/.frameio.env in-process during long flights, and a child
+    // spawned with the LAUNCH env carries a token that may have expired an
+    // hour ago (run-6: the producer comment silently failed on it).
+    final env = Map<String, String>.of(Platform.environment);
+    final credFile = File(
+        '${Platform.environment['HOME'] ?? ''}/.frameio.env');
+    if (!Platform.isWindows && credFile.existsSync()) {
+      for (final line in credFile.readAsLinesSync()) {
+        final i = line.indexOf('=');
+        if (i > 0 && !line.trimLeft().startsWith('#')) {
+          env[line.substring(0, i).trim()] = line.substring(i + 1).trim();
+        }
+      }
+    }
     final r = await Process.run(
       'uv',
       [
@@ -464,6 +507,7 @@ class Flight {
         pjoin('integration_test', 'plugsmoke.py'), plugin, tool, jsonEncode(args),
       ],
       runInShell: true,
+      environment: env,
     );
     final out = '${r.stdout}'.trim();
     log('plugin $plugin.$tool -> ${out.isEmpty ? '${r.stderr}'.trim() : out}');
