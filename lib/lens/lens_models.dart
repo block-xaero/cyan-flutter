@@ -663,8 +663,8 @@ class RunBoardFeed {
       approval: lane('approval'),
       done: lane('done'),
       failed: lane('failed'),
-      counts: LaneCounts.fromJson(
-          j['counts'] as Map<String, dynamic>? ?? const {}),
+      counts:
+          LaneCounts.fromJson(j['counts'] as Map<String, dynamic>? ?? const {}),
       total: _optInt(j['total']) ?? 0,
       actionNeeded: an == null
           ? null
@@ -692,7 +692,10 @@ class RunBoardFeed {
   List<RunSummary> get approvalRuns {
     final an = actionNeeded;
     if (an != null && an.isNotEmpty) {
-      return [for (final r in an) if (r.status.canApprove) r];
+      return [
+        for (final r in an)
+          if (r.status.canApprove) r
+      ];
     }
     return approval;
   }
@@ -711,20 +714,24 @@ class RunBoardFeed {
   /// to deriving from the run set when those fields are not served yet.
   ({int done, int total}) get workflowSteps {
     final runs = allRuns;
-    final totals = [for (final r in runs) if (r.stepTotal != null) r.stepTotal!];
+    final totals = [
+      for (final r in runs)
+        if (r.stepTotal != null) r.stepTotal!
+    ];
     if (totals.isNotEmpty) {
       final total = totals.reduce((a, b) => a > b ? a : b);
       if (total > 0) {
-        final dones = [for (final r in runs) if (r.stepDone != null) r.stepDone!];
-        final d = dones.isEmpty
-            ? done.length
-            : dones.reduce((a, b) => a > b ? a : b);
+        final dones = [
+          for (final r in runs)
+            if (r.stepDone != null) r.stepDone!
+        ];
+        final d =
+            dones.isEmpty ? done.length : dones.reduce((a, b) => a > b ? a : b);
         return (done: d.clamp(0, total), total: total);
       }
     }
     // Fallback: one unique run per authored step ⇒ total = run count.
-    final total =
-        runs.length > done.length ? runs.length : done.length;
+    final total = runs.length > done.length ? runs.length : done.length;
     return (done: done.length, total: total);
   }
 
@@ -1067,3 +1074,133 @@ Object? decodeLensBody(String body) {
   if (trimmed.isEmpty) return null;
   return jsonDecode(trimmed);
 }
+
+// ---------------------------------------------------------------------------
+// A4 §1b — the NOTES STRUCTURING lane (`POST /api/v1/notes/structure`)
+// ---------------------------------------------------------------------------
+//
+// Freeform text in, TYPED note proposals out. Nothing is persisted by the lens
+// call: auto-accept is OFF and every proposal is a suggestion a human must
+// confirm, which then writes a real typed note through the engine's own JSON
+// door so its RBAC and payload validation still run.
+//
+// SwiftUI reference (read-only):
+//   cyan-iOS/Cyan/Cyan/Views/NotesStructuringView.swift
+
+/// One typed-note proposal.
+///
+/// [payload] is kept as the RAW decoded JSON object so a typed note round-trips
+/// verbatim into the write body — the app never reshapes what the lane
+/// produced, because reshaping is how a payload stops validating.
+class NoteProposal {
+  final String proposalId;
+  final String kind;
+
+  /// The lane only ever routes `group` or `board`.
+  final String scope;
+  final String boardId;
+  final String text;
+  final Map<String, dynamic>? payload;
+  final String? originRef;
+  final double confidence;
+  final String? rationale;
+
+  /// The VERBATIM substring of the operator's own text this came from — the
+  /// anti-fabrication quoting gate. A proposal whose span is not in the input
+  /// is the model inventing a note.
+  final String? sourceSpan;
+
+  const NoteProposal({
+    required this.proposalId,
+    required this.kind,
+    required this.scope,
+    required this.boardId,
+    required this.text,
+    this.payload,
+    this.originRef,
+    this.confidence = 0,
+    this.rationale,
+    this.sourceSpan,
+  });
+
+  /// Null when the row lacks the three fields that make it a proposal at all —
+  /// a half-decoded proposal is dropped rather than shown with blanks.
+  static NoteProposal? fromJson(Map<String, dynamic> j) {
+    final id = j['proposal_id'];
+    final kind = j['kind'];
+    final text = j['text'];
+    if (id is! String || kind is! String || text is! String) return null;
+    return NoteProposal(
+      proposalId: id,
+      kind: kind,
+      scope: j['scope'] is String ? j['scope'] as String : 'board',
+      boardId: j['board_id'] is String ? j['board_id'] as String : '',
+      text: text,
+      payload: j['payload'] is Map
+          ? Map<String, dynamic>.from(j['payload'] as Map)
+          : null,
+      originRef: j['origin_ref'] is String ? j['origin_ref'] as String : null,
+      confidence: (j['confidence'] as num?)?.toDouble() ?? 0,
+      rationale: j['rationale'] is String ? j['rationale'] as String : null,
+      sourceSpan:
+          j['source_span'] is String ? j['source_span'] as String : null,
+    );
+  }
+}
+
+/// A span the lane REFUSED to structure, with the closed reason set
+/// (`noise` / `unstructurable` / `invalid_payload_degraded`).
+///
+/// Surfaced rather than swallowed: the operator sees exactly what was dropped
+/// and why, which is the difference between a lane that ignored half your note
+/// and one that told you it did.
+class RejectedSpan {
+  final String span;
+  final String reason;
+
+  const RejectedSpan({required this.span, required this.reason});
+
+  static RejectedSpan? fromJson(Map<String, dynamic> j) {
+    final span = j['span'];
+    final reason = j['reason'];
+    if (span is! String || reason is! String) return null;
+    return RejectedSpan(span: span, reason: reason);
+  }
+}
+
+/// What one structuring call answered.
+class NoteStructureResult {
+  final List<NoteProposal> proposals;
+  final List<RejectedSpan> rejected;
+
+  const NoteStructureResult({
+    this.proposals = const [],
+    this.rejected = const [],
+  });
+
+  bool get isEmpty => proposals.isEmpty && rejected.isEmpty;
+
+  factory NoteStructureResult.fromJson(Map<String, dynamic> j) {
+    List<T> rows<T>(String key, T? Function(Map<String, dynamic>) decode) {
+      final raw = j[key];
+      if (raw is! List) return const [];
+      final out = <T>[];
+      for (final row in raw) {
+        if (row is Map) {
+          final decoded = decode(Map<String, dynamic>.from(row));
+          if (decoded != null) out.add(decoded);
+        }
+      }
+      return out;
+    }
+
+    return NoteStructureResult(
+      proposals: rows('proposals', NoteProposal.fromJson),
+      rejected: rows('rejected', RejectedSpan.fromJson),
+    );
+  }
+}
+
+/// Which structuring lane is driven: a freeform NOTE, or a messy shot-log
+/// REPORT import (which the lens types entirely as `shot-log`).
+enum NotesLane { note, report }

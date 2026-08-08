@@ -22,6 +22,7 @@ import '../../providers/notes_editor_controller.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_constitution_editor.dart';
 import 'parity_notes_ledger.dart';
+import 'parity_notes_structuring.dart';
 
 /// The ledger column's width — Swift pins its panel to a fixed 260pt beside the
 /// editor; the extra room here carries the byline + edit-time row without
@@ -159,35 +160,38 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
             // its arguments when the reviewer left nothing?
             child: _mode == NotesFaceMode.constitution
                 ? ParityConstitutionEditor(boardId: widget.boardId)
-                : Row(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            // A2: the review conversation the board already
-                            // has, above the document. It exists only when a
-                            // reviewer has actually left something.
-                            if (_state.reviewNotes.isNotEmpty) _reviewRail(),
-                            Expanded(child: _editorBody()),
-                          ],
-                        ),
+                : _mode == NotesFaceMode.structure
+                    ? ParityNotesStructuring(boardId: widget.boardId)
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                // A2: the review conversation the board already
+                                // has, above the document. It exists only when a
+                                // reviewer has actually left something.
+                                if (_state.reviewNotes.isNotEmpty)
+                                  _reviewRail(),
+                                Expanded(child: _editorBody()),
+                              ],
+                            ),
+                          ),
+                          const VerticalDivider(
+                              width: 1, color: MonokaiTheme.divider),
+                          SizedBox(
+                            width: _ledgerWidth,
+                            child: ParityNotesLedger(boardId: widget.boardId),
+                          ),
+                        ],
                       ),
-                      const VerticalDivider(
-                          width: 1, color: MonokaiTheme.divider),
-                      SizedBox(
-                        width: _ledgerWidth,
-                        child: ParityNotesLedger(boardId: widget.boardId),
-                      ),
-                    ],
-                  ),
           ),
           const Divider(height: 1, color: MonokaiTheme.divider),
           // The status bar reports the DOCUMENT (line, column, word count), so
           // it belongs to the editor mode and would be meaningless over the
           // constitution.
-          if (_mode != NotesFaceMode.constitution) _statusBar(),
+          if (_mode == NotesFaceMode.editor) _statusBar(),
         ],
       ),
     );
@@ -432,10 +436,10 @@ class _ModePicker extends StatelessWidget {
 
   const _ModePicker({required this.mode, required this.onSelect});
 
-  static const List<NotesFaceMode> _offered = [
-    NotesFaceMode.editor,
-    NotesFaceMode.constitution,
-  ];
+  /// All three now: `Structure` was withheld only while the `LensApi` seam had
+  /// no `structureNote`, because a control with no lane behind it is worse than
+  /// no control. The lane exists, so the segment is drawn.
+  static const List<NotesFaceMode> _offered = NotesFaceMode.values;
 
   @override
   Widget build(BuildContext context) {

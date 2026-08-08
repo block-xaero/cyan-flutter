@@ -21,7 +21,9 @@ import 'package:cyan_flutter/ffi/fake_cyan_backend.dart';
 import 'package:cyan_flutter/ffi/parity_models.dart';
 import 'package:cyan_flutter/providers/notes_editor_controller.dart';
 import 'package:cyan_flutter/widgets/parity/parity_constitution_editor.dart';
+import 'package:cyan_flutter/models/notes_face_mode.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_ledger.dart';
+import 'package:cyan_flutter/widgets/parity/parity_notes_structuring.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_view.dart';
 
 import 'support/parity_test_harness.dart';
@@ -233,21 +235,96 @@ void main() {
   // rules, so "add a rule, re-run, the output changes" is the whole
   // without-notes demonstration — and it could not be performed at all.
 
-  testWidgets('the Notes face offers Editor and Constitution modes',
-      (tester) async {
+  testWidgets('the Notes face offers all three modes', (tester) async {
     await pumpParity(tester, const ParityNotesView(boardId: 'b-eng-1'),
         size: const Size(1200, 800));
 
     expect(find.byKey(const ValueKey('notes.mode.picker')), findsOneWidget);
-    expect(find.byKey(const ValueKey('notes-mode-editor')), findsOneWidget);
-    expect(
-        find.byKey(const ValueKey('notes-mode-constitution')), findsOneWidget);
+    for (final mode in NotesFaceMode.values) {
+      expect(find.byKey(ValueKey(mode.segmentKey)), findsOneWidget,
+          reason: 'the ${mode.label} segment');
+    }
+    // Structure was withheld while `LensApi` had no `structureNote` — a control
+    // with no lane behind it is worse than no control. This assertion is the
+    // other half of that trade: the segment appears the moment the lane does,
+    // and the old "it must be absent" case is what made me come back here.
+  });
 
-    // Structure is a real Swift segment whose surface is lens HTTP the seam
-    // does not carry yet. It is deliberately NOT drawn: a control with no lane
-    // behind it is worse than no control.
-    expect(find.byKey(const ValueKey('notes-mode-structure')), findsNothing,
-        reason: 'the structuring lane does not exist on this build');
+  testWidgets('selecting Structure mounts the structuring lane',
+      (tester) async {
+    await pumpParity(tester, const ParityNotesView(boardId: 'b-eng-1'),
+        size: const Size(1200, 800));
+
+    await tester.tap(find.byKey(const ValueKey('notes-mode-structure')));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(ParityNotesStructuring), findsOneWidget);
+    expect(find.byKey(const ValueKey('structuring.draft')), findsOneWidget);
+    // The document's status bar is meaningless over this surface.
+    expect(find.byKey(const ValueKey('notes-caret')), findsNothing);
+  });
+
+  testWidgets('structuring proposes typed notes that QUOTE the input',
+      (tester) async {
+    await pumpParity(tester, const ParityNotesView(boardId: 'b-eng-1'),
+        size: const Size(1200, 900));
+    await tester.tap(find.byKey(const ValueKey('notes-mode-structure')));
+    await tester.pumpAndSettle();
+
+    const written = 'Warm teal-orange look on the endcard. '
+        'Keep it at -14 LUFS integrated. Ok fine.';
+    await tester.enterText(
+        find.byKey(const ValueKey('structuring.draft')), written);
+    await tester.tap(find.byKey(const ValueKey('structuring.run')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('structuring.proposal.prop-0')),
+        findsOneWidget);
+    expect(find.byKey(const ValueKey('structuring.proposal.prop-1')),
+        findsOneWidget);
+    // The two-word fragment came back as a NAMED rejection rather than
+    // vanishing — "it ignored half my note" and "it told me it did" are very
+    // different products.
+    expect(find.text('noise'), findsOneWidget);
+
+    // THE QUOTING GATE: every proposal's span is a verbatim substring of what
+    // the operator actually wrote. A span that is not is the model inventing.
+    for (final key in const ['prop-0', 'prop-1']) {
+      final span = tester
+          .widget<Text>(find.byKey(ValueKey('structuring.span.$key')))
+          .data!;
+      final quoted = span.substring(1, span.length - 1);
+      expect(written, contains(quoted),
+          reason: 'the lane may only surface substrings of the input');
+    }
+  });
+
+  testWidgets('nothing is written until a proposal is CONFIRMED',
+      (tester) async {
+    // Auto-accept is off. The lens call persists nothing; confirming is what
+    // writes, and it writes through the ENGINE so its validation still runs.
+    final backend = FakeCyanBackend();
+    await pumpParity(tester, const ParityNotesView(boardId: 'b-eng-1'),
+        backend: backend, size: const Size(1200, 900));
+    await tester.tap(find.byKey(const ValueKey('notes-mode-structure')));
+    await tester.pumpAndSettle();
+
+    final before = (await backend.noteList('b-eng-1')).length;
+
+    await tester.enterText(find.byKey(const ValueKey('structuring.draft')),
+        'Grade the endcard warmer please.');
+    await tester.tap(find.byKey(const ValueKey('structuring.run')));
+    await tester.pumpAndSettle();
+
+    expect((await backend.noteList('b-eng-1')).length, before,
+        reason: 'structuring alone must not write a note');
+
+    await tester.tap(find.byKey(const ValueKey('structuring.confirm.prop-0')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Confirmed'), findsOneWidget);
+    expect((await backend.noteList('b-eng-1')).length, greaterThan(before),
+        reason: 'confirming writes through the engine');
   });
 
   testWidgets('selecting Constitution mounts the house-rules editor',

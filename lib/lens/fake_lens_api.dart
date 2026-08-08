@@ -104,9 +104,15 @@ class FakeLensApi implements LensApi {
     _record('runs', {'board': board, 'status': status?.wire, 'limit': limit});
     var rows = board == null || board.isEmpty
         ? _runs
-        : [for (final r in _runs) if (r.boardId == board) r];
+        : [
+            for (final r in _runs)
+              if (r.boardId == board) r
+          ];
     if (status != null && status != RunStatusValue.unknown) {
-      rows = [for (final r in rows) if (r.status == status) r];
+      rows = [
+        for (final r in rows)
+          if (r.status == status) r
+      ];
     }
     if (rows.length > limit) rows = rows.sublist(0, limit);
     return RunBoardFeed.assembled(boardId: board ?? '', runs: rows);
@@ -186,8 +192,7 @@ class FakeLensApi implements LensApi {
     final run = _find(id);
     if (run == null) throw LensApiException('no such run: $id');
     if (!run.status.canApprove) {
-      throw const LensApiException(
-          'CONFLICT that run is not parked at a gate',
+      throw const LensApiException('CONFLICT that run is not parked at a gate',
           statusCode: 409);
     }
     final updated = decision == ApprovalDecision.approve
@@ -221,7 +226,10 @@ class FakeLensApi implements LensApi {
     }
     final aisle = query.aisle;
     if (aisle != null && aisle.isNotEmpty) {
-      rows = [for (final c in rows) if (c.stage == aisle) c];
+      rows = [
+        for (final c in rows)
+          if (c.stage == aisle) c
+      ];
     }
     return rows.length > query.limit ? rows.sublist(0, query.limit) : rows;
   }
@@ -237,14 +245,19 @@ class FakeLensApi implements LensApi {
   @override
   Future<List<LensAskRow>> asks({int limit = 50}) async {
     _record('asks', {'limit': limit});
-    final rows = [for (final a in _asks) if (!dismissed.contains(a.id)) a];
+    final rows = [
+      for (final a in _asks)
+        if (!dismissed.contains(a.id)) a
+    ];
     return rows.length > limit ? rows.sublist(0, limit) : rows;
   }
 
   @override
   Future<List<LensDecisionRow>> decisions({int limit = 50}) async {
     _record('decisions', {'limit': limit});
-    return _decisions.length > limit ? _decisions.sublist(0, limit) : _decisions;
+    return _decisions.length > limit
+        ? _decisions.sublist(0, limit)
+        : _decisions;
   }
 
   @override
@@ -309,8 +322,7 @@ class FakeLensApi implements LensApi {
           if (n.id != nodeId) n
       ],
       staleAsks: _nudges.staleAsks,
-      staleBlockers:
-          _nudges.staleBlockers > 0 ? _nudges.staleBlockers - 1 : 0,
+      staleBlockers: _nudges.staleBlockers > 0 ? _nudges.staleBlockers - 1 : 0,
       unimplementedDecisions: _nudges.unimplementedDecisions,
     );
   }
@@ -682,7 +694,8 @@ class FakeLensApi implements LensApi {
           askerName: 'Devon',
           assigneeName: 'Priya',
           status: 'answered',
-          answerSummary: 'Yes — locked as of this morning, proxies regenerated.',
+          answerSummary:
+              'Yes — locked as of this morning, proxies regenerated.',
           answeredByName: 'Priya',
           answeredAt: seedSecs - 3600,
           createdAt: seedSecs - 3 * 3600,
@@ -715,4 +728,58 @@ class FakeLensApi implements LensApi {
         lens: true,
         commit: 'seed',
       );
+
+  // ---- notes structuring ---------------------------------------------------
+
+  /// What the next `structureNote` answers. Left null, the fake DERIVES a
+  /// result from the input rather than returning a canned one — see below.
+  NoteStructureResult? structureResult;
+
+  @override
+  Future<NoteStructureResult> structureNote({
+    required String boardId,
+    required String text,
+    NotesLane lane = NotesLane.note,
+  }) async {
+    _record('structureNote', {
+      'boardId': boardId,
+      'text': text,
+      'lane': lane.name,
+    });
+    if (structureResult != null) return structureResult!;
+
+    // The derivation matters: every proposal's `source_span` is a VERBATIM
+    // substring of what was passed in. That is the lane's anti-fabrication
+    // gate, so a fake that invented spans would let a test pass over a UI that
+    // silently accepted invented ones.
+    final sentences = text
+        .split(RegExp(r'[.\n]'))
+        .map((s) => s.trim())
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (sentences.isEmpty) return const NoteStructureResult();
+
+    final proposals = <NoteProposal>[];
+    final rejected = <RejectedSpan>[];
+    for (var i = 0; i < sentences.length; i++) {
+      final span = sentences[i];
+      // Too short to carry an instruction: the lane calls that noise, and says
+      // so instead of dropping it.
+      if (span.split(RegExp(r'\s+')).length < 3) {
+        rejected.add(RejectedSpan(span: span, reason: 'noise'));
+        continue;
+      }
+      proposals.add(NoteProposal(
+        proposalId: 'prop-$i',
+        kind: lane == NotesLane.report ? 'shot-log' : 'editor-note',
+        scope: 'board',
+        boardId: boardId,
+        text: span,
+        confidence: 0.86,
+        rationale: 'derived from the operator\'s own words',
+        sourceSpan: span,
+      ));
+    }
+    return NoteStructureResult(proposals: proposals, rejected: rejected);
+  }
 }

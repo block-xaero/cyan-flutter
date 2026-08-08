@@ -177,6 +177,20 @@ abstract class LensApi {
 
   /// `PATCH /nodes/{id}/resolve-blocker` — what a nudge's Resolve does.
   Future<void> resolveBlocker(String nodeId);
+
+  // ---- notes structuring (A4 §1b) -------------------------------------------
+
+  /// Turn freeform text into TYPED note proposals.
+  ///
+  /// Nothing is persisted by this call: auto-accept is OFF, every proposal is a
+  /// suggestion the human confirms, and confirming writes through the ENGINE's
+  /// own note door so its RBAC and payload validation still run. Spans the lane
+  /// refused come back in `rejected` rather than being dropped silently.
+  Future<NoteStructureResult> structureNote({
+    required String boardId,
+    required String text,
+    NotesLane lane = NotesLane.note,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +310,8 @@ class LensNudgeWire {
         question: j['question'] as String?,
         externalId: j['external_id'] as String?,
         decision: j['decision'] as String?,
-        ageHours: j['age_hours'] is num ? (j['age_hours'] as num).round() : null,
+        ageHours:
+            j['age_hours'] is num ? (j['age_hours'] as num).round() : null,
         staleDays:
             j['stale_days'] is num ? (j['stale_days'] as num).round() : null,
         sourceNodeId: j['source_node_id'] as String?,
@@ -698,6 +713,26 @@ class LensApiHttp implements LensApi {
         envelope: true);
   }
 
+  @override
+  Future<NoteStructureResult> structureNote({
+    required String boardId,
+    required String text,
+    NotesLane lane = NotesLane.note,
+  }) async {
+    // The REPORT lane is a different endpoint, not a flag — a messy shot-log
+    // import is typed entirely as `shot-log` by the lens, so routing it through
+    // the note lane would mis-type every row.
+    final path = lane == NotesLane.report
+        ? '/api/v1/notes/structure/report'
+        : '/api/v1/notes/structure';
+    final body = await _send('POST', _uri(path), envelope: true, jsonBody: {
+      'board_id': boardId,
+      'text': text,
+    });
+    if (body is! Map) return const NoteStructureResult();
+    return NoteStructureResult.fromJson(Map<String, dynamic>.from(body));
+  }
+
   // ---- Transport ----------------------------------------------------------
 
   Uri _uri(String path, [Map<String, String>? query]) {
@@ -729,8 +764,8 @@ class LensApiHttp implements LensApi {
     try {
       final request = await client.openUrl(method, url).timeout(timeout);
       // Attach the cached bearer. NEVER logged. Tenant scope is the lens's.
-      request.headers.set(HttpHeaders.authorizationHeader,
-          'Bearer ${config.effectiveToken}');
+      request.headers.set(
+          HttpHeaders.authorizationHeader, 'Bearer ${config.effectiveToken}');
       if (jsonBody != null) {
         request.headers.contentType = ContentType.json;
         request.write(jsonEncode(jsonBody));
@@ -753,7 +788,8 @@ class LensApiHttp implements LensApi {
       if (!envelope) return decoded;
       final unwrapped = LensEnvelope.of(decoded);
       if (!unwrapped.success) {
-        throw LensApiException(unwrapped.error ?? 'the lens reported a failure');
+        throw LensApiException(
+            unwrapped.error ?? 'the lens reported a failure');
       }
       return unwrapped.data;
     } on LensApiException {
