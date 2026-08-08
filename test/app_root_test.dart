@@ -35,6 +35,8 @@ import 'package:cyan_flutter/widgets/parity/parity_board_container.dart';
 import 'package:cyan_flutter/widgets/parity/parity_boards_grid.dart';
 import 'package:cyan_flutter/widgets/parity/parity_explorer_tree.dart';
 import 'package:cyan_flutter/widgets/parity/parity_home_shell.dart';
+import 'package:cyan_flutter/widgets/parity/parity_login_view.dart';
+import 'package:cyan_flutter/widgets/parity/parity_onboarding_gate.dart';
 import 'package:cyan_flutter/widgets/parity/parity_marketplace.dart';
 import 'package:cyan_flutter/widgets/parity/parity_icon_rail.dart';
 
@@ -83,8 +85,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byType(ParityBoardContainer), findsOneWidget,
-          reason:
-              'tapping a board card must open the board cube — a card that '
+          reason: 'tapping a board card must open the board cube — a card that '
               'does nothing is the whole reason the parity tree was dead');
       expect(find.byType(ParityIconRail), findsOneWidget,
           reason: 'Swift mounts the board container BESIDE the rail, so a '
@@ -162,6 +163,42 @@ void main() {
       expect(market.sessionRole, isNull,
           reason: 'no session means no role — and the gate locks on that, '
               'which is honest. What was wrong was locking an OWNER too.');
+    });
+  });
+
+  group('the front door is the parity one', () {
+    // ParityLoginView + ParityOnboardingGate were built, tested and imported by
+    // nothing. The running app went to the legacy LoginScreen, whose only
+    // entries are Google, a deliberately non-persisting Test Account and a
+    // Scan-QR that always returns null — so there was NO way to sign in with an
+    // organization on Windows, and no tenant, role or groups were ever
+    // resolved.
+
+    testWidgets('the gate offers both entry modes', (tester) async {
+      await pumpParity(tester, const ParityOnboardingGate());
+
+      expect(find.byType(ParityLoginView), findsOneWidget);
+      // The two-mode picker is the thing the legacy screen had no equivalent
+      // of, and the organization side is what everything role-scoped needs.
+      expect(find.text('Personal'), findsOneWidget);
+      expect(find.text('Organization'), findsOneWidget);
+    });
+
+    testWidgets('Restore is wired, not inert', (tester) async {
+      var restored = false;
+      await pumpParity(
+        tester,
+        ParityOnboardingGate(onRestore: () => restored = true),
+      );
+
+      final restore = find.byKey(const ValueKey('login-restore'));
+      expect(restore, findsOneWidget);
+      await tester.tap(restore);
+      await tester.pumpAndSettle();
+
+      expect(restored, isTrue,
+          reason: 'a Restore button that does nothing is worse than none — '
+              'the host routes it to the flow that owns backup keys');
     });
   });
 

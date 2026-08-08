@@ -17,10 +17,12 @@
 //   cyan-iOS/Cyan/Cyan/Views/Auth/LoginView.swift  — the two-mode front door
 //   cyan-iOS/Cyan/Cyan/Views/ProfileView.swift     — `ssoSection` + Sign Out
 //
-// NOT ported here: Restore (Scan QR / backup key). That is the QR-scanner face
-// (`Views/Auth/QRScannerView.swift`) and there is no identity-restore verb on
-// the `CyanBackend` seam yet, so `ParityLoginView.onRestore` is left unwired
-// rather than pointed at a stub that would pretend to restore something.
+// Restore (Scan QR / backup key) is NOT owned here — there is no
+// identity-restore verb on the `CyanBackend` seam, so this gate would have
+// nothing to call. It is a PASSTHROUGH ([onRestore]) that the host wires to
+// whichever flow owns backup keys on that platform, and left null the
+// affordance is inert. Pointing it at a stub that pretended to restore
+// something would be the worse failure.
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -34,7 +36,16 @@ class ParityOnboardingGate extends ConsumerWidget {
   /// which is the smallest signed-in surface that can sign back out.
   final Widget? child;
 
-  const ParityOnboardingGate({super.key, this.child});
+  /// "Restore" on the personal side — the operator already HAS an identity and
+  /// wants this device to carry it. Passed through rather than owned here
+  /// because restoring is a different flow (a backup key, a scanned XaeroID)
+  /// that the host routes to.
+  ///
+  /// Null renders the affordance inert, which is why the host must supply it:
+  /// a Restore button that does nothing is worse than no Restore button.
+  final VoidCallback? onRestore;
+
+  const ParityOnboardingGate({super.key, this.child, this.onRestore});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -52,6 +63,7 @@ class ParityOnboardingGate extends ConsumerWidget {
       // The sovereign default IS the anonymous entry — no account, no network,
       // no organization. The engine mints the handle it is seen behind.
       onCreateIdentity: controller.enterAnonymously,
+      onRestore: onRestore,
       onSsoSignIn: controller.signInWithOrganization,
     );
   }
@@ -213,8 +225,7 @@ class _SessionCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: MonokaiTheme.surface.withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
-        border:
-            Border.all(color: MonokaiTheme.comment.withValues(alpha: 0.2)),
+        border: Border.all(color: MonokaiTheme.comment.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -248,8 +259,8 @@ class _Row extends StatelessWidget {
           child: Text(
             value,
             textAlign: TextAlign.right,
-            style: MonokaiTheme.bodySmall
-                .copyWith(color: MonokaiTheme.foreground),
+            style:
+                MonokaiTheme.bodySmall.copyWith(color: MonokaiTheme.foreground),
           ),
         ),
       ],
@@ -282,8 +293,8 @@ class _SignOutButton extends StatelessWidget {
             const Icon(Icons.logout, size: 15, color: MonokaiTheme.red),
             const SizedBox(width: 8),
             Text('Sign Out',
-                style: MonokaiTheme.labelLarge
-                    .copyWith(color: MonokaiTheme.red)),
+                style:
+                    MonokaiTheme.labelLarge.copyWith(color: MonokaiTheme.red)),
           ],
         ),
       ),

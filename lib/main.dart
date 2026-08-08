@@ -8,6 +8,7 @@ import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/profile_screen.dart';
 import 'widgets/parity/parity_home_shell.dart';
+import 'widgets/parity/parity_onboarding_gate.dart';
 import 'providers/auth_provider.dart';
 import 'providers/cyan_backend_provider.dart';
 import 'ffi/cyan_backend.dart';
@@ -76,7 +77,7 @@ void main() async {
 
 class CyanApp extends ConsumerWidget {
   const CyanApp({super.key});
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return MaterialApp(
@@ -97,21 +98,39 @@ class CyanApp extends ConsumerWidget {
 
 class _AppRoot extends ConsumerWidget {
   const _AppRoot();
-  
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final authState = ref.watch(authProvider);
-    
+
     // Show splash while initializing
     if (!authState.isInitialized) {
       return const SplashScreen();
     }
-    
+
     // Show login if not authenticated
+    // The FRONT DOOR, and it is the parity one.
+    //
+    // `ParityLoginView` + `ParityOnboardingGate` were built, tested and
+    // imported by nothing: the running app went straight to the legacy
+    // `LoginScreen`, whose only entries are Google, a deliberately
+    // non-persisting Test Account, and a Scan-QR that always fails. So there
+    // was NO way to sign in with an organization on Windows — no tenant, no
+    // role and no groups were ever resolved, which is why nothing downstream
+    // could be role-scoped.
+    //
+    // The gate decides for itself whether a session exists, so a signed-in
+    // operator falls through to the workspace either way. Restore routes to the
+    // legacy screen, which owns the working backup-key entry and the Google
+    // path — those capabilities are preserved rather than dropped, and the
+    // button is wired rather than inert.
     if (!authState.isAuthenticated) {
-      return const LoginScreen();
+      return ParityOnboardingGate(
+        onRestore: () => Navigator.of(context).pushNamed('/login'),
+        child: const CyanWorkspace(),
+      );
     }
-    
+
     // Show main workspace
     return const CyanWorkspace();
   }
