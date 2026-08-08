@@ -23,6 +23,7 @@ import 'package:cyan_flutter/models/board_face.dart';
 import 'package:cyan_flutter/widgets/parity/parity_board_container.dart';
 import 'package:cyan_flutter/widgets/parity/parity_dashboard_view.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_view.dart';
+import 'package:cyan_flutter/widgets/parity/parity_review_player.dart';
 import 'package:cyan_flutter/widgets/parity/parity_workflow_view.dart';
 
 import 'support/parity_test_harness.dart';
@@ -47,7 +48,8 @@ class _RefusingBackend extends FakeCyanBackend {
   Future<bool> setBoardActiveFace(String boardId, String face) async => false;
 }
 
-Finder _tab(BoardFace face) => find.byKey(ValueKey('board.face.${face.rawValue}'));
+Finder _tab(BoardFace face) =>
+    find.byKey(ValueKey('board.face.${face.rawValue}'));
 
 Future<void> _tapFace(WidgetTester tester, BoardFace face) async {
   await tester.tap(_tab(face));
@@ -70,19 +72,58 @@ void main() {
     // no mode string for.
     await pumpParity(tester, const ParityBoardContainer(boardId: _schema));
 
-    for (final face in BoardFace.values) {
+    for (final face in kStandardBoardFaces) {
       expect(_tab(face), findsOneWidget,
           reason: 'the selector must offer the ${face.label} face');
     }
-    expect(find.byWidgetPredicate((w) => w.key is ValueKey<String> &&
+    // STRICTER than the old `BoardFace.values.length == 3`, which conflated the
+    // enum with what a board OFFERS. Swift declares four faces
+    // (BoardFace.swift:12-16) and appends `.video` to `availableFaces` only
+    // when the board resolves a media asset. So: four declared, three standard,
+    // and this board — which has no media — shows exactly three tabs.
+    expect(BoardFace.values, hasLength(4),
+        reason: 'Swift declares notebook / notes / dashboard / video');
+    expect(kStandardBoardFaces, hasLength(3),
+        reason: 'the faces EVERY board carries');
+    expect(kStandardBoardFaces, isNot(contains(BoardFace.video)),
+        reason: 'video is conditional, never standard');
+    expect(
+        find.byWidgetPredicate((w) =>
+            w.key is ValueKey<String> &&
             (w.key as ValueKey<String>).value.startsWith('board.face.')),
         findsNWidgets(3),
-        reason: 'exactly three faces — no fourth tab');
-    expect(BoardFace.values, hasLength(3));
+        reason: 'a board with no media shows no Video tab');
+    expect(_tab(BoardFace.video), findsNothing,
+        reason: 'a Video tab onto an empty player is worse than no tab');
+
+    // The other half of the same contract, asserted where the fixture has
+    // media. `ParityReviewPlayerView` (scrubber, timecode rail, graphics strip,
+    // approve/reject, PRODUCE MASTER) was fully ported and had no door:
+    // `BoardFace` had no video member and `_face` was a three-arm switch, so no
+    // click path in the app reached a delivered master — the end of the spine.
+    await pumpParity(tester, const ParityBoardContainer(boardId: 'b-eng-1'),
+        size: const Size(1200, 900));
+
+    expect(_tab(BoardFace.video), findsOneWidget,
+        reason: 'b-eng-1 resolves a review proxy, so it carries the face');
+    expect(
+        find.byWidgetPredicate((w) =>
+            w.key is ValueKey<String> &&
+            (w.key as ValueKey<String>).value.startsWith('board.face.')),
+        findsNWidgets(4),
+        reason: 'the standard three plus Video');
+
+    await _tapFace(tester, BoardFace.video);
+    expect(find.byType(ParityReviewPlayerView), findsOneWidget,
+        reason: 'the Video face mounts the surface that carries approve, the '
+            'graphics rail and produce-master');
+
+    // Back to the media-less board for the rest of this case.
+    await pumpParity(tester, const ParityBoardContainer(boardId: _schema));
 
     // Each tab is named, and each one MOUNTS a real surface: the authored
     // workflow, the editor, the run dashboard.
-    for (final face in BoardFace.values) {
+    for (final face in kStandardBoardFaces) {
       expect(find.descendant(of: _tab(face), matching: find.text(face.label)),
           findsOneWidget,
           reason: 'the ${face.label} tab is labelled');
@@ -121,7 +162,9 @@ void main() {
 
     expect(_headerBoard(tester), 'Database Schema');
     expect(
-        tester.widget<ParityWorkflowView>(find.byType(ParityWorkflowView)).boardId,
+        tester
+            .widget<ParityWorkflowView>(find.byType(ParityWorkflowView))
+            .boardId,
         _schema);
 
     await _tapFace(tester, BoardFace.notes);
@@ -235,11 +278,17 @@ void main() {
     // Run A removed the canvas face: in Swift `BoardFace(rawValue: "canvas")`
     // is nil and the enum has no such case. Both halves hold here — the strict
     // parse refuses the removed spellings outright…
+    // The enum matches Swift's four cases in Swift's order (BoardFace.swift:12),
+    // and `standardFaces` is the three every board carries — the pair the old
+    // single assertion conflated.
     expect(BoardFace.values.map((f) => f.rawValue),
-        ['notebook', 'notes', 'dashboard']);
+        ['notebook', 'notes', 'dashboard', 'video']);
     expect(BoardFace.values.map((f) => f.label),
-        ['Workflow', 'Notes', 'Dashboard']);
-    expect(kStandardBoardFaces, BoardFace.values);
+        ['Workflow', 'Notes', 'Dashboard', 'Video']);
+    expect(kStandardBoardFaces.map((f) => f.rawValue),
+        ['notebook', 'notes', 'dashboard']);
+    expect(kStandardBoardFaces, isNot(BoardFace.values),
+        reason: 'video is a real face but a conditional one');
 
     for (final gone in const ['canvas', 'whiteboard', 'freeform']) {
       expect(tryParseBoardFace(gone), isNull,
@@ -248,7 +297,12 @@ void main() {
 
     // …and a board SAVED on one of them is migrated onto Workflow rather than
     // stranded on a face that no longer exists (Swift `fromLegacy`).
-    for (final legacy in const ['canvas', 'whiteboard', 'freeform', 'nonsense']) {
+    for (final legacy in const [
+      'canvas',
+      'whiteboard',
+      'freeform',
+      'nonsense'
+    ]) {
       expect(boardFaceFromLegacy(legacy), BoardFace.workflow);
     }
     expect(boardFaceFromLegacy(null), BoardFace.workflow);
@@ -287,6 +341,5 @@ class _BoardHostState extends State<_BoardHost> {
   void open(String boardId) => setState(() => _boardId = boardId);
 
   @override
-  Widget build(BuildContext context) =>
-      ParityBoardContainer(boardId: _boardId);
+  Widget build(BuildContext context) => ParityBoardContainer(boardId: _boardId);
 }

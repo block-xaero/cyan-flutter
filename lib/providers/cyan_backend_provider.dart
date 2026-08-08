@@ -122,7 +122,8 @@ final boardChatProvider =
 });
 
 /// The plugin bundles installed on this device (Plugins workspace).
-final pluginCatalogProvider = FutureProvider<List<InstalledPlugin>>((ref) async {
+final pluginCatalogProvider =
+    FutureProvider<List<InstalledPlugin>>((ref) async {
   final backend = ref.watch(cyanBackendProvider);
   await backend.initialize();
   return backend.pluginCatalog();
@@ -140,4 +141,17 @@ final pluginConfigProvider =
   final backend = ref.watch(cyanBackendProvider);
   await backend.initialize();
   return backend.pluginConfigGet(key.groupId, key.pluginId);
+});
+
+/// The board's review media — the proxy, the preview render and the master, as
+/// the engine resolves them.
+///
+/// The board CUBE reads it to decide whether to offer the Video face at all:
+/// Swift's `availableFaces` appends `.video` only when the board resolves a
+/// media asset, so a board with no media never grows a tab onto an empty
+/// player.
+final boardVideoMediaProvider =
+    FutureProvider.family<BoardVideoMedia, String>((ref, boardId) async {
+  final backend = ref.watch(cyanBackendProvider);
+  return backend.boardVideoMedia(boardId);
 });

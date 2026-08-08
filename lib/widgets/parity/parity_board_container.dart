@@ -24,12 +24,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../ffi/parity_models.dart';
 import '../../models/board_face.dart';
 import '../../providers/board_face_provider.dart';
 import '../../providers/cyan_backend_provider.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_dashboard_view.dart';
 import 'parity_notes_view.dart';
+import 'parity_review_player.dart';
 import 'parity_workflow_view.dart';
 
 /// ⌘1 · ⌘2 · ⌘3 — one chord per face, in [kStandardBoardFaces] order (Swift
@@ -38,6 +40,7 @@ const List<LogicalKeyboardKey> _faceDigits = [
   LogicalKeyboardKey.digit1,
   LogicalKeyboardKey.digit2,
   LogicalKeyboardKey.digit3,
+  LogicalKeyboardKey.digit4,
 ];
 
 class ParityBoardContainer extends ConsumerStatefulWidget {
@@ -89,9 +92,23 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
     widget.onFaceChanged?.call(face);
   }
 
+  /// The faces THIS board offers — Swift `availableFaces`. The standard three,
+  /// plus Video only when the board actually resolves a media asset. A Video
+  /// tab on a board with no media is a tab onto "No video asset linked", and
+  /// the review station is exactly where a dead tab is most expensive.
+  List<BoardFace> _availableFaces(BoardVideoMedia? media) => [
+        ...kStandardBoardFaces,
+        if (media != null &&
+            (media.proxyPath != null ||
+                media.previewPath != null ||
+                media.masterUri != null))
+          BoardFace.video,
+      ];
+
   @override
   Widget build(BuildContext context) {
     final opening = ref.watch(boardOpeningFaceProvider(widget.boardId));
+    final media = ref.watch(boardVideoMediaProvider(widget.boardId));
 
     return Material(
       color: MonokaiTheme.background,
@@ -100,18 +117,30 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
         // An unreadable saved face is not a reason to refuse the board: the
         // Swift bridge answers "notebook" when the engine says nothing, so the
         // cube opens on Workflow and stays fully usable.
-        error: (_, __) => _cube(BoardFace.workflow),
-        data: (resolved) => _cube(_switched ?? resolved),
+        error: (_, __) => _cube(BoardFace.workflow, media.valueOrNull),
+        data: (resolved) {
+          var face = _switched ?? resolved;
+          // A board saved on the Video face whose media has since gone lands on
+          // Workflow rather than on a face its own selector does not offer.
+          if (face == BoardFace.video &&
+              !_availableFaces(media.valueOrNull).contains(BoardFace.video)) {
+            face = BoardFace.workflow;
+          }
+          return _cube(face, media.valueOrNull);
+        },
       ),
     );
   }
 
-  Widget _cube(BoardFace face) {
+  Widget _cube(BoardFace face, BoardVideoMedia? media) {
+    final faces = _availableFaces(media);
     return CallbackShortcuts(
       bindings: {
-        for (var i = 0; i < kStandardBoardFaces.length; i++)
+        // ⌘4 exists only when the Video face does — Swift binds it inside the
+        // same `if videoAsset != nil` its tab lives in.
+        for (var i = 0; i < faces.length; i++)
           SingleActivator(_faceDigits[i], meta: true): () =>
-              _switchTo(kStandardBoardFaces[i], face),
+              _switchTo(faces[i], face),
       },
       child: Focus(
         autofocus: true,
@@ -121,20 +150,21 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
             _BoardHeader(
               boardId: widget.boardId,
               face: face,
+              faces: faces,
               onBack: widget.onBack,
               onSelectFace: (f) => _switchTo(f, face),
             ),
             const Divider(height: 1, color: MonokaiTheme.divider),
-            Expanded(child: _face(face)),
+            Expanded(child: _face(face, media)),
           ],
         ),
       ),
     );
   }
 
-  /// The mounted face. Exactly one of the three is built at a time — the same
+  /// The mounted face. Exactly one is built at a time — the same
   /// `switch activeFace` Swift's `faceContent` is.
-  Widget _face(BoardFace face) => switch (face) {
+  Widget _face(BoardFace face, BoardVideoMedia? media) => switch (face) {
         // Deploying follows the board to its Dashboard: once the steps are
         // frozen the operator's next question is what the RUN is doing, not
         // what the editor looks like read-only. Swift lands them the same way.
@@ -144,6 +174,18 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
           ),
         BoardFace.notes => ParityNotesView(boardId: widget.boardId),
         BoardFace.dashboard => ParityDashboardView(boardId: widget.boardId),
+        // The REVIEW STATION — the surface that carries approve/reject, the
+        // graphics rail and PRODUCE MASTER, which is the only click path in the
+        // app that ends at a delivered master. Both it and `ParityVideoFace`
+        // were fully ported and neither had a door.
+        //
+        // Swift splits these two on `assetUnderReview` — the review player for
+        // a board whose asset is under Frame.io review, the plain timecoded
+        // player otherwise. `BoardVideoMedia` carries no such flag, so rather
+        // than infer one from the paths (which would guess, and guess wrong on
+        // exactly the boards that matter) the review station is mounted for
+        // every media board and the missing signal is recorded on COORD.md.
+        BoardFace.video => ParityReviewPlayerView(boardId: widget.boardId),
       };
 }
 
@@ -154,12 +196,14 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
 class _BoardHeader extends ConsumerWidget {
   final String boardId;
   final BoardFace face;
+  final List<BoardFace> faces;
   final VoidCallback? onBack;
   final void Function(BoardFace) onSelectFace;
 
   const _BoardHeader({
     required this.boardId,
     required this.face,
+    required this.faces,
     required this.onBack,
     required this.onSelectFace,
   });
@@ -193,7 +237,7 @@ class _BoardHeader extends ConsumerWidget {
             ),
           ),
           const Spacer(),
-          _FaceSelector(face: face, onSelect: onSelectFace),
+          _FaceSelector(face: face, faces: faces, onSelect: onSelectFace),
           const Spacer(),
         ],
       ),
@@ -232,9 +276,15 @@ class _BackButton extends StatelessWidget {
 /// three: there is no canvas or whiteboard face to offer.
 class _FaceSelector extends StatelessWidget {
   final BoardFace face;
+
+  /// The faces THIS board offers — the standard three, plus Video when the
+  /// board resolves media. Passed in rather than read off the enum: `.values`
+  /// would hand every board a Video tab onto an empty player.
+  final List<BoardFace> faces;
   final void Function(BoardFace) onSelect;
 
-  const _FaceSelector({required this.face, required this.onSelect});
+  const _FaceSelector(
+      {required this.face, required this.faces, required this.onSelect});
 
   @override
   Widget build(BuildContext context) {
@@ -248,12 +298,12 @@ class _FaceSelector extends StatelessWidget {
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          for (var i = 0; i < kStandardBoardFaces.length; i++)
+          for (var i = 0; i < faces.length; i++)
             _FaceTab(
-              face: kStandardBoardFaces[i],
-              isSelected: kStandardBoardFaces[i] == face,
+              face: faces[i],
+              isSelected: faces[i] == face,
               shortcutDigit: i + 1,
-              onTap: () => onSelect(kStandardBoardFaces[i]),
+              onTap: () => onSelect(faces[i]),
             ),
         ],
       ),

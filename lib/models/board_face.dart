@@ -29,7 +29,7 @@ import '../ffi/parity_models.dart';
 /// keeps the `"notebook"` rawValue for back-compat while presenting as
 /// "Workflow"; [BoardFaceX.rawValue] preserves that split so a face written by
 /// this app is still read by the macOS one.
-enum BoardFace { workflow, notes, dashboard }
+enum BoardFace { workflow, notes, dashboard, video }
 
 extension BoardFaceX on BoardFace {
   /// How the ENGINE spells this face (`cyan_get_board_mode` /
@@ -38,6 +38,7 @@ extension BoardFaceX on BoardFace {
         BoardFace.workflow => 'notebook',
         BoardFace.notes => 'notes',
         BoardFace.dashboard => 'dashboard',
+        BoardFace.video => 'video',
       };
 
   /// The tab label (Swift `BoardFace.label`).
@@ -45,6 +46,7 @@ extension BoardFaceX on BoardFace {
         BoardFace.workflow => 'Workflow',
         BoardFace.notes => 'Notes',
         BoardFace.dashboard => 'Dashboard',
+        BoardFace.video => 'Video',
       };
 
   /// Swift `BoardFace.icon` (SF Symbols → Material equivalents).
@@ -52,6 +54,7 @@ extension BoardFaceX on BoardFace {
         BoardFace.workflow => Icons.list_alt, // list.bullet.rectangle
         BoardFace.notes => Icons.description_outlined, // doc.text
         BoardFace.dashboard => Icons.bar_chart, // chart.bar.xaxis
+        BoardFace.video => Icons.movie_outlined, // film
       };
 
   /// Swift `BoardFace.description` — the tab tooltip.
@@ -59,11 +62,22 @@ extension BoardFaceX on BoardFace {
         BoardFace.workflow => 'Plain-English steps the workflow runs for you',
         BoardFace.notes => 'Text editor with syntax highlighting',
         BoardFace.dashboard => 'The running workflow — live status and summary',
+        BoardFace.video => 'Video player with timecoded notes',
       };
 }
 
-/// Swift `BoardFace.standardFaces` — what the container's selector offers.
-const List<BoardFace> kStandardBoardFaces = BoardFace.values;
+/// The faces EVERY board carries, in tab order — Swift `BoardFace.standardFaces`.
+///
+/// Deliberately NOT `BoardFace.values`: `video` is a real face but a
+/// CONDITIONAL one, offered only by a board that resolves a media asset
+/// (Swift `BoardContainerViewNew.availableFaces`). Writing it as `.values` is
+/// what made the fourth face impossible to add without silently granting it to
+/// every board.
+const List<BoardFace> kStandardBoardFaces = [
+  BoardFace.workflow,
+  BoardFace.notes,
+  BoardFace.dashboard,
+];
 
 /// STRICT parse of an engine face string (Swift `BoardFace(rawValue:)`): an
 /// unknown spelling is not a face, and `canvas` / `whiteboard` / `freeform` are
