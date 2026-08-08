@@ -27,7 +27,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../ffi/cyan_backend.dart';
 import '../ffi/parity_models.dart';
+import '../models/default_plugins.dart';
+import '../services/plugin_bundle_fetcher.dart';
 import 'cyan_backend_provider.dart';
+import 'marketplace_provider.dart';
 
 /// The picker's scope: the board a clone lands on, and the tenant whose saves
 /// are visible beside the global seeds. An empty [tenantId] is resolved off the
@@ -136,6 +139,7 @@ final templatesProvider = StateNotifierProvider.autoDispose
     .family<TemplatesController, TemplatesState, TemplatesScope>((ref, scope) {
   final controller = TemplatesController(
     backend: ref.watch(cyanBackendProvider),
+    fetcher: ref.watch(pluginBundleFetcherProvider),
     boardId: scope.boardId,
     tenantId: scope.tenantId,
   );
@@ -151,12 +155,72 @@ class TemplatesController extends StateNotifier<TemplatesState> {
   /// which [load] does through the seam.
   final String tenantId;
 
+  /// Where a step-bound plugin's bytes come from when the group does not hold
+  /// it yet. Injected so a Tier-1 clone needs no network.
+  final PluginBundleFetcher _fetcher;
+
   TemplatesController({
     required CyanBackend backend,
+    required PluginBundleFetcher fetcher,
     required this.boardId,
     this.tenantId = '',
   })  : _backend = backend,
+        _fetcher = fetcher,
         super(const TemplatesState());
+
+  /// Install the plugins this template's STEPS bind, before the clone lands.
+  ///
+  /// The engine's own clone-path auto-install covers only the template's
+  /// declared `auto_install_set`, and its DTO explicitly excludes step
+  /// `@mentions`. In practice that set is EMPTY on the builtins whose steps bind
+  /// `@cyan-media` / `@ae` / `@frameio`, and on every user-saved template — so
+  /// the engine installs nothing, the bind then refuses any mention whose bundle
+  /// is not in the group, and the same clone that is runnable on macOS lands
+  /// unrunnable here with an empty install report. The Mac installs the UNION of
+  /// every plugin the steps bind; so does this.
+  ///
+  /// BEST EFFORT by design. A clone that cannot reach the bundle host must still
+  /// land its steps — the operator can install the tool afterwards, but they
+  /// cannot re-run a clone that refused. So every failure is swallowed and the
+  /// clone proceeds.
+  ///
+  /// Port of `TemplatesViewModel.autoInstallTemplatePlugins`.
+  Future<void> _autoInstallTemplatePlugins(String templateId) async {
+    final template = state.byId(templateId);
+    if (template == null) return;
+
+    final group = state.tenantId;
+    if (group.isEmpty) return;
+
+    // The union of what the steps bind, minus the defaults every group already
+    // carries — `DefaultPlugins.ensure` has provisioned those from app-shipped
+    // bytes, and re-fetching them over the network would undo the whole point
+    // of shipping them.
+    final required = <String>{
+      for (final step in template.steps)
+        if (step.plugin != null && step.plugin!.isNotEmpty) step.plugin!,
+    }..removeAll(DefaultPlugins.ids);
+    if (required.isEmpty) return;
+
+    // What the group already holds — installing a bundle twice is wasted
+    // bytes, not a failure, but the catalog read is cheap.
+    Set<String> installed;
+    try {
+      installed = {for (final p in await _backend.pluginCatalog()) p.id};
+    } catch (_) {
+      installed = const {};
+    }
+
+    for (final pluginId in required) {
+      if (installed.contains(pluginId)) continue;
+      try {
+        final bytes = await _fetcher.fetchBundleB64(pluginId);
+        await _backend.installPluginBundle(group, pluginId, bytes);
+      } catch (_) {
+        // See the best-effort note above.
+      }
+    }
+  }
 
   /// Read the catalog: the seeds plus this tenant's own saves, split by source.
   /// This is also the RELOAD a save ends with, so a saved template appears
@@ -170,8 +234,14 @@ class TemplatesController extends StateNotifier<TemplatesState> {
         loading: false,
         clearError: true,
         tenantId: tenant,
-        builtins: [for (final t in templates) if (t.isBuiltin) t],
-        userTemplates: [for (final t in templates) if (!t.isBuiltin) t],
+        builtins: [
+          for (final t in templates)
+            if (t.isBuiltin) t
+        ],
+        userTemplates: [
+          for (final t in templates)
+            if (!t.isBuiltin) t
+        ],
       );
     } catch (e) {
       if (!mounted) return;
@@ -241,6 +311,11 @@ class TemplatesController extends StateNotifier<TemplatesState> {
       }
     }
 
+    // The plugins the template's STEPS bind must be in the group BEFORE the
+    // clone lands, or every one of those steps compiles to a mention the engine
+    // refuses to bind.
+    await _autoInstallTemplatePlugins(templateId);
+
     try {
       await _backend.workflowFromTemplate(templateId, boardId,
           tenantId: state.tenantId);
@@ -305,7 +380,8 @@ class TemplatesController extends StateNotifier<TemplatesState> {
     }
     if (!state.canSave) {
       state = state.copyWith(
-          error: 'No group context — a template is saved to the board\'s group.');
+          error:
+              'No group context — a template is saved to the board\'s group.');
       return false;
     }
 
@@ -343,8 +419,7 @@ class TemplatesController extends StateNotifier<TemplatesState> {
     final saved = result.template!;
     state = state.copyWith(
       clearError: true,
-      saveConfirmation:
-          'Saved “${saved.name}” with ${saved.steps.length} step'
+      saveConfirmation: 'Saved “${saved.name}” with ${saved.steps.length} step'
           '${saved.steps.length == 1 ? "" : "s"}'
           '${saved.notes.isEmpty ? "" : " and ${saved.notes.length} standing note"
               "${saved.notes.length == 1 ? "" : "s"}"} — '
@@ -379,8 +454,7 @@ String cloneReportLine(String? templateName, TemplateCloneOutcome outcome) {
   if (failed.isNotEmpty) {
     bits.add('${failed.length} failed (${failed.join(", ")})');
   }
-  final prefix = (templateName == null || templateName.isEmpty)
-      ? ''
-      : '$templateName: ';
+  final prefix =
+      (templateName == null || templateName.isEmpty) ? '' : '$templateName: ';
   return prefix + bits.join(' · ');
 }
