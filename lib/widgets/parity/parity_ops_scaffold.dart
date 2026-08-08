@@ -84,6 +84,11 @@ class _Segmented extends StatelessWidget {
         children: [
           for (final f in OpsFace.values)
             GestureDetector(
+              // Keyed because the face labels legitimately recur inside the
+              // console's own content — "Cost" is both a segment and a column —
+              // exactly as the Swift console disambiguates by
+              // accessibilityIdentifier rather than by visible text.
+              key: ValueKey('ops.face.${f.name}'),
               onTap: () => onSelect?.call(f),
               child: Container(
                 padding:

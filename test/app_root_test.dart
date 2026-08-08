@@ -38,6 +38,11 @@ import 'package:cyan_flutter/widgets/parity/parity_home_shell.dart';
 import 'package:cyan_flutter/widgets/parity/parity_login_view.dart';
 import 'package:cyan_flutter/widgets/parity/parity_onboarding_gate.dart';
 import 'package:cyan_flutter/widgets/parity/parity_marketplace.dart';
+import 'package:cyan_flutter/widgets/parity/parity_ops_console.dart';
+import 'package:cyan_flutter/widgets/parity/parity_ops_cost.dart';
+import 'package:cyan_flutter/widgets/parity/parity_ops_efficiency.dart';
+import 'package:cyan_flutter/widgets/parity/parity_ops_runs.dart';
+import 'package:cyan_flutter/widgets/parity/parity_settings_view.dart';
 import 'package:cyan_flutter/widgets/parity/parity_icon_rail.dart';
 
 import 'support/parity_test_harness.dart';
@@ -163,6 +168,65 @@ void main() {
       expect(market.sessionRole, isNull,
           reason: 'no session means no role — and the gate locks on that, '
               'which is honest. What was wrong was locking an OWNER too.');
+    });
+  });
+
+  group('the rail\'s bottom actions reach Ops and Settings', () {
+    // Swift's rail carries five DOORS on top and a separate bottom stack of
+    // ACTIONS below a divider — Ops console and Settings among them. Dart had
+    // the five doors and no bottom stack at all, so `ParitySettingsView` (838
+    // lines, three tabs) and the entire Ops console tree were unreachable.
+    //
+    // Note what is deliberately NOT done here: Ops is not added as a sixth rail
+    // DOOR. The Mac's NavigationMode has exactly five cases, so a sixth door
+    // would be a divergence dressed up as parity.
+
+    testWidgets('the Ops console opens over the workspace', (tester) async {
+      await pumpParity(tester, const CyanWorkspace(),
+          size: const Size(1400, 1000));
+
+      expect(find.byType(ParityOpsConsole), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('rail.ops')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ParityOpsConsole), findsOneWidget);
+      // It opens on Runs — what is happening now, before what it cost — and the
+      // rail is still there behind it.
+      expect(find.byType(ParityOpsRuns), findsOneWidget);
+      expect(find.byType(ParityIconRail), findsOneWidget);
+    });
+
+    testWidgets('the console\'s segmented control actually changes the face',
+        (tester) async {
+      // `OpsScaffold.onSelectFace` was documented as "UI-only here; the host
+      // wires navigation" — and there was no host, so the control could not
+      // change anything.
+      await pumpParity(tester, const CyanWorkspace(),
+          size: const Size(1400, 1000));
+      await tester.tap(find.byKey(const ValueKey('rail.ops')));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const ValueKey('ops.face.cost')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ParityOpsCost), findsOneWidget);
+      expect(find.byType(ParityOpsRuns), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('ops.face.efficiency')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ParityOpsEfficiency), findsOneWidget);
+      expect(find.byType(ParityOpsCost), findsNothing);
+    });
+
+    testWidgets('Settings opens over the workspace', (tester) async {
+      await pumpParity(tester, const CyanWorkspace(),
+          size: const Size(1400, 1000));
+
+      expect(find.byType(ParitySettingsView), findsNothing);
+      await tester.tap(find.byKey(const ValueKey('rail.settings')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ParitySettingsView), findsOneWidget,
+          reason: 'Settings was a SnackBar over an orphaned 838-line face');
     });
   });
 

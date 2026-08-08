@@ -38,11 +38,16 @@ class ParityOpsRuns extends ConsumerWidget {
   /// Intercept Reject. When null the widget POSTs to the lens itself.
   final void Function(OpsRun run)? onReject;
 
+  /// Turning the console's segmented control. Null leaves the header inert,
+  /// which is right when this face is mounted on its own.
+  final void Function(OpsFace)? onSelectFace;
+
   const ParityOpsRuns({
     super.key,
     this.onRetry,
     this.onApprove,
     this.onReject,
+    this.onSelectFace,
   });
 
   @override
@@ -62,6 +67,7 @@ class ParityOpsRuns extends ConsumerWidget {
 
     return OpsScaffold(
       face: OpsFace.runs,
+      onSelectFace: onSelectFace,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -124,8 +130,8 @@ class _RefusalBanner extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: Text(message,
-                style: MonokaiTheme.labelMedium
-                    .copyWith(color: MonokaiTheme.red)),
+                style:
+                    MonokaiTheme.labelMedium.copyWith(color: MonokaiTheme.red)),
           ),
         ],
       ),
@@ -329,8 +335,8 @@ class _RunCard extends StatelessWidget {
                           MonokaiTheme.background,
                         ],
                       ),
-                      borderRadius: const BorderRadius.vertical(
-                          top: Radius.circular(9)),
+                      borderRadius:
+                          const BorderRadius.vertical(top: Radius.circular(9)),
                     ),
                     child: const Center(
                       child: Icon(Icons.movie,
@@ -397,7 +403,8 @@ class _RunCard extends StatelessWidget {
                   children: [
                     _meta('steps', '${run.currentStep}/${run.stepCount}'),
                     _meta('cost', '\$${run.costDollars.toStringAsFixed(2)}'),
-                    _meta('dur', run.durationLabel.isEmpty ? '—' : run.durationLabel),
+                    _meta('dur',
+                        run.durationLabel.isEmpty ? '—' : run.durationLabel),
                   ],
                 ),
                 if (run.status == RunStatus.failed ||
@@ -440,8 +447,8 @@ class _RunCard extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         Text('$label ',
-            style: MonokaiTheme.codeSmall
-                .copyWith(color: MonokaiTheme.comment)),
+            style:
+                MonokaiTheme.codeSmall.copyWith(color: MonokaiTheme.comment)),
         Text(value,
             style: MonokaiTheme.codeSmall
                 .copyWith(color: MonokaiTheme.foreground)),
@@ -461,8 +468,8 @@ class _RunCard extends StatelessWidget {
           border: Border.all(color: color),
         ),
         child: Text(label,
-            style: MonokaiTheme.labelMedium.copyWith(
-                color: filled ? MonokaiTheme.background : color)),
+            style: MonokaiTheme.labelMedium
+                .copyWith(color: filled ? MonokaiTheme.background : color)),
       ),
     );
   }
@@ -482,7 +489,8 @@ class _Badge extends StatelessWidget {
         borderRadius: BorderRadius.circular(8),
       ),
       child: Text(label,
-          style: MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.background)),
+          style:
+              MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.background)),
     );
   }
 }

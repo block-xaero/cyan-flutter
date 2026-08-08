@@ -19,7 +19,11 @@ import '../../theme/monokai_theme.dart';
 import 'parity_ops_scaffold.dart';
 
 class ParityOpsCost extends ConsumerWidget {
-  const ParityOpsCost({super.key});
+  /// Turning the console's segmented control. Null leaves the header inert,
+  /// which is right when this face is mounted on its own.
+  final void Function(OpsFace)? onSelectFace;
+
+  const ParityOpsCost({super.key, this.onSelectFace});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -27,14 +31,14 @@ class ParityOpsCost extends ConsumerWidget {
 
     return OpsScaffold(
       face: OpsFace.cost,
+      onSelectFace: onSelectFace,
       child: meterAsync.when(
         loading: () => const Center(
           child: CircularProgressIndicator(color: MonokaiTheme.cyan),
         ),
         error: (e, _) => Center(
           child: Text('Failed to load cost meter: $e',
-              style:
-                  MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
+              style: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
         ),
         data: (meter) => _Body(meter: meter),
       ),
@@ -119,8 +123,7 @@ class _Body extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(value,
-                style: MonokaiTheme.titleMedium.copyWith(color: color)),
+            Text(value, style: MonokaiTheme.titleMedium.copyWith(color: color)),
             const SizedBox(height: 2),
             Text(label, style: MonokaiTheme.labelSmall),
           ],

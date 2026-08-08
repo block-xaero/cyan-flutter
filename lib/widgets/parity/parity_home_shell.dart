@@ -29,6 +29,8 @@ import 'parity_explorer_tree.dart';
 import 'parity_icon_rail.dart';
 import 'parity_lens_view.dart';
 import 'parity_marketplace.dart';
+import 'parity_ops_console.dart';
+import 'parity_settings_view.dart';
 import 'parity_status_bar.dart';
 
 class ParityHomeShell extends ConsumerWidget {
@@ -59,7 +61,22 @@ class ParityHomeShell extends ConsumerWidget {
         Expanded(
           child: Row(
             children: [
-              const ParityIconRail(),
+              ParityIconRail(
+                onOpenOps: () => _openOverlay(
+                  context,
+                  const ParityOpsConsole(),
+                  width: 1100,
+                  height: 760,
+                ),
+                onOpenSettings: () => _openOverlay(
+                  context,
+                  ParitySettingsView(
+                    onClose: () => Navigator.of(context).pop(),
+                  ),
+                  width: 820,
+                  height: 700,
+                ),
+              ),
               Container(width: 1, color: MonokaiTheme.divider),
               Expanded(
                 child: openBoard == null
@@ -128,6 +145,25 @@ class ParityHomeShell extends ConsumerWidget {
           sessionRole: _sessionRole(ref),
         ),
     };
+  }
+
+  /// The rail's bottom actions open OVER the workspace rather than replacing
+  /// the door's surface — Swift presents both the Ops console and Settings the
+  /// same way, so the operator returns to exactly where they were standing.
+  static void _openOverlay(
+    BuildContext context,
+    Widget surface, {
+    required double width,
+    required double height,
+  }) {
+    showDialog<void>(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: MonokaiTheme.background,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 40, vertical: 40),
+        child: SizedBox(width: width, height: height, child: surface),
+      ),
+    );
   }
 
   /// The membership role of the verified session, spelled the way the gates

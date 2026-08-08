@@ -13,7 +13,15 @@ import '../../providers/shell_provider.dart';
 import '../../theme/monokai_theme.dart';
 
 class ParityIconRail extends ConsumerWidget {
-  const ParityIconRail({super.key});
+  /// The rail's BOTTOM actions, which are not doors: they open a surface OVER
+  /// the workspace rather than swapping the door's own surface. Swift's rail
+  /// separates them the same way, below a divider.
+  ///
+  /// Null leaves the affordance out entirely rather than drawing a dead one.
+  final VoidCallback? onOpenOps;
+  final VoidCallback? onOpenSettings;
+
+  const ParityIconRail({super.key, this.onOpenOps, this.onOpenSettings});
 
   static const _icons = <ShellDoor, IconData>{
     ShellDoor.explorer: Icons.description_outlined,
@@ -38,9 +46,38 @@ class ParityIconRail extends ConsumerWidget {
               icon: _icons[door]!,
               label: door.label,
               isOpen: door == open,
-              onTap: () =>
-                  ref.read(shellDoorProvider.notifier).state = door,
+              onTap: () => ref.read(shellDoorProvider.notifier).state = door,
             ),
+          const Spacer(),
+          // The bottom stack. These are ACTIONS, not doors — Swift puts them
+          // below a divider for that reason, and neither highlights as "open"
+          // because neither replaces the door you are standing in.
+          if (onOpenOps != null || onOpenSettings != null) ...[
+            const Divider(
+              height: 17,
+              thickness: 1,
+              indent: 14,
+              endIndent: 14,
+              color: MonokaiTheme.divider,
+            ),
+            if (onOpenOps != null)
+              _RailDoor(
+                key: const ValueKey('rail.ops'),
+                icon: Icons.cloud_outlined,
+                label: 'Ops console',
+                isOpen: false,
+                onTap: onOpenOps!,
+              ),
+            if (onOpenSettings != null)
+              _RailDoor(
+                key: const ValueKey('rail.settings'),
+                icon: Icons.settings_outlined,
+                label: 'Settings',
+                isOpen: false,
+                onTap: onOpenSettings!,
+              ),
+          ],
+          const SizedBox(height: 12),
         ],
       ),
     );
@@ -54,6 +91,7 @@ class _RailDoor extends StatelessWidget {
   final VoidCallback onTap;
 
   const _RailDoor({
+    super.key,
     required this.icon,
     required this.label,
     required this.isOpen,

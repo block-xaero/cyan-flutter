@@ -20,7 +20,11 @@ import '../../theme/monokai_theme.dart';
 import 'parity_ops_scaffold.dart';
 
 class ParityOpsEfficiency extends ConsumerWidget {
-  const ParityOpsEfficiency({super.key});
+  /// Turning the console's segmented control. Null leaves the header inert,
+  /// which is right when this face is mounted on its own.
+  final void Function(OpsFace)? onSelectFace;
+
+  const ParityOpsEfficiency({super.key, this.onSelectFace});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -28,14 +32,14 @@ class ParityOpsEfficiency extends ConsumerWidget {
 
     return OpsScaffold(
       face: OpsFace.efficiency,
+      onSelectFace: onSelectFace,
       child: effAsync.when(
         loading: () => const Center(
           child: CircularProgressIndicator(color: MonokaiTheme.cyan),
         ),
         error: (e, _) => Center(
           child: Text('Failed to load efficiency: $e',
-              style:
-                  MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
+              style: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
         ),
         data: (eff) => _Body(eff: eff),
       ),
@@ -79,8 +83,9 @@ class _Body extends StatelessWidget {
               value: '${eff.failureRatePct.toStringAsFixed(1)}%',
               detail:
                   '${eff.failureHotspotStep}${eff.topErrorClass != null ? ' · ${eff.topErrorClass}' : ''}',
-              color:
-                  eff.failureRatePct > 0 ? MonokaiTheme.red : MonokaiTheme.green,
+              color: eff.failureRatePct > 0
+                  ? MonokaiTheme.red
+                  : MonokaiTheme.green,
             ),
             _InsightCard(
               icon: Icons.timer,
@@ -116,8 +121,9 @@ class _Body extends StatelessWidget {
     );
   }
 
-  static String _ms(double ms) =>
-      ms >= 1000 ? '${(ms / 1000).toStringAsFixed(1)}s' : '${ms.toStringAsFixed(0)}ms';
+  static String _ms(double ms) => ms >= 1000
+      ? '${(ms / 1000).toStringAsFixed(1)}s'
+      : '${ms.toStringAsFixed(0)}ms';
 }
 
 class _InsightCard extends StatelessWidget {
