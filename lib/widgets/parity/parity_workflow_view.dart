@@ -30,6 +30,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
 import '../../providers/cyan_backend_provider.dart';
+import '../../providers/board_lock_store.dart';
 import '../../providers/workflow_authoring_provider.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_sources_sheet.dart';
@@ -49,11 +50,16 @@ class ParityWorkflowView extends ConsumerStatefulWidget {
   /// Tapping Review. The compile goes through the seam; this fires alongside.
   final VoidCallback? onReview;
 
+  /// The board was deployed + locked. A host wires this to follow the board to
+  /// its Dashboard face, the way Swift lands the operator on the run.
+  final VoidCallback? onDeployed;
+
   const ParityWorkflowView({
     super.key,
     required this.boardId,
     this.onRun,
     this.onReview,
+    this.onDeployed,
   });
 
   @override
@@ -257,6 +263,38 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
     ref.invalidate(boardWorkflowProvider(widget.boardId));
   }
 
+  // ---- deploy / unlock -----------------------------------------------------
+
+  /// Deploy: freeze the authored steps for the run lifecycle, then follow the
+  /// board to its Dashboard — Swift's `WorkflowView` deploys and lands the
+  /// operator on the running face, because the next thing they want is the run,
+  /// not the frozen editor.
+  void _deploy() {
+    ref.read(boardLockStoreProvider.notifier).lock(widget.boardId);
+    setState(() {
+      _status = 'Deployed — the steps are frozen for the run lifecycle.';
+      _error = null;
+      _picker = null;
+    });
+    widget.onDeployed?.call();
+  }
+
+  /// Unlock: re-enable authoring. The engine's own `deployed` flag is NOT
+  /// something this can clear, so a board the engine reports deployed stays
+  /// locked and says so rather than pretending the toggle won.
+  void _unlock() {
+    ref.read(boardLockStoreProvider.notifier).unlock(widget.boardId);
+    final wf = ref.read(boardWorkflowProvider(widget.boardId)).valueOrNull;
+    setState(() {
+      _error = (wf?.isDeployed ?? false)
+          ? 'The ENGINE still reports this board deployed, so it stays locked.'
+          : null;
+      _status = (wf?.isDeployed ?? false)
+          ? null
+          : 'Unlocked — the steps are editable again.';
+    });
+  }
+
   // ---- sources (ingest) ----------------------------------------------------
 
   /// The watched-folder / S3 / Frame.io C2C sensors, presented the way Swift
@@ -411,6 +449,11 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
   Widget build(BuildContext context) {
     final workflowAsync = ref.watch(boardWorkflowProvider(widget.boardId));
 
+    // The lock the operator toggles here, OR'd with the engine's own deploy
+    // truth: a board deployed on another device is locked on this one too.
+    final lockedHere =
+        ref.watch(boardLockStoreProvider).contains(widget.boardId);
+
     return Material(
       color: MonokaiTheme.background,
       child: workflowAsync.when(
@@ -421,53 +464,58 @@ class _ParityWorkflowViewState extends ConsumerState<ParityWorkflowView> {
           child: Text('Failed to load workflow: $e',
               style: MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.red)),
         ),
-        data: (wf) => Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _Toolbar(
-              workflow: wf,
-              onRun: _run,
-              onReview: _review,
-              onReset: _reset,
-              onTemplates: _openTemplates,
-              onSources: _openSources,
-              autopilotMode: _autopilot,
-              onSetAutopilot: _setAutopilot,
-            ),
-            if (wf.isDeployed) const _LockedBanner(),
-            if (_error != null)
-              _StatusStrip(text: _error!, tint: MonokaiTheme.red)
-            else if (_status != null)
-              _StatusStrip(text: _status!, tint: MonokaiTheme.comment),
-            if (_showPlan) _planPanel(),
-            const Divider(height: 1, color: MonokaiTheme.divider),
-            Expanded(
-              child: wf.steps.isEmpty
-                  ? const _EmptyState()
-                  : ListView.separated(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 20, vertical: 16),
-                      itemCount: wf.steps.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (context, i) {
-                        final step = wf.steps[i];
-                        return _StepRow(
-                          index: i + 1,
-                          step: step,
-                          picker: _picker?.field == step.id ? _picker : null,
-                          onPickPlugin: () => _pickPluginFor(step),
-                          onAccept: (entry) => _bindStep(step, entry),
-                        );
-                      },
-                    ),
-            ),
-            const Divider(height: 1, color: MonokaiTheme.divider),
-            _composer(),
-          ],
-        ),
+        data: (wf) => _body(wf, wf.isDeployed || lockedHere),
       ),
     );
   }
+
+  Widget _body(Workflow wf, bool locked) => Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          _Toolbar(
+            workflow: wf,
+            locked: locked,
+            onRun: _run,
+            onReview: _review,
+            onReset: _reset,
+            onTemplates: _openTemplates,
+            onSources: _openSources,
+            onDeploy: _deploy,
+            onUnlock: _unlock,
+            autopilotMode: _autopilot,
+            onSetAutopilot: _setAutopilot,
+          ),
+          if (locked) const _LockedBanner(),
+          if (_error != null)
+            _StatusStrip(text: _error!, tint: MonokaiTheme.red)
+          else if (_status != null)
+            _StatusStrip(text: _status!, tint: MonokaiTheme.comment),
+          if (_showPlan) _planPanel(),
+          const Divider(height: 1, color: MonokaiTheme.divider),
+          Expanded(
+            child: wf.steps.isEmpty
+                ? const _EmptyState()
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 16),
+                    itemCount: wf.steps.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 10),
+                    itemBuilder: (context, i) {
+                      final step = wf.steps[i];
+                      return _StepRow(
+                        index: i + 1,
+                        step: step,
+                        picker: _picker?.field == step.id ? _picker : null,
+                        onPickPlugin: () => _pickPluginFor(step),
+                        onAccept: (entry) => _bindStep(step, entry),
+                      );
+                    },
+                  ),
+          ),
+          const Divider(height: 1, color: MonokaiTheme.divider),
+          _composer(),
+        ],
+      );
 
   /// The compiled plan, read back off the engine. Height-capped: the plan is a
   /// reference while authoring, not the face.
@@ -740,13 +788,26 @@ class _Toolbar extends StatelessWidget {
   /// Opening the ingest sensors — the spine's first station.
   final VoidCallback? onSources;
 
+  /// Deploy + lock, and unlock. Separate callbacks rather than one toggle so a
+  /// host cannot accidentally wire the destructive half to the safe one.
+  final VoidCallback? onDeploy;
+  final VoidCallback? onUnlock;
+
+  /// Whether the board is frozen: the engine's `deployed` OR the operator's own
+  /// local lock. Passed in rather than read off [workflow], because only one of
+  /// those two sources lives on the workflow.
+  final bool locked;
+
   const _Toolbar({
     required this.workflow,
+    required this.locked,
     this.onRun,
     this.onReview,
     this.onReset,
     this.onTemplates,
     this.onSources,
+    this.onDeploy,
+    this.onUnlock,
     this.autopilotMode = 'off',
     this.onSetAutopilot,
   });
@@ -754,7 +815,6 @@ class _Toolbar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasSteps = workflow.steps.isNotEmpty;
-    final locked = workflow.isDeployed;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
@@ -814,11 +874,15 @@ class _Toolbar extends StatelessWidget {
                 _AutopilotControl(mode: autopilotMode, onSet: onSetAutopilot),
                 const SizedBox(width: 8),
                 _ToolButton(
+                  key: const ValueKey('workflow.deploy'),
                   icon: locked ? Icons.lock_open : Icons.lock,
                   label: locked ? 'Unlock' : 'Deploy',
                   tint: MonokaiTheme.purple,
-                  enabled: hasSteps,
-                  onTap: null,
+                  // Unlock must stay live on a locked board even though
+                  // authoring is frozen — otherwise a deployed board can never
+                  // be edited again.
+                  enabled: locked || hasSteps,
+                  onTap: locked ? onUnlock : onDeploy,
                 ),
                 const SizedBox(width: 8),
                 _ToolButton(

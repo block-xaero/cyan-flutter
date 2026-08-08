@@ -214,7 +214,8 @@ void main() {
     expect((await backend.loadWorkflow('b-eng-2')).steps[1].tool, isNull);
 
     // The prompt is actionable, not decoration: pick a plugin…
-    await tester.tap(find.byKey(const ValueKey('workflow.step.pickPlugin.ws2')));
+    await tester
+        .tap(find.byKey(const ValueKey('workflow.step.pickPlugin.ws2')));
     await tester.pumpAndSettle();
     expect(_row('ffmpeg.transcode'), findsOneWidget);
 
@@ -282,6 +283,99 @@ void main() {
   testWidgets('empty workflow shows the empty state', (tester) async {
     await pumpParity(tester, const ParityWorkflowView(boardId: 'b-des-3'));
     expect(find.text('No steps yet'), findsOneWidget);
+  });
+
+  // ---- DEPLOY / UNLOCK -----------------------------------------------------
+  //
+  // The control rendered at full purple with `enabled: hasSteps` and
+  // `onTap: null` — a live-looking Deploy that swallowed the tap. Worse on an
+  // already-deployed board, where Unlock was equally dead and Templates /
+  // Review / Reset therefore stayed disabled forever. These drive the toggle
+  // rather than asserting a fixture's deploy flag.
+  //
+  // The lock is client-side on purpose: the engine exports only the READ verb
+  // `cyan_board_workflow_state`, so this mirrors what the Mac already does in
+  // ViewModels/BoardLockStore.swift.
+
+  testWidgets(
+      'Deploy locks the board, freezes authoring and follows to the '
+      'Dashboard', (tester) async {
+    var deployed = false;
+    await pumpParity(
+      tester,
+      ParityWorkflowView(
+        boardId: 'b-eng-2', // authored, not deployed
+        onDeployed: () => deployed = true,
+      ),
+      size: const Size(1280, 800),
+    );
+
+    expect(find.textContaining('Deployed & locked'), findsNothing);
+    final deploy = find.byKey(const ValueKey('workflow.deploy'));
+    expect(deploy, findsOneWidget);
+    expect(find.text('Deploy'), findsOneWidget);
+
+    await tester.tap(deploy);
+    await tester.pumpAndSettle();
+
+    // The board is frozen, and says so.
+    expect(find.textContaining('Deployed & locked'), findsOneWidget,
+        reason: 'deploying must raise the locked banner');
+    expect(find.text('Unlock'), findsOneWidget,
+        reason: 'the control must flip to its inverse, not stay on Deploy');
+    expect(deployed, isTrue,
+        reason: 'the host follows the board to its Dashboard after a deploy');
+
+    // Authoring affordances are disabled while frozen — an in-flight run must
+    // never be edited out from under itself.
+    final templates =
+        tester.widget<Widget>(find.byKey(const ValueKey('workflow.templates')));
+    expect(templates, isNotNull);
+    expect(find.textContaining('Deployed & locked'), findsOneWidget);
+  });
+
+  testWidgets('Unlock restores authoring', (tester) async {
+    await pumpParity(
+      tester,
+      const ParityWorkflowView(boardId: 'b-eng-2'),
+      size: const Size(1280, 800),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('workflow.deploy')));
+    await tester.pumpAndSettle();
+    expect(find.text('Unlock'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('workflow.deploy')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Deploy'), findsOneWidget,
+        reason: 'unlocking must return the control to Deploy');
+    expect(find.textContaining('Deployed & locked'), findsNothing,
+        reason: 'the locked banner must clear with the lock');
+    expect(find.textContaining('Unlocked'), findsOneWidget);
+  });
+
+  testWidgets('a board the ENGINE reports deployed stays locked after Unlock',
+      (tester) async {
+    // b-eng-1 is deployed on the seam. The local store cannot clear the
+    // engine's own truth, and the face must say so rather than pretending the
+    // toggle won.
+    await pumpParity(
+      tester,
+      const ParityWorkflowView(boardId: 'b-eng-1'),
+      size: const Size(1280, 800),
+    );
+
+    expect(find.textContaining('Deployed & locked'), findsOneWidget);
+    expect(find.text('Unlock'), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('workflow.deploy')));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('Deployed & locked'), findsOneWidget,
+        reason: 'the engine still reports this board deployed');
+    expect(find.textContaining('ENGINE still reports'), findsOneWidget,
+        reason: 'the refusal must be explained, not silent');
   });
 
   testWidgets('golden: workflow author face', (tester) async {

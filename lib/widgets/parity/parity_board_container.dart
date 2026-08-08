@@ -135,7 +135,13 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
   /// The mounted face. Exactly one of the three is built at a time — the same
   /// `switch activeFace` Swift's `faceContent` is.
   Widget _face(BoardFace face) => switch (face) {
-        BoardFace.workflow => ParityWorkflowView(boardId: widget.boardId),
+        // Deploying follows the board to its Dashboard: once the steps are
+        // frozen the operator's next question is what the RUN is doing, not
+        // what the editor looks like read-only. Swift lands them the same way.
+        BoardFace.workflow => ParityWorkflowView(
+            boardId: widget.boardId,
+            onDeployed: () => _switchTo(BoardFace.dashboard, face),
+          ),
         BoardFace.notes => ParityNotesView(boardId: widget.boardId),
         BoardFace.dashboard => ParityDashboardView(boardId: widget.boardId),
       };
