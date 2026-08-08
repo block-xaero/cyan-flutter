@@ -1,17 +1,17 @@
 // test/notes_view_test.dart
 //
-// PARITY face `notes` â€” the board's notes DOCUMENT (Swift: NotesEditorView +
+// PARITY face `notes` — the board's notes DOCUMENT (Swift: NotesEditorView +
 // NotesEditorViewModel, on today's cyan-iOS main). Tier-1: driven through the
 // `CyanBackend` seam (FakeCyanBackend), no dylib.
 //
 // The behaviours the reference publishes:
-//   â€¢ the document opens in an EDITABLE buffer with its name and its stats
-//   â€¢ the file type is DETECTED from the content, not from the name
-//   â€¢ typing marks the buffer unsaved, and an idle buffer autosaves after 2s
-//   â€¢ the caret is reported live in the status bar
-//   â€¢ a save the engine cannot read back is NOT reported as saved
-//   â€¢ the A2 reviewer rail shows the board's sensed review comments
-//   â€¢ the ledger is the face's right column
+//   • the document opens in an EDITABLE buffer with its name and its stats
+//   • the file type is DETECTED from the content, not from the name
+//   • typing marks the buffer unsaved, and an idle buffer autosaves after 2s
+//   • the caret is reported live in the status bar
+//   • a save the engine cannot read back is NOT reported as saved
+//   • the A2 reviewer rail shows the board's sensed review comments
+//   • the ledger is the face's right column
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -32,7 +32,7 @@ const Size _face = Size(1000, 700);
 /// The board the fixture seeds a real document on.
 const String _board = 'b-eng-4';
 
-/// The board the fixture seeds review comments on â€” `reviewAddComment` files
+/// The board the fixture seeds review comments on — `reviewAddComment` files
 /// them as `review_comment` timecoded notes, which is the A2 rail's source.
 const String _reviewBoard = 'b-eng-1';
 
@@ -52,7 +52,7 @@ void main() {
     expect(find.byKey(const ValueKey('notes-filename')), findsOneWidget);
     expect(find.text('deployment.md'), findsOneWidget);
 
-    // The whole document is IN the buffer â€” the editor is a field, not a
+    // The whole document is IN the buffer — the editor is a field, not a
     // rendered listing, because the reference lets you type into it.
     final seeded = await backend.loadNotes(_board);
     expect(editorText(tester), seeded.content);
@@ -83,7 +83,7 @@ void main() {
     await tester.pump();
     expect(find.text('Unsaved'), findsOneWidget);
 
-    // Nothing has been written yet â€” the autosave is a DELAY, not a keystroke
+    // Nothing has been written yet — the autosave is a DELAY, not a keystroke
     // hook, or every character would be a round trip to the engine.
     expect((await backend.loadNotes(_board)).content,
         isNot(contains('Friday DCP')));
@@ -126,7 +126,7 @@ void main() {
       (tester) async {
     // The engine this port runs against coerces every authored cell kind to
     // `step`, so a notes document is accepted and then unreadable. The face
-    // must say so â€” a green "Saved" over a document that will come back blank
+    // must say so — a green "Saved" over a document that will come back blank
     // is the single worst thing this editor could do.
     final backend = _CoercingBackend();
     await pumpParity(tester, const ParityNotesView(boardId: _board),
@@ -168,14 +168,14 @@ void main() {
     expect(find.text('00:12'), findsOneWidget);
     expect(find.text('01:14'), findsOneWidget);
 
-    // A board with no reviewer comments has NO rail â€” not an empty one.
+    // A board with no reviewer comments has NO rail — not an empty one.
     await pumpParity(tester, const ParityNotesView(boardId: _board),
         backend: backend, size: _face);
     expect(find.byKey(const ValueKey('notes-review-rail')), findsNothing);
   });
 
   test('the file type is detected the way the reference detects it', () {
-    // JSON only when it PARSES â€” a leading brace is not a document.
+    // JSON only when it PARSES — a leading brace is not a document.
     expect(detectNotesFileType('{"a": 1}'), NotesFileType.json);
     expect(detectNotesFileType('{not json at all'), isNot(NotesFileType.json));
     // YAML is gated on a `---` front matter marker or a bare `:\n` line, then
@@ -199,7 +199,7 @@ void main() {
     expect(durable.durable, isTrue);
     expect(durable.reason, isNull);
 
-    // Accepted, re-kinded, unreadable â€” the case this engine actually produces.
+    // Accepted, re-kinded, unreadable — the case this engine actually produces.
     const coerced =
         NotesSaveResult(accepted: true, readBack: false, storedKind: 'step');
     expect(coerced.durable, isFalse);
@@ -223,7 +223,7 @@ void main() {
   // ---- MODE PICKER: the route to the house rules ---------------------------
   //
   // `ParityConstitutionEditor` is a complete port with four green behaviour
-  // tests and, until now, ZERO mount sites â€” and unlike every other orphaned
+  // tests and, until now, ZERO mount sites — and unlike every other orphaned
   // face it has no in-tree parent either, so mounting the shell did not reach
   // it. Every Mac route to the constitution goes through this picker
   // (NotesEditorView.swift:403-411), and Flutter's Notes face had none.
@@ -231,7 +231,7 @@ void main() {
   // This matters beyond navigation: the constitution IS the WITHOUT-NOTES
   // lever. A board with no review notes takes its arguments from the house
   // rules, so "add a rule, re-run, the output changes" is the whole
-  // without-notes demonstration â€” and it could not be performed at all.
+  // without-notes demonstration — and it could not be performed at all.
 
   testWidgets('the Notes face offers Editor and Constitution modes',
       (tester) async {

@@ -1,19 +1,19 @@
 // test/app_root_test.dart
 //
-// The MOUNT EDGE â€” the one test that asks "which app actually ships?".
+// The MOUNT EDGE — the one test that asks "which app actually ships?".
 //
 // Every other parity test pumps its face directly. That is the right shape for
 // proving a face, and it is exactly why the whole `lib/widgets/parity/` tree
 // could sit at 436 green assertions while no operator could open a single one
 // of those faces: `lib/main.dart` mounted the pre-parity `WorkspaceScreen`
-// (canvas / notebook / notes cell editor â€” the surface SwiftUI's `WorkflowView`
+// (canvas / notebook / notes cell editor — the surface SwiftUI's `WorkflowView`
 // was written to REPLACE), and nothing outside `lib/widgets/parity/` imported
 // anything from `lib/widgets/parity/`.
 //
 // So this file tests two things no face test can:
 //   1. the signed-in workspace mounts `ParityHomeShell`, and a board row in it
 //      opens the board CUBE rather than doing nothing;
-//   2. a REPO ORACLE, read off disk, that the orphaning cannot come back â€”
+//   2. a REPO ORACLE, read off disk, that the orphaning cannot come back —
 //      app code must reference the parity shell, and must not re-mount the
 //      legacy shell widgets.
 //
@@ -84,7 +84,7 @@ void main() {
 
       expect(find.byType(ParityBoardContainer), findsOneWidget,
           reason:
-              'tapping a board card must open the board cube â€” a card that '
+              'tapping a board card must open the board cube — a card that '
               'does nothing is the whole reason the parity tree was dead');
       expect(find.byType(ParityIconRail), findsOneWidget,
           reason: 'Swift mounts the board container BESIDE the rail, so a '
@@ -113,7 +113,7 @@ void main() {
   });
 
   group('the Market door is handed the group and the role', () {
-    // `ParityMarketplace` was mounted bare â€” `const ParityMarketplace()` â€” so
+    // `ParityMarketplace` was mounted bare — `const ParityMarketplace()` — so
     // it evaluated `forgeEntryGate(null)` and hard-locked "Build a custom tool"
     // for EVERYONE, owners included, while Install could never run at all for
     // want of a group id to land in. A ported gate, permanently denying.
@@ -160,12 +160,12 @@ void main() {
       final market =
           tester.widget<ParityMarketplace>(find.byType(ParityMarketplace));
       expect(market.sessionRole, isNull,
-          reason: 'no session means no role â€” and the gate locks on that, '
+          reason: 'no session means no role — and the gate locks on that, '
               'which is honest. What was wrong was locking an OWNER too.');
     });
   });
 
-  group('repo oracle â€” the parity tree cannot be orphaned again', () {
+  group('repo oracle — the parity tree cannot be orphaned again', () {
     test('app code mounts the parity shell', () {
       final main = _read('lib/main.dart');
 
@@ -195,7 +195,7 @@ void main() {
 
       expect(importers, isNotEmpty,
           reason: 'NOTHING outside lib/widgets/parity/ imported the parity '
-              'tree â€” that is precisely how 34 faces passed their tests while '
+              'tree — that is precisely how 34 faces passed their tests while '
               'no operator could open one. At least the app entrypoint must.');
     });
   });

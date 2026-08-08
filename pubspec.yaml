@@ -42,3 +42,11 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+
+  assets:
+    # The DEFAULT plugin bundle every group is provisioned with, offline and
+    # with zero clicks (lib/models/default_plugins.dart). Mirrors the Mac app,
+    # which ships the same signed bytes as a Bundle.main resource. Owned by the
+    # Mac session like the engine DLL — never hand-edit, request a restage on
+    # COORD.md.
+    - assets/plugins/

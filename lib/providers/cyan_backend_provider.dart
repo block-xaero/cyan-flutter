@@ -10,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../ffi/cyan_backend.dart';
 import '../ffi/cyan_backend_ffi.dart';
 import '../ffi/parity_models.dart';
+import '../models/default_plugins.dart';
 
 /// The single backend instance. Prod = real FFI adapter.
 /// Tests override this with `FakeCyanBackend`.
@@ -154,4 +155,24 @@ final boardVideoMediaProvider =
     FutureProvider.family<BoardVideoMedia, String>((ref, boardId) async {
   final backend = ref.watch(cyanBackendProvider);
   return backend.boardVideoMedia(boardId);
+});
+
+/// Provisions the DEFAULT plugins into every group the tree knows.
+///
+/// Swift ensures them on group creation AND on every tree load
+/// (`FileTreeViewModel`), because a group can arrive from a sync as well as
+/// from a click. Watching `groupsProvider` covers both: it is the one read that
+/// answers "which groups exist", and it re-runs whenever the tree does.
+///
+/// The result is deliberately `void` and never surfaced. Provisioning is a
+/// convenience — an operator who cannot see their boards because a plugin
+/// install failed is strictly worse off than one whose `@cyan-media` step
+/// pends — so `DefaultPlugins.ensure` swallows failures and simply retries on
+/// the next tree read.
+final defaultPluginsProvider = FutureProvider<void>((ref) async {
+  final backend = ref.watch(cyanBackendProvider);
+  final groups = await ref.watch(groupsProvider.future);
+  for (final group in groups) {
+    await DefaultPlugins.ensure(group.id, backend);
+  }
 });

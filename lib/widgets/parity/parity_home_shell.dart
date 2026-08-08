@@ -18,6 +18,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../ffi/parity_models.dart';
+import '../../providers/cyan_backend_provider.dart';
 import '../../providers/onboarding_session_provider.dart';
 import '../../providers/shell_provider.dart';
 import '../../theme/monokai_theme.dart';
@@ -44,6 +45,12 @@ class ParityHomeShell extends ConsumerWidget {
     ref.listen<ShellDoor>(shellDoorProvider, (_, __) {
       ref.read(selectedBoardProvider.notifier).state = null;
     });
+
+    // Every group carries the default plugins, provisioned from app-shipped
+    // bytes with no network and no clicks. Watched here because the shell is
+    // the one surface guaranteed to be mounted for a signed-in operator; the
+    // result is never rendered (see `defaultPluginsProvider`).
+    ref.watch(defaultPluginsProvider);
 
     final openBoard = ref.watch(selectedBoardProvider);
 
