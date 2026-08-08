@@ -22,6 +22,7 @@
 //   flutter test integration_test/dcc_matrix_w1_test.dart -d windows
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
@@ -30,7 +31,9 @@ import 'flight_harness.dart';
 
 /// The proxy the producer reviews. Real bytes: a 540p H.264 the cyan-media
 /// plugin transcoded from the SET_F hero plate on this box.
-const reviewProxy = r'C:\cyan-media-staging\SET_F_review_proxy.mp4';
+final reviewProxy = Platform.isWindows
+    ? r'C:\cyan-media-staging\SET_F_review_proxy.mp4'
+    : '$mediaRoot/SET_F_review_proxy.mp4';
 
 /// The spine, authored order. Authored order is law — the engine runs exactly
 /// this, and a step that FAILS halts the walk with everything downstream
@@ -43,7 +46,7 @@ const reviewProxy = r'C:\cyan-media-staging\SET_F_review_proxy.mp4';
 /// halt on an unreachable DCC in position 2 would have left the Frame.io
 /// round-trip — the half this box CAN prove — untested. The parks are reported
 /// as parks either way.
-const spine = <String>[
+final spine = <String>[
   // 1 — ingest + probe the dailies. Real ffprobe on the real ARRI plate.
   'ingest and probe the dailies via @cyan-media.probe',
   // 2 — the review proxy goes out for producer review. `file_path`/`name` are

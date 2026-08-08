@@ -25,7 +25,9 @@ import 'package:integration_test/integration_test.dart';
 
 import 'flight_harness.dart';
 
-const reviewProxy = r'C:\cyan-media-staging\SET_F_review_proxy.mp4';
+final reviewProxy = Platform.isWindows
+    ? r'C:\cyan-media-staging\SET_F_review_proxy.mp4'
+    : '$mediaRoot/SET_F_review_proxy.mp4';
 
 /// The reviewer's own words. Everything downstream must be QUOTED out of this
 /// — the moment something appears that is not in here, it was invented.
@@ -34,7 +36,7 @@ const houseRule = '-14 LUFS integrated';
 const freeform = '$creativeNote. House rule: $houseRule.';
 
 /// Same leg set as W1, same stated ordering (reachable DCCs first).
-const spine = <String>[
+final spine = <String>[
   'ingest and probe the dailies via @cyan-media.probe',
   'upload the review proxy for producer review via @frameio.upload_file '
       'file_path=$reviewProxy name=SET_F_W2_review.mp4 /needs-approval',

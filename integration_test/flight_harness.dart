@@ -25,15 +25,32 @@ import 'package:cyan_flutter/ffi/ffi_helpers.dart';
 
 /// Where the flights live. NOT a temp dir: Rick opens the desktop app on the
 /// finished one, so it has to survive the test process.
-const flightsRoot = r'C:\cyan\flights';
+final flightsRoot = Platform.isWindows
+    ? r'C:\cyan\flights'
+    : '${Platform.environment['HOME']}/cyan-flights';
 
-/// SET_F, as ingested: one folder holding the hero ARRI plate. The folder is
-/// under `CYAN_MEDIA_ROOT`, so the engine's staging pass recognises it as
-/// already-confined and never copies half a gigabyte to reach it.
-const setFFolder = r'C:\cyan-media-staging\SET_F';
+/// The box's media root — the flight MUST be launched with
+/// `CYAN_MEDIA_ROOT=<mediaRoot>` in the test process env, so the engine's
+/// staging pass recognises SET_F as already-confined and never copies half a
+/// gigabyte to reach it.
+final mediaRoot = Platform.isWindows
+    ? r'C:\cyan-media-staging'
+    : '/Volumes/cyan-media/cyan-corpus/multicut_sets';
 
-/// The signed `.cyanplugin` bundles staged on this box.
-const bundlesDir = r'C:\Users\ricky\.cyan-staging\plugins';
+/// SET_F, as ingested: one folder holding the hero plates, under [mediaRoot].
+final setFFolder = Platform.isWindows
+    ? r'C:\cyan-media-staging\SET_F'
+    : '$mediaRoot/SET_F_demo_cinematic_flat';
+
+/// The signed `.cyanplugin` bundles staged on this box. On the Mac the served
+/// s0-lens dir IS the signed-bundle store.
+final bundlesDir = Platform.isWindows
+    ? r'C:\Users\ricky\.cyan-staging\plugins'
+    : '${Platform.environment['HOME']}/.cyan-s0-lens/plugins';
+
+/// Path-separator-safe join for the two flight platforms.
+String pjoin(String a, String b) =>
+    Platform.isWindows ? '$a\\$b' : '$a/$b';
 
 /// The plugins a flight installs into its own fresh group. Per-group install is
 /// what `workflow_bind` checks before it will bind an `@mention` at all, so a
@@ -75,7 +92,7 @@ class Flight {
   final String name;
   final backend = CyanBackendFFI();
 
-  late final String dataDir = '$flightsRoot\\$name';
+  late final String dataDir = pjoin(flightsRoot, name);
   late final FlightLog log;
 
   String groupId = '';
@@ -85,14 +102,14 @@ class Flight {
   /// Boot the engine on this flight's own data dir.
   Future<void> boot() async {
     Directory(dataDir).createSync(recursive: true);
-    log = FlightLog('$dataDir\\flight.log');
+    log = FlightLog(pjoin(dataDir, 'flight.log'));
     log('=== FLIGHT $name — engine boot on $dataDir ===');
 
     if (!CyanFFI.setDataDir(dataDir)) {
       throw StateError('the engine refused $dataDir as its data dir');
     }
     final ok = CyanFFI.initWithIdentity(
-      dbPath: '$dataDir\\cyan.db',
+      dbPath: pjoin(dataDir, 'cyan.db'),
       secretKeyHex: List.filled(64, name.hashCode.abs().toRadixString(16)[0])
           .join(),
       relayUrl: '',
@@ -145,7 +162,7 @@ class Flight {
   Future<Map<String, String>> installPlugins() async {
     final outcomes = <String, String>{};
     for (final id in flightPlugins) {
-      final file = File('$bundlesDir\\$id.cyanplugin');
+      final file = File(pjoin(bundlesDir, '$id.cyanplugin'));
       if (!file.existsSync()) {
         outcomes[id] = 'MISSING BUNDLE ${file.path}';
         log('plugin $id: ${outcomes[id]}');
@@ -442,7 +459,7 @@ class Flight {
       'uv',
       [
         'run', '--python', '3.12', '--no-project', 'python',
-        r'C:\cyan\plugsmoke.py', plugin, tool, jsonEncode(args),
+        pjoin('integration_test', 'plugsmoke.py'), plugin, tool, jsonEncode(args),
       ],
       runInShell: true,
     );
