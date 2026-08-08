@@ -174,6 +174,55 @@ build kept green as the cheap CI canary. Plugin-foundation work (Frame.io) lives
 repos on `main` against the frozen tag — these two streams never collide.
 
 ## Digest log (newest first)
+- **2026-08-08 (seventh shift, cyan-win) — from "the app mounts nothing" to a RUNNING binary with the parity front door on screen. Fourteen commits, local only.**
+
+  **Green:** Tier-1 **474/474** (436 at shift start, +38), `flutter analyze` 0 errors, `flutter build
+  windows --release` GREEN, goldens platform-skipped. No test, face or golden weakened.
+
+  **Verified in the running binary, not only in tests** — the release exe launches, the engine
+  resolves (no EngineUnavailable screen), and the parity front door renders: brand mark,
+  Personal/Organization picker, "Create your identity (no account)", the offline promise, Restore
+  and the end-to-end-encrypted footer. The SHELL itself is still test-proved only; the workstation
+  locked before it could be driven past sign-in.
+
+  **The four axes, measured as an operator:** (1) the spine now has both ENDS reachable — a Sources
+  door at the front, the Video face mounting the review station with produce-master at the back;
+  (2) the constitution — the WITHOUT-notes lever — is reachable through the new Notes mode picker,
+  while the structuring lane still needs the lens methods; (3) template → marketplace auto-install
+  is CLOSED end to end; (4) signup has its parity front door, its RBAC vocabulary and its first real
+  gate, with durable offline identity remaining.
+
+  **Landed:** `c48438f` mount the shell + board selection · `185b6f2` Sources door · `fca6923`
+  Deploy/Unlock lifecycle · `091b0ec` parked-step Re-run (routed to the sense step UPSTREAM so the
+  resume re-reads the reviewer's comment) · `7dd3e5e` Notes mode picker + constitution ·
+  `762c144` the sixth-shift digest + `PARITY_AUDIT_2026-08-08.md` · `717eef2` the fourth face ·
+  `afbddd7` Market door handed group + role · `729dfcc` cyan-media provisioning ·
+  `d57ea17` clone-time step-bound auto-install · `84210f2` Role/AppAction/authorize ·
+  `3a0b196` the parity front door · `5c49f65` the REAL brand mark · `c306c42` rail bottom actions.
+
+  **Three engine/Swift divergences found by reading the reference rather than assuming:**
+  the engine's template auto-install covers only `auto_install_set` and its DTO EXCLUDES step
+  `@mentions`, so clones that run on macOS could not run here; Swift's `BoardFace` declares FOUR
+  faces with `video` CONDITIONAL on the board resolving media (Dart had conflated `values` with
+  `standardFaces`); and Swift's `NavigationMode` has exactly five cases, so the "missing Ops door"
+  was really a missing bottom ACTION stack — adding a sixth door would have been divergence dressed
+  as parity.
+
+  **Things that were built and structurally could not work**, each fixed where the fault was:
+  `ParityMarketplace` mounted bare so `forgeEntryGate(null)` hard-locked the forge for OWNERS;
+  `OpsScaffold`'s segmented control had no host, so the console could not change face; a rail door
+  chosen while a board was open did nothing, leaving the rail decorative; and the login's brand mark
+  was `Icons.hexagon_outlined` while the real artwork sat unbundled in the repo (pubspec had no
+  `assets:` key at all).
+
+  **Two traps recorded so nobody re-pays them.** PowerShell `Set-Content -Encoding utf8` reads a
+  UTF-8 source file as ANSI and rewrites it DOUBLE-ENCODED — it silently mojibaked every em-dash and
+  box-drawing character in three files, and the tests could not catch it because only comments were
+  touched (repaired in `729dfcc`; use the editor, never Set-Content, on source). And this box's
+  display is at **225% scaling** (window DPI 216, client 2880x1620 for a 1280x720 logical window):
+  screenshot code that is not per-monitor-DPI-aware samples a virtualised region and makes a
+  correctly centred layout look badly offset — `SetProcessDpiAwarenessContext(-4)` before
+  `CopyFromScreen` is what makes a screenshot of this app trustworthy.
 - **2026-08-08 (sixth shift, cyan-win) — THE ROWS WERE TRUE AND THE APP WAS NOT: every parity face was dead code at runtime. Five commits, local only.**
 
   **The finding that reframes this whole tracker.** `lib/main.dart` mounted the pre-parity
