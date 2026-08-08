@@ -174,6 +174,57 @@ build kept green as the cheap CI canary. Plugin-foundation work (Frame.io) lives
 repos on `main` against the frozen tag — these two streams never collide.
 
 ## Digest log (newest first)
+- **2026-08-08 (sixth shift, cyan-win) — THE ROWS WERE TRUE AND THE APP WAS NOT: every parity face was dead code at runtime. Five commits, local only.**
+
+  **The finding that reframes this whole tracker.** `lib/main.dart` mounted the pre-parity
+  `WorkspaceScreen` — the canvas/notebook/notes cell editor that SwiftUI's `WorkflowView` was
+  written to REPLACE — and **nothing outside `lib/widgets/parity/` imported anything from
+  `lib/widgets/parity/`**: `grep -rn "widgets/parity" lib/ | grep -v "^lib/widgets/parity/"`
+  returned ZERO. All 34 parity faces were reachable only from `test/`. So rows 0–22 were
+  honest about the WIDGETS and silent about the SHELL, and 436 green Tier-1 assertions plus 15
+  green Tier-2 suites were proving screens an operator had never been able to open. Measured as
+  an operator rather than as a test runner, Windows was at roughly zero on all four of Rick's
+  axes: no compile, no Run, no autopilot switch, no ingest, no gate, no review player, no
+  delivered master; no Structure or Constitution lever in either notes lane; no Market door and
+  no Templates button, so the plugin auto-install question never even arose; and no role, no
+  org sign-in, no durable offline identity. **Runtime reachability was never a row. It is one
+  now** — `test/app_root_test.dart` carries a repo oracle, read off disk, that fails if app code
+  ever stops importing the parity tree.
+
+  **The port itself is in far BETTER shape than "zero" implies**, which is the other half of the
+  finding: 38 parity files, ~44 widgets and ~16 providers are built, engine-wired and
+  behaviour-tested. Roughly two thirds of the ranked work is a missing MOUNT EDGE or a missing
+  DOOR, not a port. Full five-axis audit with file-level evidence: `PARITY_AUDIT_2026-08-08.md`.
+
+  **Green:** Tier-1 **451/451** (436 + 15 new), `flutter analyze` 0 errors, goldens
+  platform-skipped. No existing test, face or golden was weakened or touched.
+
+  **Landed:** `c48438f` mount the parity shell + the board selection it lacked (`ParityHomeShell`
+  default-constructed all five surfaces, so `onOpenBoard` was null and `ParityBoardContainer` had
+  no call site — repointing `main.dart` alone would not have opened a board) · `185b6f2` the
+  Sources door, the spine's first station, with the tenant RESOLVED from the board's group rather
+  than defaulted · `fca6923` the Deploy/Unlock lifecycle, replacing a full-tint button wired to
+  `onTap: null`, client-side per `BoardLockStore.swift` because the engine exports only the READ
+  verb · `091b0ec` the parked-step Re-run, routed to the comment/sense step UPSTREAM so a resume
+  re-reads the reviewer's new comment instead of re-running the same step into the same park ·
+  `7dd3e5e` the Notes mode picker, which is the only route to `ParityConstitutionEditor` — the
+  WITHOUT-NOTES lever, a complete 611-line port that had never been mounted by anything.
+
+  **Deliberately NOT drawn:** the Notes `Structure` segment. Its surface is lens HTTP
+  (`POST /api/v1/notes/structure`) and the `LensApi` seam has no such method, so it would be a
+  control with no lane behind it. The enum case exists and a test pins the absence with its
+  reason.
+
+  **For the Mac session — goldens to re-baseline there:** `golden/workflow_author.png` (the
+  toolbar deliberately gained the Sources control, and now scrolls instead of clipping — seven
+  controls overflowed the Row by 87px at 900px wide and threw a RenderFlex in ten existing
+  tests) and `golden/notes_editor.png` (gained the mode picker). `golden/dashboard_dag.png` only
+  if its fixture ever parks.
+
+  **Two things Windows cannot resolve alone, both answered on COORD.md:** cyan-media is vendored
+  at `assets/plugins/` with the Mac owning sync; and the two "missing verbs" turned out not to
+  need engine work — `schedule` is a LENS route, and durable create-identity is
+  `xaero_generate_json`, already in the DLL's export table and simply unbound on the Dart seam.
 - **2026-08-07 (fifth shift, MAC) — BOTH DCC-matrix flights GREEN ON THE MAC (W1 9/9, W2 11/11), four engine holes fixed suite-green, and the first REAL cross-machine run over LAN — with its blocker found and named.**
 
   **Green:** Tier-1 436/436, analyze 0 errors. Backend full suite 137 binaries / 0 failed over the fixes. **W1 (WITHOUT notes) 9/9** and **W2 (WITH notes, LIVE lens structuring) 11/11** on macOS — real engine, real signed plugins (7/7 incl. ae), real Frame.io both directions, the producer window CLEARED on real comment evidence (`window:comments-present` — first time reachable on any box), AUTO-1 colour floor held, one settle, incidents ledgered, zero clicks. Flights: `~/cyan-flights/W1` + `W2`. Launch recipe + traps in auto-memory (`mac-flight-rig-recipe`).
