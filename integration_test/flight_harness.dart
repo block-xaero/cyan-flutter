@@ -37,10 +37,12 @@ final mediaRoot = Platform.isWindows
     ? r'C:\cyan-media-staging'
     : '/Volumes/cyan-media/cyan-corpus/multicut_sets';
 
-/// SET_F, as ingested: one folder holding the hero plates, under [mediaRoot].
+/// SET_F, as ingested: one folder holding THE hero plate — the harness
+/// contract is exactly one file (the rungs key off "the" asset), so the Mac
+/// uses the staged one-plate SET_F_hero, not the 3-plate corpus folder.
 final setFFolder = Platform.isWindows
     ? r'C:\cyan-media-staging\SET_F'
-    : '$mediaRoot/SET_F_demo_cinematic_flat';
+    : '$mediaRoot/SET_F_hero';
 
 /// The signed `.cyanplugin` bundles staged on this box. On the Mac the served
 /// s0-lens dir IS the signed-bundle store.
