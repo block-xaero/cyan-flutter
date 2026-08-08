@@ -44,6 +44,11 @@ flutter:
   uses-material-design: true
 
   assets:
+    # The brand mark — the real the-cyan.com icon the login screen and the
+    # Windows app icon are both built from (byte-identical to cyan-iOS's
+    # CyanBrandMark asset). This directory existed with the artwork in it and
+    # was never declared, so nothing could load it.
+    - assets/icons/
     # The DEFAULT plugin bundle every group is provisioned with, offline and
     # with zero clicks (lib/models/default_plugins.dart). Mirrors the Mac app,
     # which ships the same signed bytes as a Bundle.main resource. Owned by the

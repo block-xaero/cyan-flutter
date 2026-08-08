@@ -123,25 +123,45 @@ class _ParityLoginViewState extends State<ParityLoginView> {
 class _BrandBlock extends StatelessWidget {
   const _BrandBlock();
 
+  /// Swift's `CyanBrandLogo` defaults to 72pt; the corner radius is derived
+  /// from it, so the two must stay together.
+  static const double _brandMarkSize = 76;
+
   @override
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // The brand mark — a hex-ish cyan glyph standing in for `CyanBrandLogo`.
-        Container(
-          width: 76,
-          height: 76,
-          decoration: BoxDecoration(
-            color: MonokaiTheme.cyan.withValues(alpha: 0.12),
-            shape: BoxShape.circle,
-            border: Border.all(
-              color: MonokaiTheme.cyan.withValues(alpha: 0.5),
-              width: 1.5,
+        // THE BRAND MARK — the real the-cyan.com icon, not a stand-in.
+        //
+        // This used to draw `Icons.hexagon_outlined` inside a cyan ring, with a
+        // comment admitting it was "a hex-ish cyan glyph standing in for
+        // CyanBrandLogo". The actual asset was in the repo the whole time and
+        // simply never bundled: `assets/icons/app_icon.png` is BYTE-IDENTICAL
+        // to cyan-iOS's `CyanBrandMark.imageset/cyan-wordmark.png` (same
+        // sha256, 1024x1024), and pubspec had no `assets:` key at all, so
+        // nothing could load it.
+        //
+        // Swift's `CyanBrandLogo` clips the asset to `size * 0.22` because the
+        // artwork bakes its own dark rounded tile and the square corners would
+        // otherwise show against the login ground. Same radius here, for the
+        // same reason — and it is the same file the Windows app icon is built
+        // from, so the login screen and the taskbar show one mark.
+        ClipRRect(
+          borderRadius: BorderRadius.circular(_brandMarkSize * 0.22),
+          child: Image.asset(
+            'assets/icons/app_icon.png',
+            width: _brandMarkSize,
+            height: _brandMarkSize,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.high,
+            semanticLabel: 'Cyan',
+            // A missing asset must not take the front door down with it: the
+            // wordmark below still names the app.
+            errorBuilder: (_, __, ___) => const SizedBox(
+              width: _brandMarkSize,
+              height: _brandMarkSize,
             ),
           ),
-          alignment: Alignment.center,
-          child: const Icon(Icons.hexagon_outlined,
-              size: 38, color: MonokaiTheme.cyan),
         ),
         const SizedBox(height: 16),
         Text('Cyan',
@@ -149,8 +169,8 @@ class _BrandBlock extends StatelessWidget {
                 .copyWith(color: MonokaiTheme.foreground)),
         const SizedBox(height: 8),
         Text('Decentralized Collaboration',
-            style: MonokaiTheme.bodyMedium
-                .copyWith(color: MonokaiTheme.comment)),
+            style:
+                MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.comment)),
       ],
     );
   }
@@ -312,8 +332,8 @@ class _OrganizationSection extends StatelessWidget {
               isDense: true,
               contentPadding: const EdgeInsets.symmetric(vertical: 14),
               hintText: 'Organization (optional)',
-              hintStyle: MonokaiTheme.bodyMedium
-                  .copyWith(color: MonokaiTheme.comment),
+              hintStyle:
+                  MonokaiTheme.bodyMedium.copyWith(color: MonokaiTheme.comment),
             ),
           ),
         ),
@@ -322,7 +342,8 @@ class _OrganizationSection extends StatelessWidget {
           key: const ValueKey('login-sso-signin'),
           icon: Icons.business,
           label: 'Sign in with your organization',
-          onTap: onSsoSignIn == null ? null : () => onSsoSignIn!(controller.text),
+          onTap:
+              onSsoSignIn == null ? null : () => onSsoSignIn!(controller.text),
         ),
         const SizedBox(height: 16),
         Text(
@@ -409,8 +430,7 @@ class _SecondaryButton extends StatelessWidget {
         decoration: BoxDecoration(
           color: MonokaiTheme.cyan.withValues(alpha: 0.1),
           borderRadius: BorderRadius.circular(8),
-          border:
-              Border.all(color: MonokaiTheme.cyan.withValues(alpha: 0.3)),
+          border: Border.all(color: MonokaiTheme.cyan.withValues(alpha: 0.3)),
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -420,8 +440,8 @@ class _SecondaryButton extends StatelessWidget {
             Flexible(
               child: Text(
                 label,
-                style: MonokaiTheme.labelLarge
-                    .copyWith(color: MonokaiTheme.cyan),
+                style:
+                    MonokaiTheme.labelLarge.copyWith(color: MonokaiTheme.cyan),
               ),
             ),
           ],
