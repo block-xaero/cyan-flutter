@@ -187,6 +187,8 @@ class _Body extends StatelessWidget {
     final gates = state.gates;
     return [
       _RunHeader(state: state),
+      const SizedBox(height: 10),
+      _RunControls(state: state, controller: controller),
       const SizedBox(height: 16),
       Text('Workflow', style: MonokaiTheme.labelLarge),
       const SizedBox(height: 8),
@@ -1060,6 +1062,108 @@ class _Placeholder extends StatelessWidget {
           Text(detail,
               style: MonokaiTheme.labelMedium, textAlign: TextAlign.center),
         ],
+      ),
+    );
+  }
+}
+
+/// The run's own controls, above the graph.
+///
+/// Deliberately only the three that have a real lane behind them:
+///
+///   • PAUSE / RESUME — client-side, because there is no engine pause verb.
+///     Swift holds it the same way. It stops THIS client advancing the chain
+///     and Resume re-runs from the first pending step; it does not reach into a
+///     step already executing, and nothing here suggests it does.
+///   • RESET RUN — `cyan_pipeline_reset`: every step back to pending, results
+///     cleared. State surgery only, so nothing re-executes and no upload
+///     re-fires — which is what makes it safe on a run that already sent things
+///     out. Refused mid-walk, because resetting rows underneath a running chain
+///     races the engine's own writes.
+///
+/// NOT drawn, and recorded rather than faked: Assign reviewer (the seam carries
+/// no `setReviewAssignee`) and Schedule (a lens route the `LensApi` seam does
+/// not have yet). A control with no lane behind it is worse than no control.
+class _RunControls extends StatelessWidget {
+  final DashboardState state;
+  final DashboardController controller;
+
+  const _RunControls({required this.state, required this.controller});
+
+  @override
+  Widget build(BuildContext context) {
+    final paused = state.isPaused;
+    return Row(
+      children: [
+        if (state.isRunning || paused)
+          _RunButton(
+            key: const ValueKey('dashboard.pause'),
+            icon: paused ? Icons.play_arrow : Icons.pause,
+            label: paused ? 'Resume' : 'Pause',
+            tint: paused ? MonokaiTheme.green : MonokaiTheme.yellow,
+            onTap: state.busy
+                ? null
+                : (paused ? controller.resumeRun : controller.pauseRun),
+          ),
+        if (state.isRunning || paused) const SizedBox(width: 8),
+        _RunButton(
+          key: const ValueKey('dashboard.reset'),
+          icon: Icons.restart_alt,
+          label: 'Reset run',
+          tint: MonokaiTheme.textMuted,
+          // Mid-walk it is refused rather than hidden: an operator who cannot
+          // see the control cannot learn why it is unavailable.
+          onTap: (state.busy || state.isRunning) ? null : controller.resetRun,
+        ),
+        const Spacer(),
+        if (paused)
+          Text('Paused — the chain stops after the step in flight',
+              key: const ValueKey('dashboard.paused-note'),
+              style:
+                  MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.yellow)),
+      ],
+    );
+  }
+}
+
+class _RunButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color tint;
+  final VoidCallback? onTap;
+
+  const _RunButton({
+    super.key,
+    required this.icon,
+    required this.label,
+    required this.tint,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: tint.withValues(alpha: enabled ? 0.14 : 0.05),
+          borderRadius: BorderRadius.circular(6),
+          border:
+              Border.all(color: tint.withValues(alpha: enabled ? 0.5 : 0.2)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon,
+                size: 12, color: tint.withValues(alpha: enabled ? 1 : 0.4)),
+            const SizedBox(width: 6),
+            Text(label,
+                style: MonokaiTheme.labelMedium.copyWith(
+                    color: tint.withValues(alpha: enabled ? 1 : 0.4))),
+          ],
+        ),
       ),
     );
   }

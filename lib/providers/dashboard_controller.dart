@@ -206,6 +206,14 @@ class DashboardState {
   /// A gate write is in flight — the buttons hold rather than double-fire.
   final bool busy;
 
+  /// The operator asked the walk to stop after the step in flight.
+  ///
+  /// CLIENT-SIDE, exactly as Swift holds it: there is no engine pause verb, and
+  /// inventing one would be worse than useless — the engine would keep walking
+  /// while the UI claimed otherwise. What this actually does is stop THIS client
+  /// from advancing the chain; Resume re-runs from the first pending step.
+  final bool isPaused;
+
   /// Frames this build could not decode. Counted, not swallowed.
   final int droppedFrames;
 
@@ -225,6 +233,7 @@ class DashboardState {
     this.error,
     this.busy = false,
     this.droppedFrames = 0,
+    this.isPaused = false,
   });
 
   static const DashboardState initial = DashboardState(
@@ -254,6 +263,7 @@ class DashboardState {
     bool clearError = false,
     bool? busy,
     int? droppedFrames,
+    bool? isPaused,
   }) =>
       DashboardState(
         hydrated: hydrated ?? this.hydrated,
@@ -272,7 +282,11 @@ class DashboardState {
         error: clearError ? null : (error ?? this.error),
         busy: busy ?? this.busy,
         droppedFrames: droppedFrames ?? this.droppedFrames,
+        isPaused: isPaused ?? this.isPaused,
       );
+
+  /// The engine is working the chain.
+  bool get isRunning => phase == DashboardPhase.running;
 
   /// The open gates, in DAG order. Derived from the steps — a gate list that
   /// can drift from the steps it gates is a gate list that lies. A LENS PARK is
@@ -368,7 +382,12 @@ class DashboardState {
       other.gateMessage == gateMessage &&
       other.error == error &&
       other.busy == busy &&
-      other.droppedFrames == droppedFrames;
+      other.droppedFrames == droppedFrames &&
+      // A field missing from here is a field that SILENTLY never reaches the
+      // view: StateNotifier suppresses the publish when the new state compares
+      // equal to the old. `isPaused` was added and omitted, and the Pause
+      // button did nothing at all until this line existed.
+      other.isPaused == isPaused;
 
   @override
   int get hashCode => Object.hash(
@@ -387,6 +406,7 @@ class DashboardState {
         error,
         busy,
         droppedFrames,
+        isPaused,
       );
 }
 
@@ -596,6 +616,76 @@ class DashboardController extends StateNotifier<DashboardState> {
       final ok = await backend.pipelineRetry(boardId, stepId);
       return ok ? null : 'the engine refused to retry this step';
     });
+  }
+
+  // ---- run controls --------------------------------------------------------
+
+  /// Stop advancing the chain after the step in flight.
+  ///
+  /// There is no engine pause verb, so this is what Swift does too: a
+  /// client-side flag. It is honest because it only claims what it can do —
+  /// this client stops pushing the run forward. It does NOT reach into a step
+  /// already executing, and the label must never suggest it did.
+  void pauseRun() {
+    if (!state.isRunning || state.isPaused) return;
+    state = state.copyWith(isPaused: true);
+  }
+
+  /// Pick the walk back up from the first step still pending.
+  Future<void> resumeRun() async {
+    if (!state.isPaused) return;
+    state = state.copyWith(isPaused: false);
+    final next = state.steps
+        .where((s) => s.state == DashboardStepState.pending)
+        .firstOrNull;
+    if (next == null) return;
+    await retry(next.id);
+  }
+
+  /// WHOLE-RUN reset: every step back to pending, results cleared.
+  ///
+  /// STATE SURGERY ONLY — it never runs anything, so nothing re-executes, no
+  /// upstream artifact is re-produced and no upload re-fires. That is what
+  /// makes it safe to offer on a run that already sent things out into the
+  /// world. The human presses Run again.
+  ///
+  /// Refused while the engine is mid-walk: resetting rows underneath a running
+  /// chain would race the engine's own writes.
+  Future<void> resetRun() async {
+    if (state.busy || state.isRunning) return;
+    state = state.copyWith(busy: true, clearGateMessage: true);
+    try {
+      final ok = await backend.pipelineReset(boardId);
+      if (_stopped) return;
+      state = state.copyWith(
+        busy: false,
+        isPaused: false,
+        gateMessage: ok ? null : 'the engine refused to reset this run',
+      );
+      await hydrate();
+    } catch (e) {
+      if (_stopped) return;
+      state = state.copyWith(busy: false, gateMessage: _describe(e));
+    }
+  }
+
+  /// Put ONE step back to pending — the narrow version of [resetRun], for the
+  /// step an operator wants to re-do without discarding the whole walk.
+  Future<void> resetStep(String stepId) async {
+    if (state.busy) return;
+    state = state.copyWith(busy: true, clearGateMessage: true);
+    try {
+      final ok = await backend.pipelineResetStep(boardId, stepId);
+      if (_stopped) return;
+      state = state.copyWith(
+        busy: false,
+        gateMessage: ok ? null : 'the engine refused to reset that step',
+      );
+      await hydrate();
+    } catch (e) {
+      if (_stopped) return;
+      state = state.copyWith(busy: false, gateMessage: _describe(e));
+    }
   }
 
   /// Re-run a PARKED (awaiting-input) step.

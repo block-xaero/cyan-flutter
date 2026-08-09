@@ -15,6 +15,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 import 'package:cyan_flutter/ffi/fake_cyan_backend.dart';
 import 'package:cyan_flutter/ffi/parity_models.dart';
+import 'package:cyan_flutter/models/dashboard_event.dart';
 import 'package:cyan_flutter/providers/dashboard_controller.dart';
 import 'package:cyan_flutter/widgets/parity/parity_dashboard_view.dart';
 
@@ -642,6 +643,61 @@ void main() {
     await vm.rerunParked('ws4');
 
     expect(backend.retried, ['ws4']);
+  });
+
+  // ---- RUN CONTROLS --------------------------------------------------------
+
+  testWidgets('a running run offers Pause, and pausing says what it did',
+      (tester) async {
+    final backend = await engine();
+    final vm = await mount(tester, backend: backend, boardId: _flagship);
+    expect(vm.current.isRunning, isTrue);
+
+    final pause = find.byKey(const ValueKey('dashboard.pause'));
+    expect(pause, findsOneWidget);
+    expect(find.text('Pause'), findsOneWidget);
+
+    await tester.tap(pause);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Resume'), findsOneWidget);
+    // The label is careful on purpose: there is no engine pause verb, so the
+    // claim is only what this client can actually do.
+    expect(find.byKey(const ValueKey('dashboard.paused-note')), findsOneWidget);
+    expect(find.textContaining('after the step in flight'), findsOneWidget);
+  });
+
+  testWidgets('Reset run is REFUSED mid-walk rather than hidden',
+      (tester) async {
+    // Resetting rows underneath a running chain races the engine's own writes.
+    // Hiding the control would leave the operator unable to learn why.
+    final backend = await engine();
+    final vm = await mount(tester, backend: backend, boardId: _flagship);
+    expect(vm.current.isRunning, isTrue);
+
+    final reset = find.byKey(const ValueKey('dashboard.reset'));
+    expect(reset, findsOneWidget, reason: 'shown, but inert');
+
+    final statesBefore = vm.current.steps.map((s) => s.state).toList();
+    await tester.tap(reset);
+    await tester.pumpAndSettle();
+    expect(vm.current.steps.map((s) => s.state).toList(), statesBefore,
+        reason: 'a refused reset must move nothing');
+  });
+
+  test('resetting a step puts exactly that step back to pending', () async {
+    final backend = await engine();
+    final vm = DashboardController(backend: backend, boardId: _flagship);
+    addTearDown(vm.dispose);
+    await vm.hydrate();
+
+    final settled = vm.current.steps
+        .firstWhere((s) => s.state == DashboardStepState.approved);
+    await vm.resetStep(settled.id);
+
+    expect(_stateOf(await backend.pipelineStatus(_flagship), settled.id),
+        PipelineStepState.pending,
+        reason: 'state surgery only — nothing re-executes');
   });
 
   testWidgets('golden: dashboard DAG + gated run', (tester) async {
