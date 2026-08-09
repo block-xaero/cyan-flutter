@@ -450,9 +450,14 @@ void main() {
             'never a policy card (AUTO-1 is about who may not, not who may)');
 
     await flight.resumeRun();
+    // Stillness must OUTLAST the window's 180s elapse: after the resume the
+    // ONLY next transition may be the elapse itself, and a 90s stillness
+    // detector declared 'parked' seconds before it fired (W2 run-4's whole
+    // mystery; W1's tail survived only because the colour confirm caused
+    // earlier transitions that reset the clock).
     final status = await flight.flyUntilSettled(
       limit: const Duration(minutes: 10),
-      stillFor: const Duration(seconds: 90),
+      stillFor: const Duration(seconds: 240),
     );
     final steps = Flight.stepsOf(status);
     final grade =

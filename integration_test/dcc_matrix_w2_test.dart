@@ -229,6 +229,23 @@ void main() {
       'active': true,
     });
     expect(graphics, isNotNull);
+
+    // The RENDER is house doctrine, not a note ask — no producer writes
+    // "please render the comp". With-notes ADDS the note lane on top of the
+    // house lane; without this op the render step has no params source and
+    // the release guard rightly holds it forever (run-7's finding).
+    final render = flight.appendEntry({
+      'kind': 'op',
+      'op': 'ae.render_comp',
+      'intent': 'render the endcard comp for the conform (house rule)',
+      'params': {'comp': 'CYAN_ENDCARD', 'confidence': 0.95},
+      'state': 'proposed',
+      'proposed_by': 'agent',
+      'source': 'house-rules',
+      'tc_in': 0,
+      'active': true,
+    });
+    expect(render, isNotNull);
   }, timeout: const Timeout(Duration(minutes: 5)));
 
   test('the house rule is MEASURED, not asserted — a real loudness read of the '
@@ -416,10 +433,6 @@ void main() {
   // render, gate release, LIVE Resolve. Verbatim words stay on the ledger as
   // the superseded row; nothing is overwritten, everything is attributed.
   test('the COLORIST supersedes to the corpus — and Resolve applies the note',
-      skip: 'run-4: the media-binding cell IS authored (harness) and the '
-          'sensed note lands, yet W2\'s window still refuses both evidence '
-          'and the 180s elapse across a 10-minute fly — W1\'s identical tail '
-          'is green. Next probe: RUST_LOG the W2 window judge inputs.',
       () async {
     final verbatim = flight
         .entriesOfKind('op')
@@ -453,9 +466,14 @@ void main() {
         reason: 'the verbatim ask must remain, labeled: ${old['state']}');
 
     await flight.resumeRun();
+    // Stillness must OUTLAST the window's 180s elapse: after the resume the
+    // ONLY next transition may be the elapse itself, and a 90s stillness
+    // detector declared 'parked' seconds before it fired (W2 run-4's whole
+    // mystery; W1's tail survived only because the colour confirm caused
+    // earlier transitions that reset the clock).
     final status = await flight.flyUntilSettled(
       limit: const Duration(minutes: 10),
-      stillFor: const Duration(seconds: 90),
+      stillFor: const Duration(seconds: 240),
     );
     final grade = Flight.stepsOf(status)
         .firstWhere((s) => s['step_id'] == 'grade_the_cut');
