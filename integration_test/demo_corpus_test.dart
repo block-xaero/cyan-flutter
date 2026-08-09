@@ -271,11 +271,13 @@ void main() {
           final err = '${s['error'] ?? ''}';
           final id = '${s['step_id']}';
           if (st == 'ai_complete') {
-            approvedAny = flight.approveStep(id) || approvedAny;
+            approvedAny =
+                flight.approveStep(id, by: 'supervisor:rick') || approvedAny;
           } else if (i == frontier &&
               st == 'scheduled' &&
               !('${s['title']}').contains('@')) {
-            approvedAny = flight.approveStep(id) || approvedAny;
+            approvedAny =
+                flight.approveStep(id, by: 'supervisor:rick') || approvedAny;
           } else if (i == frontier &&
               st == 'failed' &&
               err.startsWith('needs_human') &&
@@ -318,6 +320,16 @@ void main() {
         .length;
     final grade =
         steps.firstWhere((s) => s['step_id'] == 'grade_the_cut');
+    // WHO SIGNED — the demo's whole point. An autopilot board's gates carry the
+    // policy identity plus its evidence; a human-gated board's carry people.
+    // `anonymous` on either means the stamp lane is broken, not that nobody
+    // clicked, so it fails the board rather than shipping a mute ledger.
+    final signer = '${grade['approved_by']}';
+    expect(signer, isNot(contains('anonymous')),
+        reason: 'the grade landed unattributed: $signer');
+    expect(signer,
+        spec.autopilot ? contains('policy:dev-floor@v0') : contains('rick'),
+        reason: 'wrong authority signed the ${spec.key} grade: $signer');
     flight.log('DEMO ${spec.key}: $done/${steps.length} approved; '
         'grade=${grade['status']} by=${grade['approved_by']}');
     expect(done, greaterThanOrEqualTo(steps.length - 2),

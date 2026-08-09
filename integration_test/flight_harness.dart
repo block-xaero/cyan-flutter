@@ -493,9 +493,16 @@ class Flight {
   }
 
   /// The Dashboard's own Approve on one step (the human gate door).
-  bool approveStep(String stepId) {
-    final ok = CyanFFI.pipelineApprove(boardId, stepId);
-    log('human approve $stepId -> $ok');
+  /// Approve a gate. Pass [by] to stamp a NAMED human on the step the way the
+  /// Dashboard's signed-in operator does — an unnamed approve records
+  /// `anonymous`, which is indistinguishable from an unattributed click when
+  /// you are demonstrating who cleared what.
+  bool approveStep(String stepId, {String? by}) {
+    final ok = by == null
+        ? CyanFFI.pipelineApprove(boardId, stepId)
+        : ('${CyanFFI.pipelineApproveAs(boardId, stepId, by)}')
+            .contains('"success":true');
+    log('human approve $stepId by=${by ?? 'anonymous'} -> $ok');
     return ok;
   }
 
