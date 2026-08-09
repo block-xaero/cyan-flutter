@@ -39,9 +39,14 @@ class BoardSpec {
     required this.autopilot,
     required this.withNotes,
     this.demux = false,
+    this.tonemap = false,
+    this.reviewProxy,
+    this.stabilize = false,
   });
   final String key, group, board, setFolder, look, title;
-  final bool autopilot, withNotes, demux;
+  final bool autopilot, withNotes, demux, tonemap, stabilize;
+  /// A proxy cut FROM THIS BOARD'S OWN footage, relative to the media root.
+  final String? reviewProxy;
 }
 
 final specs = <String, BoardSpec>{
@@ -75,6 +80,25 @@ final specs = <String, BoardSpec>{
     autopilot: false,
     withNotes: true,
   ),
+  // The real project: Rick's daughter's pre-school graduation, seven clips off
+  // his phone. Its OWN board rather than reusing the phone TEST board, whose
+  // ledger still anchors to placeholder clips that no longer exist — deleting a
+  // board does not clear the review lane for its old asset, and a poisoned
+  // anchor fails at the master with "location does not exist on disk".
+  'graduation': BoardSpec(
+    key: 'graduation',
+    group: 'DEMO — Styled Masters',
+    board: 'Graduation — Pre-School',
+    setFolder: '${Platform.environment['HOME']}/cyan-demo-inbox',
+    look: 'warm 90s',
+    title: 'A BIG DAY',
+    autopilot: true,
+    withNotes: false,
+    demux: true,
+    tonemap: true,
+    stabilize: true,
+    reviewProxy: 'SET_GRAD_review_proxy.mp4',
+  ),
   'iphone': BoardSpec(
     key: 'iphone',
     group: 'DEMO — Styled Masters',
@@ -98,8 +122,15 @@ void main() {
 
   setUpAll(() async {
     await flight.boot();
-    flight.reviewProxyPathForBinding =
-        '$mediaRoot/SET_F_review_proxy.mp4';
+    // THE PROXY MUST BE THE BOARD'S OWN FOOTAGE. This was hard-wired to the
+    // shared SET_F demo clip for every board, so the review player on the
+    // graduation board played a stock hotel-room shot instead of Rick's
+    // daughter's ceremony — the workflow was right and the one surface that
+    // shows the work was playing someone else's video. A per-board proxy or
+    // nothing; never a stand-in that looks like an answer.
+    flight.reviewProxyPathForBinding = spec.reviewProxy != null
+        ? '$mediaRoot/${spec.reviewProxy}'
+        : '$mediaRoot/SET_F_review_proxy.mp4';
   });
 
   tearDownAll(() async {
@@ -142,12 +173,44 @@ void main() {
   }, timeout: const Timeout(Duration(minutes: 6)));
 
   test('the ${spec.key} spine authors, binds and compiles', () async {
+    // THE PROSUMER MASTER-DELIVERY SPINE (Rick, 2026-08-09): "make sure all
+    // these steps become part of workflow template for prosumer master
+    // delivery — these are sort of tablestakes for them and increasingly a lot
+    // of videos are being shot on iphone".
+    //
+    // What a phone-shot project needs BEFORE anyone talks about a look, and
+    // what a professional set never has to think about:
+    //   tone-map  — an iPhone shoots HLG; an SDR cube on HDR numbers is wrong
+    //   stabilize — handheld is the norm, not the exception
+    //   separate  — sound and picture must part ways to score a piece
+    // Each is a visible step, so the agent reasons about it and the operator
+    // can see it happened.
+    //
+    // ORDER MATTERS, and the first cut of this had it backwards: tone-map and
+    // stabilize were prepended AHEAD of ingest, so the spine tried to condition
+    // footage the board had not looked at yet. You probe first — that is how
+    // the workflow LEARNS a clip is HLG (4 of the 7 graduation clips are
+    // arib-std-b67) — and only then decide what conditioning it needs.
+    //
+    // Conditioning also runs on the CUT, not on the dailies. Stabilising the
+    // 14-minute IMG_4887 daily costs about an hour of two-pass vidstab for
+    // footage nobody delivers; the 95-second assembled cut is what ships.
     final steps = <String>[
+      'ingest and probe the dailies via @cyan-media.probe',
+      if (spec.tonemap)
+        'tone-map any HDR sources to SDR via @cyan-media.tonemap '
+            'input=${flight.reviewProxyPathForBinding}',
+      if (spec.stabilize)
+        'stabilize the handheld shots via @cyan-media.stabilize '
+            'input=${flight.reviewProxyPathForBinding}',
       if (spec.demux)
         'separate the source tracks via @cyan-media.separate_tracks',
-      'ingest and probe the dailies via @cyan-media.probe',
+      // The proxy the producer reviews IS the proxy the player plays — one
+      // path, bound once. Hard-wiring SET_F here is what put a stock hotel-room
+      // clip on Rick's daughter's board while the rest of the workflow ran
+      // correctly on her footage.
       'upload the review proxy for producer review via @frameio.upload_file '
-          'file_path=$mediaRoot/SET_F_review_proxy.mp4 '
+          'file_path=${flight.reviewProxyPathForBinding} '
           'name=DEMO_${spec.key}_review.mp4 /needs-approval',
       'await the producer review notes from Frame.io',
       'pull the review comments from @frameio.list_comments',
@@ -300,8 +363,17 @@ void main() {
             final m = RegExp(r'"file_id"\s*:\s*"([^"]+)"').firstMatch(r);
             if (m != null) {
               commented = true;
-              await flight.producerComments(m.group(1)!,
-                  'Producer: love the ${spec.look} direction. Ship it.');
+              // The producer note is what closes the review window, so a
+              // WITH-NOTES board needs one. A board that is not testing the
+              // notes lane should not have a stranger's opinion written onto
+              // it — Rick opened his daughter's board and found "Producer:
+              // love the lynch direction. Ship it." on it, which is a synthetic
+              // test fixture pretending to be a review.
+              await flight.producerComments(
+                  m.group(1)!,
+                  spec.withNotes
+                      ? 'Producer: love the ${spec.look} direction. Ship it.'
+                      : 'Reviewed.');
             }
           }
         }

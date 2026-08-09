@@ -277,7 +277,24 @@ class Flight {
 
   /// Author the spine, one authored step per line, in order. Authored order is
   /// law — the engine runs exactly what is written here.
+  ///
+  /// The board is durable and re-flown, so the OLD spine's step cells are
+  /// cleared first. Appending onto a board that already has steps does not
+  /// re-order it: the surviving cells keep their original `cell_order` and the
+  /// newly-authored ones land after them. Reordering the prosumer spine to put
+  /// probe FIRST left probe at `cell_order` 35, dead last, behind the delivery
+  /// step — the source read correctly and the board ran the old order. A spine
+  /// change that does not reach the board is worse than no change, because the
+  /// log says it was authored.
   Future<List<String>> authorSpine(List<String> steps) async {
+    final existing = CyanFFI.loadNotebookCells(boardId);
+    if (existing != null) {
+      for (final cell in (jsonDecode(existing) as List).cast<Map>()) {
+        if (cell['cell_type'] != 'step') continue;
+        final id = cell['id'] as String?;
+        if (id != null) CyanFFI.deleteNotebookCell(boardId, id);
+      }
+    }
     final ids = <String>[];
     for (final text in steps) {
       final step = await backend.addWorkflowStep(boardId, text);
