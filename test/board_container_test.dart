@@ -14,6 +14,7 @@
 //                                        `resolved(saved:deployment:)`
 //   CyanTests/BoardFacesVMTests.swift  — `test_canvas_face_absent`
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -250,15 +251,25 @@ void main() {
     expect(find.byType(ParityWorkflowView), findsNothing);
   });
 
-  testWidgets('the face chords ⌘1 ⌘2 ⌘3 turn the cube', (tester) async {
-    // Swift Tier 3.5: ⌘1 Workflow · ⌘2 Notes · ⌘3 Dashboard, bound on the
-    // container so they work from any face.
+  testWidgets('the face chords turn the cube, on THIS platform\'s accelerator',
+      (tester) async {
+    // Swift Tier 3.5 binds ⌘1 Workflow · ⌘2 Notes · ⌘3 Dashboard on the
+    // container so they work from any face. Carrying `meta` across literally
+    // put them on the WINDOWS KEY here — a chord no Windows operator would try,
+    // and one the shell partly owns (Win+1..9 drives the taskbar). The binding
+    // follows the platform; this test presses whatever that platform's
+    // accelerator is, so it stays honest on both.
+    final accelerator = defaultTargetPlatform == TargetPlatform.macOS ||
+            defaultTargetPlatform == TargetPlatform.iOS
+        ? LogicalKeyboardKey.metaLeft
+        : LogicalKeyboardKey.controlLeft;
+
     await pumpParity(tester, const ParityBoardContainer(boardId: _schema));
 
     Future<void> chord(LogicalKeyboardKey digit) async {
-      await tester.sendKeyDownEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyDownEvent(accelerator);
       await tester.sendKeyEvent(digit);
-      await tester.sendKeyUpEvent(LogicalKeyboardKey.metaLeft);
+      await tester.sendKeyUpEvent(accelerator);
       await tester.pumpAndSettle();
     }
 
@@ -270,6 +281,19 @@ void main() {
 
     await chord(LogicalKeyboardKey.digit1);
     expect(find.byType(ParityWorkflowView), findsOneWidget);
+
+    // And the WRONG modifier must do nothing. On Windows that is Meta — if the
+    // binding regressed to Command-style, this would silently pass while no
+    // operator could ever fire it.
+    final wrong = accelerator == LogicalKeyboardKey.metaLeft
+        ? LogicalKeyboardKey.controlLeft
+        : LogicalKeyboardKey.metaLeft;
+    await tester.sendKeyDownEvent(wrong);
+    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
+    await tester.sendKeyUpEvent(wrong);
+    await tester.pumpAndSettle();
+    expect(find.byType(ParityWorkflowView), findsOneWidget,
+        reason: 'the other platform\'s modifier must not turn the cube');
   });
 
   // ---- board_container.txt, line 3 -----------------------------------------

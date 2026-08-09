@@ -37,6 +37,42 @@ import 'package:video_player/video_player.dart';
 /// not carry. Same number as the review lane's comment anchoring.
 const double kReviewFallbackFps = 24;
 
+/// The instant to seek to in order to LAND on [frame].
+///
+/// Aims at the CENTRE of the frame's display interval, not its boundary. This
+/// is the whole of frame-accurate seeking and it is not a nicety: a boundary
+/// seek asks the decoder for the exact instant where frame N-1 ends and N
+/// begins, and which one you get is then decided by floating-point rounding and
+/// by that decoder's tie-breaking. Half a frame of slack in both directions
+/// removes the ambiguity — every decoder that lands anywhere inside the frame
+/// returns that frame.
+///
+/// Pairs with [positionToFrame], which FLOORS. The two must change together:
+/// centre-seek with a rounding read-back would report N+1 for a frame you
+/// deliberately aimed at the middle of.
+Duration frameToPosition(int frame, double fps) {
+  final rate = fps > 0 ? fps : kReviewFallbackFps;
+  final safe = frame < 0 ? 0 : frame;
+  return Duration(microseconds: ((safe + 0.5) / rate * 1000000).round());
+}
+
+/// Which frame the picture at [position] is showing.
+///
+/// FLOOR, because that is what "the frame being displayed at time t" means —
+/// frame N owns the half-open interval [N/fps, (N+1)/fps).
+int positionToFrame(Duration position, double fps) {
+  final rate = fps > 0 ? fps : kReviewFallbackFps;
+  final frame = (position.inMicroseconds * rate / 1000000).floor();
+  return frame < 0 ? 0 : frame;
+}
+
+/// How many frames of picture [duration] holds.
+int durationToFrameCount(Duration duration, double fps) {
+  final rate = fps > 0 ? fps : kReviewFallbackFps;
+  final count = (duration.inMicroseconds * rate / 1000000).round();
+  return count < 0 ? 0 : count;
+}
+
 /// What the player mounts media on. A [ChangeNotifier] rather than Swift's two
 /// Combine publishers — one notification covers both the playhead and the play
 /// flag, and Flutter's listeners are the idiom the rest of this app uses.
@@ -72,7 +108,8 @@ abstract class ReviewVideoSurface extends ChangeNotifier {
 
   /// Clamp-and-step, for the transport's ± one-frame buttons.
   void step(int frames) {
-    final upper = durationFrames > 0 ? durationFrames - 1 : currentFrame + frames;
+    final upper =
+        durationFrames > 0 ? durationFrames - 1 : currentFrame + frames;
     final target = currentFrame + frames;
     seek(target < 0 ? 0 : (target > upper ? (upper < 0 ? 0 : upper) : target));
   }
@@ -109,14 +146,14 @@ class VideoPlayerReviewSurface extends ReviewVideoSurface {
   int get currentFrame {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return 0;
-    return (c.value.position.inMicroseconds * _fps / 1000000).round();
+    return positionToFrame(c.value.position, _fps);
   }
 
   @override
   int get durationFrames {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return 0;
-    return (c.value.duration.inMicroseconds * _fps / 1000000).round();
+    return durationToFrameCount(c.value.duration, _fps);
   }
 
   /// Nothing has been positively detected as untrustworthy: a zero-tolerance
@@ -169,8 +206,7 @@ class VideoPlayerReviewSurface extends ReviewVideoSurface {
   void seek(int frame) {
     final c = _controller;
     if (c == null || !c.value.isInitialized) return;
-    final clamped = frame < 0 ? 0 : frame;
-    c.seekTo(Duration(microseconds: (clamped / _fps * 1000000).round()));
+    c.seekTo(frameToPosition(frame, _fps));
   }
 
   @override
@@ -220,15 +256,16 @@ class _UnmountedPicture extends StatelessWidget {
           const SizedBox(height: 6),
           Text(name,
               style: const TextStyle(
-                  fontFamily: 'monospace', fontSize: 11, color: Colors.white54)),
+                  fontFamily: 'monospace',
+                  fontSize: 11,
+                  color: Colors.white54)),
           if (failure != null)
             Padding(
               padding: const EdgeInsets.only(top: 4),
               child: Text(failure!,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style:
-                      const TextStyle(fontSize: 10, color: Colors.white38)),
+                  style: const TextStyle(fontSize: 10, color: Colors.white38)),
             ),
         ],
       ),

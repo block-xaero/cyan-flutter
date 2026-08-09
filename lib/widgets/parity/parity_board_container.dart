@@ -20,6 +20,7 @@
 // moves second. A refused write leaves the operator where they were rather than
 // showing them a face the board is not on.
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -36,6 +37,18 @@ import 'parity_workflow_view.dart';
 
 /// ⌘1 · ⌘2 · ⌘3 — one chord per face, in [kStandardBoardFaces] order (Swift
 /// Tier 3.5 face shortcuts).
+/// Which modifier is THIS platform's accelerator.
+///
+/// Swift binds the face chords to Command. Carrying `meta: true` straight
+/// across put them on the WINDOWS KEY here — a chord no Windows operator would
+/// ever try, and one the OS partly owns (Win+1..9 activates taskbar items), so
+/// the face shortcuts were both undiscoverable and fighting the shell.
+///
+/// Read once at startup rather than per build: the platform does not change,
+/// and `defaultTargetPlatform` is not free.
+final bool _kAcceleratorIsMeta = defaultTargetPlatform == TargetPlatform.macOS ||
+    defaultTargetPlatform == TargetPlatform.iOS;
+
 const List<LogicalKeyboardKey> _faceDigits = [
   LogicalKeyboardKey.digit1,
   LogicalKeyboardKey.digit2,
@@ -139,8 +152,11 @@ class _ParityBoardContainerState extends ConsumerState<ParityBoardContainer> {
         // ⌘4 exists only when the Video face does — Swift binds it inside the
         // same `if videoAsset != nil` its tab lives in.
         for (var i = 0; i < faces.length; i++)
-          SingleActivator(_faceDigits[i], meta: true): () =>
-              _switchTo(faces[i], face),
+          SingleActivator(
+            _faceDigits[i],
+            meta: _kAcceleratorIsMeta,
+            control: !_kAcceleratorIsMeta,
+          ): () => _switchTo(faces[i], face),
       },
       child: Focus(
         autofocus: true,
