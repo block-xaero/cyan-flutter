@@ -95,6 +95,15 @@ class NotesIntentController extends StateNotifier<NotesIntentState> {
   final LensApi _lens;
   final String boardId;
 
+  /// Clear the failure banner. The operator acknowledging an error is the only
+  /// thing that dismisses it — it never times out on its own, because a draft
+  /// that failed while they were looking elsewhere is exactly the one they need
+  /// to see.
+  void dismissError() {
+    if (state.error == null) return;
+    state = state.copyWith(clearError: true);
+  }
+
   /// "Author a workflow with Lens" — a plain-English brief becomes steps.
   Future<bool> authorFromBrief(String brief) async {
     final text = brief.trim();

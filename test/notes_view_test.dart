@@ -21,6 +21,8 @@ import 'package:cyan_flutter/ffi/fake_cyan_backend.dart';
 import 'package:cyan_flutter/ffi/parity_models.dart';
 import 'package:cyan_flutter/providers/notes_editor_controller.dart';
 import 'package:cyan_flutter/widgets/parity/parity_constitution_editor.dart';
+import 'package:cyan_flutter/lens/fake_lens_api.dart';
+import 'package:cyan_flutter/lens/lens_api.dart';
 import 'package:cyan_flutter/models/notes_face_mode.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_ledger.dart';
 import 'package:cyan_flutter/widgets/parity/parity_notes_structuring.dart';
@@ -248,6 +250,70 @@ void main() {
     // with no lane behind it is worse than no control. This assertion is the
     // other half of that trade: the segment appears the moment the lane does,
     // and the old "it must be absent" case is what made me come back here.
+  });
+
+  // ---- NOTES AS INTENT: the note becomes a workflow ------------------------
+
+  testWidgets(
+      'the editor offers "Author workflow with Lens", and it lands '
+      'steps without running them', (tester) async {
+    final backend = FakeCyanBackend();
+    await pumpParity(tester, const ParityNotesView(boardId: _board),
+        backend: backend, size: const Size(1400, 900));
+
+    final button = find.byKey(const ValueKey('notes.authorWithLens'));
+    expect(button, findsOneWidget,
+        reason: 'the note IS the intent — the editor must offer the lane');
+
+    final stepsBefore = (await backend.loadWorkflow(_board)).steps.length;
+    await tester.tap(button);
+    await tester.pumpAndSettle();
+
+    // The banner reports what landed and, crucially, tells the operator that
+    // NOTHING has run.
+    expect(find.byKey(const ValueKey('notes.intent.success')), findsOneWidget);
+    expect(find.textContaining('press Run yourself'), findsOneWidget);
+    expect((await backend.loadWorkflow(_board)).steps.length,
+        greaterThan(stepsBefore),
+        reason: 'the drafted steps land on the board through the seam');
+  });
+
+  testWidgets('the intent lane\'s failure is shown and dismissible',
+      (tester) async {
+    await pumpParity(
+      tester,
+      const ParityNotesView(boardId: _board),
+      lens: FakeLensApi(
+          failWith:
+              const LensApiException('vLLM unreachable', statusCode: 503)),
+      size: const Size(1400, 900),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('notes.authorWithLens')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const ValueKey('notes.intent.error')), findsOneWidget);
+    expect(find.textContaining('vLLM unreachable'), findsOneWidget,
+        reason: 'the banner carries the LENS\'s words, not a generic shrug');
+
+    // It clears only when the operator says so — a failure they were not
+    // looking at is exactly the one they need to still be there.
+    await tester.tap(find.byKey(const ValueKey('notes.intent.dismiss')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('notes.intent.error')), findsNothing);
+  });
+
+  testWidgets(
+      'the lane is offered only on the document, not over the '
+      'constitution', (tester) async {
+    await pumpParity(tester, const ParityNotesView(boardId: _board),
+        size: const Size(1400, 900));
+    expect(find.byKey(const ValueKey('notes.authorWithLens')), findsOneWidget);
+
+    await tester.tap(find.byKey(const ValueKey('notes-mode-constitution')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const ValueKey('notes.authorWithLens')), findsNothing,
+        reason: 'there is no document to draft from on that surface');
   });
 
   testWidgets('selecting Structure mounts the structuring lane',

@@ -19,6 +19,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../models/notes_face_mode.dart';
 import '../../providers/cyan_backend_provider.dart';
 import '../../providers/notes_editor_controller.dart';
+import '../../providers/notes_intent_controller.dart';
 import '../../theme/monokai_theme.dart';
 import 'parity_constitution_editor.dart';
 import 'parity_notes_ledger.dart';
@@ -152,6 +153,10 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
                   style: MonokaiTheme.labelSmall
                       .copyWith(color: MonokaiTheme.red)),
             ),
+          // The intent lane's outcome, above the document — a draft that failed
+          // or landed is the first thing the operator needs to see.
+          if (_mode == NotesFaceMode.editor)
+            _IntentBanner(boardId: widget.boardId),
           Expanded(
             // The CONSTITUTION replaces the editor body, exactly as Swift's
             // `notesMode == .constitution` branch does — the house rules are a
@@ -237,6 +242,19 @@ class _ParityNotesViewState extends ConsumerState<_NotesSurface> {
                 style:
                     MonokaiTheme.labelSmall.copyWith(color: MonokaiTheme.cyan)),
           ),
+          const SizedBox(width: 12),
+          // STAGE 4 — the note IS the intent. Editor mode only: there is no
+          // document to draft from on the other two surfaces.
+          //
+          // The label collapses on a narrow toolbar: "Author workflow with
+          // Lens" is ~200px of text and the bar already carries a mode picker,
+          // a file name, a type chip and a save state. A clipped control is
+          // worse than an iconic one with the same tooltip.
+          if (_mode == NotesFaceMode.editor)
+            _AuthorWithLensButton(
+              editor: this,
+              compact: MediaQuery.sizeOf(context).width < 1150,
+            ),
           const Spacer(),
           if (problem != null)
             Flexible(
@@ -475,6 +493,188 @@ class _ModePicker extends StatelessWidget {
                 ),
               ),
             ),
+        ],
+      ),
+    );
+  }
+}
+
+/// "Author workflow with Lens" — the note becomes a workflow.
+///
+/// Saves FIRST, then drafts. Swift's comment says why in one line: *the note IS
+/// the intent*, so drafting from an unsaved buffer would draft from something
+/// the board does not have. Disabled while a draft is in flight and on an empty
+/// buffer — there is nothing to draft from.
+class _AuthorWithLensButton extends ConsumerWidget {
+  final _ParityNotesViewState editor;
+
+  /// Icon only. The tooltip still names the action, so nothing is lost but
+  /// width.
+  final bool compact;
+
+  const _AuthorWithLensButton({required this.editor, this.compact = false});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final boardId = editor.widget.boardId;
+    final intent = ref.watch(notesIntentProvider(boardId));
+    final busy = intent.isAuthoring;
+    final text = editor._text.text.trim();
+    final enabled = !busy && text.isNotEmpty;
+
+    return Tooltip(
+      message: 'Lens drafts workflow steps from this note — you review them on '
+          'the Workflow face; nothing runs until you press Run',
+      child: GestureDetector(
+        key: const ValueKey('notes.authorWithLens'),
+        onTap: enabled
+            ? () async {
+                // Same path as an explicit save, then draft from what landed.
+                await editor._editor.save();
+                await ref
+                    .read(notesIntentProvider(boardId).notifier)
+                    .authorFromBrief(editor._text.text);
+              }
+            : null,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: MonokaiTheme.cyan.withValues(alpha: enabled ? 0.12 : 0.05),
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (busy)
+                const SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 2, color: MonokaiTheme.cyan),
+                )
+              else
+                Icon(Icons.auto_fix_high,
+                    size: 12,
+                    color: enabled
+                        ? MonokaiTheme.cyan
+                        : MonokaiTheme.cyan.withValues(alpha: 0.4)),
+              if (!compact || busy) ...[
+                const SizedBox(width: 6),
+                Text(
+                  busy ? 'Drafting…' : 'Author workflow with Lens',
+                  style: MonokaiTheme.labelMedium.copyWith(
+                    color: enabled
+                        ? MonokaiTheme.cyan
+                        : MonokaiTheme.cyan.withValues(alpha: 0.4),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// What the last draft did. Failure wins over success: an error the operator has
+/// not acknowledged is more important than an older good outcome.
+class _IntentBanner extends ConsumerWidget {
+  final String boardId;
+
+  const _IntentBanner({required this.boardId});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final intent = ref.watch(notesIntentProvider(boardId));
+
+    if (intent.error != null) {
+      return _BannerBox(
+        key: const ValueKey('notes.intent.error'),
+        tint: MonokaiTheme.red,
+        icon: Icons.error_outline,
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(intent.error!,
+                  style: MonokaiTheme.labelMedium
+                      .copyWith(color: MonokaiTheme.red)),
+            ),
+            GestureDetector(
+              key: const ValueKey('notes.intent.dismiss'),
+              onTap:
+                  ref.read(notesIntentProvider(boardId).notifier).dismissError,
+              child: const Icon(Icons.close,
+                  size: 13, color: MonokaiTheme.textMuted),
+            ),
+          ],
+        ),
+      );
+    }
+
+    if (intent.lastAuthoredCount > 0) {
+      return _BannerBox(
+        key: const ValueKey('notes.intent.success'),
+        tint: MonokaiTheme.green,
+        icon: Icons.auto_awesome,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              '${intent.lastAuthoredCount} steps drafted — review them on the '
+              'Workflow face, then press Run yourself.',
+              style:
+                  MonokaiTheme.labelMedium.copyWith(color: MonokaiTheme.green),
+            ),
+            if (intent.costLine != null) ...[
+              const SizedBox(height: 3),
+              Text(intent.costLine!,
+                  key: const ValueKey('notes.intent.savings'),
+                  style: MonokaiTheme.labelSmall),
+            ],
+            // The receipts: which note or rule shaped which step.
+            for (final line in intent.provenance.take(4))
+              Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(line, style: MonokaiTheme.labelSmall),
+              ),
+          ],
+        ),
+      );
+    }
+
+    return const SizedBox.shrink();
+  }
+}
+
+class _BannerBox extends StatelessWidget {
+  final Color tint;
+  final IconData icon;
+  final Widget child;
+
+  const _BannerBox({
+    super.key,
+    required this.tint,
+    required this.icon,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: tint.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: tint.withValues(alpha: 0.45)),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 13, color: tint),
+          const SizedBox(width: 8),
+          Expanded(child: child),
         ],
       ),
     );
