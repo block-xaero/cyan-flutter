@@ -342,6 +342,43 @@ void main() {
         reason: 'Resolve did not report the ${spec.look} grade applied');
   }, timeout: const Timeout(Duration(minutes: 22)));
 
+  test('the ${spec.key} board ACCUMULATES its grade and its master', () async {
+    // Rick demos from this island: the graded and mastered artifacts have to be
+    // ON the board, not merely in the registry. A registry row is invisible to
+    // a board (the D-8 lesson) — this rung is what keeps that honest.
+    final version = flight.snapshotVersion();
+    expect(version, isNotNull,
+        reason: 'no frozen version — the delivery lane has nothing to render');
+    final produced = flight.produceMaster();
+    final out = produced?['output_path'] as String?;
+    if (out == null) {
+      flight.log('produce_master returned no output_path: $produced');
+    }
+
+    final files = flight.boardFiles();
+    final names = files.map((f) => '${f['name']}').toList();
+    flight.log('DEMO ${spec.key} board files: ${names.join(' | ')}');
+
+    // Its OWN look, named for the look — not a neighbour's cube. Before the
+    // ledger-first pick, four boards shared one board's grade.
+    final look = spec.look.replaceAll(' ', '_');
+    expect(names.any((n) => n.toLowerCase() == '$look.cube'.toLowerCase()),
+        isTrue,
+        reason: 'the ${spec.look} grade is not on the board: $names');
+
+    // The endcard render the same run produced (the path that always worked —
+    // if this is missing the whole registration lane is broken, not just mine).
+    expect(names.any((n) => n.startsWith('CYAN_ENDCARD')), isTrue,
+        reason: 'no endcard render on the board: $names');
+
+    if (out != null) {
+      expect(File(out).existsSync(), isTrue,
+          reason: 'the delivery names a file that is not on disk: $out');
+      expect(names.any((n) => n.contains('master')), isTrue,
+          reason: 'a master was produced but never landed on the board: $names');
+    }
+  }, timeout: const Timeout(Duration(minutes: 12)));
+
   test('the ${spec.key} stage lineage is READABLE — review_versions answers',
       () async {
     final raw = flight.review({

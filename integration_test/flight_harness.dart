@@ -412,6 +412,57 @@ class Flight {
     return decoded;
   }
 
+  /// Freeze the board's ledger into an immutable version and return its id —
+  /// the delivery lane's precondition (`produce_master` renders a VERSION, not
+  /// a moving head).
+  String? snapshotVersion() {
+    final env = reviewEnvelope();
+    final tenant = env?['tenant_id'] as String?;
+    final asset = env?['asset_hash'] as String?;
+    if (tenant == null || asset == null) {
+      log('snapshot: no review envelope yet');
+      return null;
+    }
+    final raw = CyanFFI.changelistCommand(jsonEncode({
+      'op': 'snapshot',
+      'tenant_id': tenant,
+      'asset_hash': asset,
+      'branch': 'main',
+    }));
+    final decoded = raw == null ? null : jsonDecode(raw);
+    final id = decoded is Map ? decoded['version_id'] as String? : null;
+    log('snapshot -> ${id ?? raw}');
+    return id;
+  }
+
+  /// Render and register the delivered master for a frozen version. Addressed
+  /// BY BOARD — the {tenant, version} form has no board to hang the file on,
+  /// so only this shape puts the master where a person will look for it.
+  Map<String, dynamic>? produceMaster({int? versionNo}) {
+    final raw = CyanFFI.ingestCommand(jsonEncode({
+      'op': 'produce_master',
+      'board_id': boardId,
+      if (versionNo != null) 'version': versionNo,
+    }));
+    if (raw == null) return null;
+    final decoded = jsonDecode(raw);
+    log('produce_master: ${raw.length > 300 ? raw.substring(0, 300) : raw}');
+    return decoded is Map<String, dynamic> ? decoded : null;
+  }
+
+  /// The files a person actually sees ON the board (objects rows), by name.
+  List<Map<String, dynamic>> boardFiles() {
+    final raw = CyanFFI.getFiles({'board_id': boardId});
+    if (raw == null) return const [];
+    final decoded = jsonDecode(raw);
+    final list = decoded is List
+        ? decoded
+        : (decoded is Map && decoded['files'] is List
+            ? decoded['files'] as List
+            : const []);
+    return list.whereType<Map<String, dynamic>>().toList();
+  }
+
   /// Every ledger entry on the board's review lane.
   List<Map<String, dynamic>> ledgerEntries() {
     final env = reviewEnvelope();
