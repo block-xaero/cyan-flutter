@@ -1097,7 +1097,9 @@ class CyanBackendFFI implements CyanBackend {
   Future<List<CyanFile>> filesForBoard(String boardId) async {
     // An empty list is the engine's answer for a board with no files, and it
     // is also what a dead binding leaves — both mean there is nothing to list.
-    final json = CyanFFI.getFiles({'type': 'board', 'id': boardId});
+    // 'Board' with the capital: the engine's scope match is a literal (it now
+    // also lowercases defensively, but an old engine would list nothing).
+    final json = CyanFFI.getFiles({'type': 'Board', 'id': boardId});
     if (json == null) return const [];
     final decoded = jsonDecode(json);
     if (decoded is! List) return const [];

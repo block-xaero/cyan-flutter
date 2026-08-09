@@ -452,7 +452,7 @@ class Flight {
 
   /// The files a person actually sees ON the board (objects rows), by name.
   List<Map<String, dynamic>> boardFiles() {
-    final raw = CyanFFI.getFiles({'board_id': boardId});
+    final raw = CyanFFI.getFiles({'type': 'Board', 'id': boardId});
     if (raw == null) return const [];
     final decoded = jsonDecode(raw);
     final list = decoded is List
