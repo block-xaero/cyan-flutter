@@ -89,12 +89,15 @@ class FlightLog {
 
 /// The engine cockpit for one flight.
 class Flight {
-  Flight(this.name);
+  Flight(this.name, {String? dataDir}) : _dataDirOverride = dataDir;
 
   final String name;
+  final String? _dataDirOverride;
   final backend = CyanBackendFFI();
 
-  late final String dataDir = pjoin(flightsRoot, name);
+  /// The demo island: several boards share ONE data dir so the desktop app,
+  /// pointed at it once, holds the whole corpus (Rick's demo requirement).
+  late final String dataDir = _dataDirOverride ?? pjoin(flightsRoot, name);
   late final FlightLog log;
 
   String groupId = '';
@@ -189,13 +192,13 @@ class Flight {
   /// Ingest SET_F through the sensor lane: a real folder source, then a real
   /// scan. The engine content-hashes the plate, registers it as a master and
   /// materialises its run — the same path a watched camera-card folder takes.
-  Future<IngestOutcome> ingestSetF() async {
+  Future<IngestOutcome> ingestSetF({String? folder}) async {
     final added = ingest({
       'op': 'source_add',
       'tenant_id': groupId,
       'board_id': boardId,
       'kind': 'folder',
-      'uri': setFFolder,
+      'uri': folder ?? setFFolder,
       'schedule_secs': 900,
     });
     log('ingest source_add: $added');
@@ -480,6 +483,36 @@ class Flight {
     if (raw == null) return null;
     final decoded = jsonDecode(raw);
     return decoded is Map<String, dynamic> ? decoded : null;
+  }
+
+  /// A visible house-rules note on the board's ledger (display; the
+  /// constitution KIND rides the app's own door — Rick's demo lever).
+  void notePutHouse(String text) {
+    CyanFFI.notePut(boardId, text, tenantId: groupId);
+    log('house note put: ${text.substring(0, text.length.clamp(0, 60))}…');
+  }
+
+  /// The Dashboard's own Approve on one step (the human gate door).
+  bool approveStep(String stepId) {
+    final ok = CyanFFI.pipelineApprove(boardId, stepId);
+    log('human approve $stepId -> $ok');
+    return ok;
+  }
+
+  /// The Dashboard's release on a side-effect park: pending + carried
+  /// approval under the reviewer's name; the next resume re-dispatches.
+  bool releaseStep(String stepId, {String by = 'anonymous'}) {
+    final ok = CyanFFI.pipelineRelease(boardId, stepId, reviewer: by);
+    log('human release $stepId by=$by -> $ok');
+    return ok;
+  }
+
+  /// The Dashboard's Retry (spends an attempt; a parked step returns to
+  /// pending with its carried approval, and the next resume re-dispatches).
+  bool retryStep(String stepId) {
+    final ok = CyanFFI.pipelineRetry(boardId, stepId);
+    log('human retry $stepId -> $ok');
+    return ok;
   }
 
   /// The HUMAN confirm door on one ledger entry (`set_state` with `by:`) —

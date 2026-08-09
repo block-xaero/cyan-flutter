@@ -387,6 +387,10 @@ typedef CyanAutopilotSetDart = Pointer<Utf8> Function(
 typedef CyanAutopilotGetNative = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 typedef CyanAutopilotGetDart = Pointer<Utf8> Function(Pointer<Utf8> boardId);
 
+typedef CyanPipelineReleaseNative = Bool Function(
+    Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
+typedef CyanPipelineReleaseDart = bool Function(
+    Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
 typedef CyanPipelineApproveAsNative = Pointer<Utf8> Function(
   Pointer<Utf8> boardId, Pointer<Utf8> stepId, Pointer<Utf8> reviewer);
 typedef CyanPipelineApproveAsDart = Pointer<Utf8> Function(
@@ -782,6 +786,7 @@ class CyanBindings {
   late final CyanAutopilotGetDart autopilotGet;
   late final CyanPipelineApproveDart pipelineApprove;
   late final CyanPipelineApproveAsDart pipelineApproveAs;
+  late final CyanPipelineReleaseDart pipelineRelease;
   late final CyanPipelineRejectDart pipelineReject;
   late final CyanPipelineRejectAsDart pipelineRejectAs;
   late final CyanPipelineRetryDart pipelineRetry;
@@ -1160,6 +1165,7 @@ class CyanBindings {
     autopilotGet = _lib.lookupFunction<CyanAutopilotGetNative, CyanAutopilotGetDart>('cyan_autopilot_get');
     pipelineApprove = _lib.lookupFunction<CyanPipelineApproveNative, CyanPipelineApproveDart>('cyan_pipeline_approve');
     pipelineApproveAs = _lib.lookupFunction<CyanPipelineApproveAsNative, CyanPipelineApproveAsDart>('cyan_pipeline_approve_as');
+    pipelineRelease = _lib.lookupFunction<CyanPipelineReleaseNative, CyanPipelineReleaseDart>('cyan_pipeline_release');
     pipelineReject = _lib.lookupFunction<CyanPipelineRejectNative, CyanPipelineRejectDart>('cyan_pipeline_reject');
     pipelineRejectAs = _lib.lookupFunction<CyanPipelineRejectAsNative, CyanPipelineRejectAsDart>('cyan_pipeline_reject_as');
     pipelineRetry = _lib.lookupFunction<CyanPipelineRetryNative, CyanPipelineRetryDart>('cyan_pipeline_retry');
@@ -1567,6 +1573,7 @@ const List<String> _requiredSymbols = <String>[
   'cyan_pin_summary_as_board',
   'cyan_pipeline_approve',
   'cyan_pipeline_approve_as',
+  'cyan_pipeline_release',
   'cyan_pipeline_compile',
   'cyan_pipeline_reject',
   'cyan_pipeline_reject_as',

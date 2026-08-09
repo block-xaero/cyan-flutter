@@ -1351,6 +1351,24 @@ class CyanFFI {
     }
   }
   
+  /// HUMAN release for a side-effect park (failed + needs_human family):
+  /// pending + approved=true stamped with [reviewer], so the next resume
+  /// re-dispatches WITH clearance. Approve alone is terminal — the tool
+  /// would never run. False for any step not actually in that park.
+  static bool pipelineRelease(String boardId, String stepId,
+      {String reviewer = 'anonymous'}) {
+    final boardPtr = boardId.toNativeUtf8();
+    final stepPtr = stepId.toNativeUtf8();
+    final reviewerPtr = reviewer.toNativeUtf8();
+    try {
+      return _b.pipelineRelease(boardPtr, stepPtr, reviewerPtr);
+    } finally {
+      calloc.free(boardPtr);
+      calloc.free(stepPtr);
+      calloc.free(reviewerPtr);
+    }
+  }
+
   /// Approve AS a named reviewer. A review_hold step clears ONLY when the
   /// reviewer matches its `waiting_on` user.
   /// Returns JSON: {"success":true} | {"success":false,"error":"..."}
