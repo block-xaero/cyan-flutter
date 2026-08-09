@@ -224,7 +224,7 @@ class VideoPlayerReviewSurface extends ReviewVideoSurface {
         child: VideoPlayer(c),
       );
     }
-    return _UnmountedPicture(path: _path, failure: _failure);
+    return UnmountedPicture(path: _path, failure: _failure);
   }
 
   @override
@@ -236,13 +236,16 @@ class VideoPlayerReviewSurface extends ReviewVideoSurface {
   }
 }
 
+/// What the hero shows when there is no picture — shared by every surface
+/// implementation, so a Windows failure and a macOS failure read identically.
+/// (Was private until the media_kit surface needed the same empty state.)
 /// What the hero shows when there is no picture: the media it was asked for and
 /// the engine's own reason, never a spinner with nothing behind it.
-class _UnmountedPicture extends StatelessWidget {
+class UnmountedPicture extends StatelessWidget {
   final String? path;
   final String? failure;
 
-  const _UnmountedPicture({this.path, this.failure});
+  const UnmountedPicture({super.key, this.path, this.failure});
 
   @override
   Widget build(BuildContext context) {

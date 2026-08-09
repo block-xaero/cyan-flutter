@@ -32,6 +32,27 @@ dependencies:
   url_launcher: ^6.3.2
   video_player: ^2.11.1
 
+  # The WINDOWS review surface. `video_player` has no Windows implementation at
+  # all — the pub cache carries android / avfoundation / web only, and
+  # windows/flutter/generated_plugins.cmake registered three plugins with
+  # video_player absent — so the review player had no picture on this platform.
+  #
+  # media_kit is libmpv (ffmpeg) rather than Media Foundation, for two reasons
+  # that are requirements and not preferences:
+  #   • FRAME ACCURACY — libmpv exposes exact / hr-seek, so "seek to frame N"
+  #     lands on frame N. Media Foundation's seek is keyframe-biased.
+  #   • THE PLATES — ffmpeg decodes ProRes 422/4444 and DNxHD/HR; Media
+  #     Foundation cannot open ProRes at all, so the drop-in alternative would
+  #     have played proxies and failed on the very masters the review station
+  #     exists for.
+  #
+  # PINNED, not caret-ranged: a decoder that silently changed seek behaviour
+  # would break frame accuracy, which is the one failure this surface must not
+  # have.
+  media_kit: 1.2.6
+  media_kit_video: 2.0.1
+  media_kit_libs_windows_video: 1.0.11
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
