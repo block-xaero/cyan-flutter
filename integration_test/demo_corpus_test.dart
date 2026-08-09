@@ -366,6 +366,13 @@ void main() {
         isTrue,
         reason: 'the ${spec.look} grade is not on the board: $names');
 
+    // The graded PICTURE — the artifact that shows the look rather than
+    // describing it. A board graded on an earlier run keeps its cube and used
+    // to skip this entirely, ending up with a cube and a master but nothing to
+    // look at.
+    expect(names.any((n) => n.contains('graded')), isTrue,
+        reason: 'no graded picture on the board: $names');
+
     // The endcard render the same run produced (the path that always worked —
     // if this is missing the whole registration lane is broken, not just mine).
     expect(names.any((n) => n.startsWith('CYAN_ENDCARD')), isTrue,
