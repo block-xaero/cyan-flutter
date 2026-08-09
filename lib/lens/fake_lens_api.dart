@@ -782,4 +782,66 @@ class FakeLensApi implements LensApi {
     }
     return NoteStructureResult(proposals: proposals, rejected: rejected);
   }
+
+  // ---- notes as intent -----------------------------------------------------
+
+  /// What the next `generateSteps` answers. Null derives from the brief.
+  LensDraft? draftResult;
+
+  /// What the next `transpileNotes` answers. Null derives from the notes.
+  LensTranspiled? transpileResult;
+
+  @override
+  Future<LensDraft> generateSteps({
+    required String boardId,
+    required String brief,
+    String? constitutionJson,
+  }) async {
+    _record('generateSteps', {
+      'boardId': boardId,
+      'brief': brief,
+      // Recorded because forwarding the constitution is what switches
+      // distillation on: a test must be able to prove the seat was sent.
+      'constitution': constitutionJson,
+    });
+    if (draftResult != null) return draftResult!;
+
+    final steps = parseStepLines(brief)
+        .map((line) => 'Draft: $line')
+        .toList(growable: false);
+    return LensDraft(
+      steps: steps,
+      cache: const LensGenCacheFlags(spec: true, plan: true),
+      cost: const LensGenCost(
+        strongMicrocents: 0,
+        fastMicrocents: 250000,
+        totalMicrocents: 250000,
+        savedMicrocents: 1750000,
+      ),
+    );
+  }
+
+  @override
+  Future<LensTranspiled> transpileNotes({
+    required String boardId,
+    required List<String> notes,
+    String? constitutionJson,
+  }) async {
+    _record('transpileNotes', {
+      'boardId': boardId,
+      'notes': notes.length,
+      'constitution': constitutionJson,
+    });
+    if (transpileResult != null) return transpileResult!;
+
+    final steps = [for (final n in notes) 'Bound: $n'];
+    return LensTranspiled(
+      steps: steps,
+      irCached: true,
+      bindCached: false,
+      provenance: [
+        for (var i = 0; i < notes.length; i++) 'step ${i + 1} ← note n$i',
+      ],
+    );
+  }
 }

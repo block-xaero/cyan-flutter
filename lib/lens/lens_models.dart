@@ -1204,3 +1204,152 @@ class NoteStructureResult {
 /// Which structuring lane is driven: a freeform NOTE, or a messy shot-log
 /// REPORT import (which the lens types entirely as `shot-log`).
 enum NotesLane { note, report }
+
+// ---------------------------------------------------------------------------
+// STAGE 4 — NOTES AS INTENT: the /generate and /transpile lanes
+// ---------------------------------------------------------------------------
+//
+// Two ways a note becomes a workflow, sharing one landing tail:
+//   • /generate  — a plain-English BRIEF is drafted into structured steps.
+//   • /transpile — the board's NOTES (+ effective constitution) become cached
+//     IR and then bound steps, with per-step provenance receipts.
+//
+// Both take the board's EFFECTIVE CONSTITUTION as the distiller seat, which is
+// the bridge between the with-notes and without-notes paths: the house rules
+// steer the draft and hard constraints are spliced verbatim.
+//
+// SwiftUI reference (read-only):
+//   cyan-iOS/Cyan/Cyan/ViewModels/NotesIntentViewModel.swift
+
+/// Which generation stages were cache hits — a near-duplicate brief re-uses the
+/// cached spec/plan for zero strong-model spend.
+class LensGenCacheFlags {
+  final bool spec;
+  final bool plan;
+  final bool tasks;
+  final bool steps;
+  final bool sweep;
+
+  const LensGenCacheFlags({
+    this.spec = false,
+    this.plan = false,
+    this.tasks = false,
+    this.steps = false,
+    this.sweep = false,
+  });
+
+  static LensGenCacheFlags fromJson(Map<String, dynamic> j) =>
+      LensGenCacheFlags(
+        spec: j['spec'] == true,
+        plan: j['plan'] == true,
+        tasks: j['tasks'] == true,
+        steps: j['steps'] == true,
+        sweep: j['sweep'] == true,
+      );
+
+  /// The stages that hit, in the order the banner names them.
+  List<String> get hits => [
+        if (spec) 'spec',
+        if (plan) 'plan',
+        if (tasks) 'tasks',
+        if (steps) 'steps',
+        if (sweep) 'sweep',
+      ];
+}
+
+/// The server's money view, in integer MICROCENTS.
+///
+/// Integers on purpose: 10^6 µ¢ = 1¢ and 100¢ = $1, so the app can display
+/// exactly the numbers that reconcile server-side with no float drift.
+class LensGenCost {
+  final int strongMicrocents;
+  final int fastMicrocents;
+  final int totalMicrocents;
+  final int savedMicrocents;
+
+  const LensGenCost({
+    this.strongMicrocents = 0,
+    this.fastMicrocents = 0,
+    this.totalMicrocents = 0,
+    this.savedMicrocents = 0,
+  });
+
+  static int _int(Object? v) => v is num ? v.round() : 0;
+
+  static LensGenCost fromJson(Map<String, dynamic> j) => LensGenCost(
+        strongMicrocents: _int(j['strong_microcents']),
+        fastMicrocents: _int(j['fast_microcents']),
+        totalMicrocents: _int(j['total_microcents']),
+        savedMicrocents: _int(j['saved_microcents']),
+      );
+
+  /// µ¢ → dollars: 10^6 µ¢ = 1¢, 100¢ = $1, so divide by 10^8.
+  static String dollars(int microcents) =>
+      '\$${(microcents / 100000000.0).toStringAsFixed(2)}';
+}
+
+/// What one `/generate` draft returned.
+class LensDraft {
+  final List<String> steps;
+  final LensGenCacheFlags? cache;
+  final LensGenCost? cost;
+
+  const LensDraft({this.steps = const [], this.cache, this.cost});
+}
+
+/// What one `/transpile` returned: bound step texts plus the provenance
+/// receipts that say how the notes shaped each one.
+class LensTranspiled {
+  final List<String> steps;
+  final bool irCached;
+  final bool bindCached;
+
+  /// Lines like "step 12 ← rule novel-tenant-loudness · note novel-editor-note".
+  final List<String> provenance;
+
+  const LensTranspiled({
+    this.steps = const [],
+    this.irCached = false,
+    this.bindCached = false,
+    this.provenance = const [],
+  });
+}
+
+/// The user-visible money line.
+///
+/// A cache hit LEADS with the saving and makes a $0 strong-model spend
+/// explicit, because that is the number worth seeing. No cost payload at all
+/// (an older lens) means NO LINE — an invented number would be worse than
+/// silence.
+String? lensCostLine(LensGenCacheFlags? cache, LensGenCost? cost) {
+  if (cost == null) return null;
+  final spent = LensGenCost.dollars(cost.totalMicrocents);
+  if (cost.savedMicrocents > 0) {
+    final saved = LensGenCost.dollars(cost.savedMicrocents);
+    final hits = cache?.hits ?? const <String>[];
+    final what = hits.isEmpty ? 'cache' : 'cached ${hits.join('+')}';
+    final strongFree =
+        cost.strongMicrocents == 0 ? ' (strong model: \$0.00)' : '';
+    return '$what — saved $saved; this draft cost $spent$strongFree';
+  }
+  final strong = LensGenCost.dollars(cost.strongMicrocents);
+  final fast = LensGenCost.dollars(cost.fastMicrocents);
+  return 'this draft cost $spent (strong $strong + fast $fast)';
+}
+
+/// Defensive line parse for a model reply: strip numbering ("1." / "1)") and
+/// bullets ("-" / "*" / "•"), drop blanks and markdown fences.
+///
+/// Anything the model wrapped around the list that survives is still a
+/// REVIEWABLE step — the human gate on the Workflow face is the real filter,
+/// not this.
+List<String> parseStepLines(String raw) {
+  final out = <String>[];
+  for (final line in raw.split('\n')) {
+    var t = line.trim();
+    t = t.replaceFirst(RegExp(r'^(\d+[.)]|[-*•])\s+'), '').trim();
+    if (t.isEmpty || t.startsWith('```')) continue;
+    out.add(t);
+  }
+  return out;
+}

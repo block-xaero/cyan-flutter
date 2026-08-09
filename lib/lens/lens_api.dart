@@ -191,6 +191,29 @@ abstract class LensApi {
     required String text,
     NotesLane lane = NotesLane.note,
   });
+
+  // ---- notes as intent: brief -> steps, notes -> steps ----------------------
+
+  /// Draft structured workflow steps from a plain-English [brief].
+  ///
+  /// [constitutionJson] is the board's EFFECTIVE constitution as
+  /// `constitutionEffective` returns it. Forwarding it is what switches
+  /// server-side distillation on, so the draft steers by the house rules and
+  /// splices hard constraints verbatim — the bridge between the with-notes and
+  /// without-notes paths.
+  Future<LensDraft> generateSteps({
+    required String boardId,
+    required String brief,
+    String? constitutionJson,
+  });
+
+  /// Turn the board's NOTES into bound steps, keeping the provenance receipts
+  /// that say which note or rule shaped each one.
+  Future<LensTranspiled> transpileNotes({
+    required String boardId,
+    required List<String> notes,
+    String? constitutionJson,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -733,6 +756,110 @@ class LensApiHttp implements LensApi {
     return NoteStructureResult.fromJson(Map<String, dynamic>.from(body));
   }
 
+  /// The deadline the two generation lanes get. Minutes, not seconds: the
+  /// server walks spec -> plan -> tasks -> steps -> sweep on a fresh brief.
+  static const Duration kGenerationDeadline = Duration(seconds: 360);
+
+  /// The distiller SEAT — only the three fields the server reads, and only when
+  /// the constitution actually has a hash. Forwarding a hashless or unparseable
+  /// constitution would ask the server to steer by nothing.
+  static Map<String, dynamic>? _seat(String? constitutionJson) {
+    if (constitutionJson == null || constitutionJson.trim().isEmpty)
+      return null;
+    try {
+      final obj = jsonDecode(constitutionJson);
+      if (obj is! Map) return null;
+      final hash = obj['hash'];
+      if (hash is! String || hash.isEmpty) return null;
+      return {
+        'hash': hash,
+        'markdown': obj['markdown'] is String ? obj['markdown'] : '',
+        if (obj['hard'] != null) 'hard': obj['hard'],
+      };
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<LensDraft> generateSteps({
+    required String boardId,
+    required String brief,
+    String? constitutionJson,
+  }) async {
+    final seat = _seat(constitutionJson);
+    final body = await _send(
+      'POST',
+      _uri('/api/v1/generate'),
+      envelope: true,
+      deadline: kGenerationDeadline,
+      jsonBody: {
+        'board_id': boardId,
+        'brief': brief,
+        if (seat != null) 'constitution': seat,
+      },
+    );
+    if (body is! Map) return const LensDraft();
+    final map = Map<String, dynamic>.from(body);
+    final rows = map['steps'];
+    final steps = <String>[];
+    if (rows is List) {
+      for (final row in rows) {
+        if (row is Map && row['text'] is String) {
+          steps.add(row['text'] as String);
+        } else if (row is String) {
+          steps.add(row);
+        }
+      }
+    }
+    return LensDraft(
+      steps: steps,
+      cache: map['cache'] is Map
+          ? LensGenCacheFlags.fromJson(Map<String, dynamic>.from(map['cache']))
+          : null,
+      cost: map['cost'] is Map
+          ? LensGenCost.fromJson(Map<String, dynamic>.from(map['cost']))
+          : null,
+    );
+  }
+
+  @override
+  Future<LensTranspiled> transpileNotes({
+    required String boardId,
+    required List<String> notes,
+    String? constitutionJson,
+  }) async {
+    final seat = _seat(constitutionJson);
+    final body = await _send(
+      'POST',
+      _uri('/api/v1/transpile'),
+      envelope: true,
+      deadline: kGenerationDeadline,
+      jsonBody: {
+        'board_id': boardId,
+        'notes': notes,
+        if (seat != null) 'constitution': seat,
+      },
+    );
+    if (body is! Map) return const LensTranspiled();
+    final map = Map<String, dynamic>.from(body);
+    List<String> strings(Object? raw) => raw is List
+        ? [
+            for (final r in raw)
+              if (r is String)
+                r
+              else if (r is Map && r['text'] is String)
+                r['text'] as String
+          ]
+        : const <String>[];
+    return LensTranspiled(
+      steps: strings(map['steps']),
+      irCached: map['ir_cached'] == true,
+      bindCached: map['bind_cached'] == true,
+      provenance: strings(map['provenance']),
+    );
+  }
+
   // ---- Transport ----------------------------------------------------------
 
   Uri _uri(String path, [Map<String, String>? query]) {
@@ -758,7 +885,14 @@ class LensApiHttp implements LensApi {
   /// command replies (`{success, run}`, `{success, decision, …, run}`) carry a
   /// `success` key of their OWN, so any heuristic unwraps them into nothing.
   Future<Object?> _send(String method, Uri url,
-      {Map<String, dynamic>? jsonBody, bool envelope = false}) async {
+      {Map<String, dynamic>? jsonBody,
+      bool envelope = false,
+      Duration? deadline}) async {
+    // GENERATION-SCALE calls need their own deadline. A fresh /generate or
+    // /transpile walks a staged pipeline and the ordinary read timeout killed
+    // every first run while cached ones flew — which reads as "the lens is
+    // broken" exactly when it is doing the most work.
+    final timeout = deadline ?? this.timeout;
     final client = _newClient();
     client.connectionTimeout = timeout;
     try {
