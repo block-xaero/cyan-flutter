@@ -98,6 +98,7 @@ class Flight {
   late final FlightLog log;
 
   String groupId = '';
+  String? reviewProxyPathForBinding;
   String workspaceId = '';
   String boardId = '';
 
@@ -544,6 +545,27 @@ class Flight {
     return out;
   }
 
+  /// The MEDIA-BINDING cell (recon verdict 3, kills the W2 fence): the
+  /// await-sense park can only sense comments when the board carries ONE
+  /// step cell binding the local master path to the uploaded Frame.io file
+  /// id — exactly the cell the product authors after an upload. Bare
+  /// whitespace-separated key=value tokens; pipeline.rs has_media_binding
+  /// (content contains 'file_path=' AND 'frameio_file_id=') is the detector.
+  bool _bindingAuthored = false;
+  void authorMediaBinding(String masterPath, String frameioFileId) {
+    if (_bindingAuthored) return;
+    _bindingAuthored = true;
+    final content =
+        'review media file_path=$masterPath frameio_file_id=$frameioFileId';
+    final ok = CyanFFI.saveNotebookCell(boardId, {
+      'id': 'binding-${DateTime.now().millisecondsSinceEpoch}',
+      'cell_type': 'step',
+      'cell_order': 999,
+      'content': content,
+    });
+    log('media-binding cell authored ($ok): $content');
+  }
+
   /// The far side of the review loop, for real: post the producer's words as a
   /// COMMENT on the board's Frame.io proxy through the plugin, then record the
   /// sensed form of that comment on the ledger.
@@ -558,6 +580,7 @@ class Flight {
   /// list_comments` step then reads the SAME comment back through the API on
   /// its own, which is what closes the loop.
   Future<String?> producerComments(String fileId, String text) async {
+    authorMediaBinding(reviewProxyPathForBinding ?? '', fileId);
     final raw = await callPluginTool('frameio', 'create_comment', {
       'account_id': Platform.environment['FRAMEIO_ACCOUNT_ID'] ?? '',
       'file_id': fileId,

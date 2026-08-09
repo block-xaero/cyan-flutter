@@ -80,6 +80,7 @@ void main() {
 
   setUpAll(() async {
     await flight.boot();
+    flight.reviewProxyPathForBinding = reviewProxy;
     await flight.standUpBoard(
       groupName: 'DCC Matrix W1',
       workspaceName: 'Flight',

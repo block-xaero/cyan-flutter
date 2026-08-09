@@ -82,6 +82,7 @@ void main() {
 
   setUpAll(() async {
     await flight.boot();
+    flight.reviewProxyPathForBinding = reviewProxy;
     await flight.standUpBoard(
       groupName: 'DCC Matrix W2',
       workspaceName: 'Flight',
@@ -415,11 +416,10 @@ void main() {
   // render, gate release, LIVE Resolve. Verbatim words stay on the ledger as
   // the superseded row; nothing is overwritten, everything is attributed.
   test('the COLORIST supersedes to the corpus — and Resolve applies the note',
-      skip: 'W2\'s window does not clear even across the tail\'s 10-minute '
-          'fly (runs park the whole DCC middle) — unlike W1, whose identical '
-          'tail is GREEN (run-12, 10/10). The supersede/confirm doors '
-          'themselves work (asserted before the fly). Next session: why the '
-          'with-notes board\'s window resists both evidence and elapse.',
+      skip: 'run-4: the media-binding cell IS authored (harness) and the '
+          'sensed note lands, yet W2\'s window still refuses both evidence '
+          'and the 180s elapse across a 10-minute fly — W1\'s identical tail '
+          'is green. Next probe: RUST_LOG the W2 window judge inputs.',
       () async {
     final verbatim = flight
         .entriesOfKind('op')
