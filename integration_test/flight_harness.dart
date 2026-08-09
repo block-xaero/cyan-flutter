@@ -132,7 +132,19 @@ class Flight {
     required String workspaceName,
     required String boardName,
   }) async {
-    CyanFFI.createGroup(groupName);
+    // REUSE a group of this name if one exists. This used to create
+    // unconditionally, and the engine auto-seeds every new group with an empty
+    // "Board 1" — so twenty-odd corpus runs left the demo island holding 23
+    // identical "DEMO — Styled Masters" folders with the real work buried
+    // among them. A flight is meant to be re-runnable; that means idempotent
+    // at the group, not just the board.
+    final priorGroups = await backend.loadGroups();
+    final existingGroup = priorGroups.where((g) => g.name == groupName);
+    if (existingGroup.isEmpty) {
+      CyanFFI.createGroup(groupName);
+    } else {
+      log('reusing existing group "$groupName" (${existingGroup.first.id})');
+    }
     groupId = await _until('group "$groupName"', () async {
       final groups = await backend.loadGroups();
       final hit = groups.where((g) => g.name == groupName);
@@ -142,7 +154,15 @@ class Flight {
     // `cyan_get_workspaces_for_group` answers bare ID STRINGS — no names — so
     // the NAMED lookup goes through the tree snapshot, which is the only place
     // on the wire that carries a workspace's name.
-    CyanFFI.createWorkspace(groupId, workspaceName);
+    // Same for the workspace — a second "Masters" beside the first is the
+    // same clutter one level down.
+    final already = priorGroups
+        .where((g) => g.id == groupId)
+        .expand((g) => g.workspaces)
+        .any((w) => w.name == workspaceName);
+    if (!already) {
+      CyanFFI.createWorkspace(groupId, workspaceName);
+    }
     workspaceId = await _until('workspace "$workspaceName"', () async {
       final groups = await backend.loadGroups();
       for (final g in groups.where((g) => g.id == groupId)) {
