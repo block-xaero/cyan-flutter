@@ -56,35 +56,94 @@ class BoardSpec {
 }
 
 final specs = <String, BoardSpec>{
+  // THE PROSUMER ASSET CLASS (Rick, 2026-08-10): "have 3 styles with source as
+  // my daughters multi cut". The three styled boards share ONE source — his
+  // daughter's phone multicut — graded three ways, so the review player's
+  // source stage is his footage and the master is that footage in the look.
+  // The workflow is the same prosumer spine as the graduation board (an iPhone
+  // shoots HLG handheld): tone-map, stabilise, then grade.
   'lynch': BoardSpec(
     key: 'lynch',
     group: 'DEMO — Styled Masters',
     board: 'Lynch — In Dreams',
-    setFolder: '$mediaRoot/SET_G_demo_sawmill_logc4',
+    setFolder: '${Platform.environment['HOME']}/cyan-demo-inbox',
     look: 'lynch',
     title: 'IN DREAMS — A CYAN PICTURE',
     autopilot: true,
     withNotes: false,
+    demux: true,
+    tonemap: true,
+    stabilize: true,
+    reviewProxy: 'SET_GRAD_review_proxy.mp4',
+    reviewAnchor: 'GRADUATION_multicut.mp4',
   ),
   'wes': BoardSpec(
     key: 'wes',
     group: 'DEMO — Styled Masters',
     board: 'Wes — The Multicut Society',
-    setFolder: '$mediaRoot/SET_A_2398_prores422',
+    setFolder: '${Platform.environment['HOME']}/cyan-demo-inbox',
     look: 'wes anderson',
     title: 'THE MULTICUT SOCIETY',
     autopilot: true,
     withNotes: true,
+    demux: true,
+    tonemap: true,
+    stabilize: true,
+    reviewProxy: 'SET_GRAD_review_proxy.mp4',
+    reviewAnchor: 'GRADUATION_multicut.mp4',
   ),
   'w90s': BoardSpec(
     key: 'w90s',
     group: 'DEMO — Styled Masters',
     board: "90s — Summer of '94",
+    setFolder: '${Platform.environment['HOME']}/cyan-demo-inbox',
+    look: 'warm 90s',
+    title: "SUMMER OF '94",
+    autopilot: false,
+    withNotes: true,
+    demux: true,
+    tonemap: true,
+    stabilize: true,
+    reviewProxy: 'SET_GRAD_review_proxy.mp4',
+    reviewAnchor: 'GRADUATION_multicut.mp4',
+  ),
+  // THE PRO ASSET CLASS (Rick: "the other few with what source multi cut
+  // footage we had for demo styled … this gives us good mix of prosumer
+  // workflow, pro workflow (recorded separate audio and mx)"). Studio-acquired
+  // multicut with separate audio + M&E — the same three looks, but the pro
+  // spine (conform/relink/separate-tracks), no phone conditioning.
+  'lynch_pro': BoardSpec(
+    key: 'lynch_pro',
+    group: 'DEMO — Styled Masters',
+    board: 'Lynch — In Dreams (Studio)',
+    setFolder: '$mediaRoot/SET_G_demo_sawmill_logc4',
+    look: 'lynch',
+    title: 'IN DREAMS — A CYAN PICTURE',
+    autopilot: true,
+    withNotes: false,
+    demux: true,
+  ),
+  'wes_pro': BoardSpec(
+    key: 'wes_pro',
+    group: 'DEMO — Styled Masters',
+    board: 'Wes — The Multicut Society (Studio)',
+    setFolder: '$mediaRoot/SET_A_2398_prores422',
+    look: 'wes anderson',
+    title: 'THE MULTICUT SOCIETY',
+    autopilot: true,
+    withNotes: true,
+    demux: true,
+  ),
+  'w90s_pro': BoardSpec(
+    key: 'w90s_pro',
+    group: 'DEMO — Styled Masters',
+    board: "90s — Summer of '94 (Studio)",
     setFolder: '$mediaRoot/SET_E_ccby_24p_mixed_res',
     look: 'warm 90s',
     title: "SUMMER OF '94",
     autopilot: false,
     withNotes: true,
+    demux: true,
   ),
   // The real project: Rick's daughter's pre-school graduation, seven clips off
   // his phone. Its OWN board rather than reusing the phone TEST board, whose
