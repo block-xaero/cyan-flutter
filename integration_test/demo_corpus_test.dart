@@ -42,9 +42,15 @@ class BoardSpec {
     this.tonemap = false,
     this.reviewProxy,
     this.stabilize = false,
+    this.reviewAnchor,
   });
   final String key, group, board, setFolder, look, title;
   final bool autopilot, withNotes, demux, tonemap, stabilize;
+
+  /// The ingested file the review lane anchors on — the thing being reviewed.
+  /// Null anchors on whatever ingested first, which is only right when the
+  /// board holds ONE deliverable.
+  final String? reviewAnchor;
   /// A proxy cut FROM THIS BOARD'S OWN footage, relative to the media root.
   final String? reviewProxy;
 }
@@ -98,6 +104,7 @@ final specs = <String, BoardSpec>{
     tonemap: true,
     stabilize: true,
     reviewProxy: 'SET_GRAD_review_proxy.mp4',
+    reviewAnchor: 'GRADUATION_multicut.mp4',
   ),
   'iphone': BoardSpec(
     key: 'iphone',
@@ -164,8 +171,35 @@ void main() {
   test('the ${spec.key} SET ingests — multi-asset, content-addressed',
       () async {
     final out = await flight.ingestSetF(folder: spec.setFolder);
-    final lane = flight.startReviewLane(out.assetHashes.first);
-    flight.log('review lane: $lane');
+
+    // THE ANCHOR IS THE THING BEING REVIEWED, and on a multicut board that is
+    // the CUT — not whichever daily happened to ingest first.
+    //
+    // The whole grade lane hangs off this. `render_pending_look` grades the
+    // board's review anchor, so anchoring on a daily graded 46 seconds of one
+    // shot and called it the master: the workflow was correct end to end, the
+    // artifacts were real, and the player showed a single clip of a project
+    // Rick asked to see as "a multi cut thing - in itself - a big project
+    // graded in different styles".
+    //
+    // Resolved by NAME, and refused if the named file is not there. Falling
+    // back to `first` on a typo would silently reinstate exactly the bug.
+    final anchor = spec.reviewAnchor;
+    String anchorHash;
+    if (anchor == null) {
+      anchorHash = out.assetHashes.first;
+    } else {
+      final match = flight.boardFiles().where((f) =>
+          f['name'] == anchor && (f['source_peer'] as String?) == 'ingest');
+      if (match.isEmpty) {
+        throw StateError(
+            'review anchor "$anchor" did not ingest from ${spec.setFolder} — '
+            'the board would have anchored on an arbitrary daily instead');
+      }
+      anchorHash = match.first['hash'] as String;
+    }
+    final lane = flight.startReviewLane(anchorHash);
+    flight.log('review lane (anchor ${anchor ?? "first-ingested"}): $lane');
     expect(out.ingested, greaterThan(0),
         reason: 'nothing ingested from ${spec.setFolder}');
     flight.log('demo ingest: discovered=${out.discovered} '
