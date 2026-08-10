@@ -213,19 +213,29 @@ class Flight {
   /// scan. The engine content-hashes the plate, registers it as a master and
   /// materialises its run — the same path a watched camera-card folder takes.
   Future<IngestOutcome> ingestSetF({String? folder}) async {
+    final want = folder ?? setFFolder;
     final added = ingest({
       'op': 'source_add',
       'tenant_id': groupId,
       'board_id': boardId,
       'kind': 'folder',
-      'uri': folder ?? setFFolder,
+      'uri': want,
       'schedule_secs': 900,
     });
     log('ingest source_add: $added');
 
     final listed = ingest({'op': 'source_list', 'tenant_id': groupId});
     final sources = (listed as List).cast<Map<String, dynamic>>();
-    final source = sources.firstWhere((s) => s['board_id'] == boardId);
+    // SCAN THE SOURCE WE JUST ADDED, not the first the board ever had. A durable
+    // board re-pointed at a new folder (the sawmill corpus → his daughter's
+    // inbox) keeps its OLD source too, and a bare `firstWhere(board_id)` returns
+    // that stale one — so the reflight re-scanned the sawmill and his multicut
+    // never ingested (the anchor resolve then threw). Match the requested folder
+    // first, newest board source as the fallback.
+    final source = sources.firstWhere(
+      (s) => s['board_id'] == boardId && s['uri'] == want,
+      orElse: () => sources.lastWhere((s) => s['board_id'] == boardId),
+    );
 
     final scanned = ingest({
       'op': 'scan_now',
